@@ -72,7 +72,11 @@ const enc = encodeURIComponent;
       const inbound = msgs.filter(m => m.direction === 'inbound');
       const outbound = msgs.filter(m => m.direction === 'outbound');
       const senders = [...new Set(inbound.map(m => m.sender || m.from).filter(Boolean))];
-      const protocols = [...new Set(msgs.map(m => m.protocol).filter(Boolean))];
+      // `pending` and `unknown` are not transports — pending means the wire
+      // service never resolved, so counting them as protocols is misleading.
+      const protocols = [...new Set(
+        msgs.map(m => m.protocol).filter(p => p && p !== 'pending' && p !== 'unknown')
+      )];
       const delivered = outbound.filter(m => m.status === 'delivered' || m.status === 'sent');
       const failed = outbound.filter(m => m.status === 'failed');
 
@@ -99,6 +103,27 @@ const enc = encodeURIComponent;
         console.log('The in-group architecture survives a real mixed league.');
       } else if (protocols.length) {
         console.log(`Single protocol family (${protocols.join(', ')}) — not yet proof of mixed-device.`);
+      }
+
+      // A thread that receives RCS/SMS inbound is NOT an iMessage thread. The
+      // bot's sending hardware is a Mac; whether it can push into a non-iMessage
+      // group is the thing that decides the whole in-group architecture.
+      const nonAppleInbound = inbound.some(m => /rcs|sms/i.test(m.protocol || ''));
+      if (nonAppleInbound) {
+        console.log('\nThis thread carries inbound over RCS/SMS — it is NOT an iMessage group.');
+        console.log('A non-Apple member forced it off iMessage for everyone.');
+      }
+
+      const deviceErrors = failed.filter(m => m.error?.code === 'device_send_error');
+      if (deviceErrors.length) {
+        console.log('\n--- DEVICE SEND ERROR ---');
+        for (const m of deviceErrors) {
+          console.log(`  ${m.error.message} (deviceErrorCode=${m.error.details?.deviceErrorCode})`);
+        }
+        console.log('  protocol=pending means the wire service never resolved — the send');
+        console.log('  failed at Blooio\'s Mac before a transport was chosen.');
+        console.log('  This code is undocumented. One occurrence is not proof of a');
+        console.log('  structural limit: retry before concluding in-group is dead.');
       }
       return;
     }
