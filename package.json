@@ -12,6 +12,7 @@
     "capabilities": "node scripts/capabilities.js",
     "groups": "node scripts/groups.js",
     "send": "node scripts/send.js",
+    "broadcast": "node scripts/broadcast.js",
     "simulate": "node scripts/simulate-webhook.js"
   },
   "dependencies": {
