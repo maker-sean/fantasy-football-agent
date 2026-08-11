@@ -27,17 +27,32 @@ require('dotenv').config();
 const { BlooioProvider } = require('../src/provider');
 
 const argv = process.argv.slice(2);
-const dryRun = argv.includes('--dry-run');
-const viaGroupIdx = argv.indexOf('--via-group');
-const viaGroup = viaGroupIdx !== -1 ? argv[viaGroupIdx + 1] : null;
 
-const rest = argv.filter((a, i) =>
-  a !== '--dry-run' && a !== '--via-group' && i !== viaGroupIdx + 1);
+// Drop flags by INDEX. A previous version computed the value index as
+// indexOf('--via-group') + 1, which is 0 when the flag is absent — silently
+// eating the message argument and shifting a phone number into its place.
+const skip = new Set();
+let viaGroup = null;
+let dryRun = false;
+argv.forEach((a, i) => {
+  if (a === '--dry-run') { dryRun = true; skip.add(i); }
+  if (a === '--via-group') { viaGroup = argv[i + 1] || null; skip.add(i); skip.add(i + 1); }
+});
+
+const rest = argv.filter((_, i) => !skip.has(i));
 const [text, ...rawMembers] = rest;
 
 if (!text || (!rawMembers.length && !viaGroup)) {
   console.error('usage: node scripts/group-message.js [--dry-run] "<message>" <number> [<number> ...]');
   console.error('       node scripts/group-message.js --via-group <grp_id> "<message>"');
+  process.exit(1);
+}
+
+// Guard against the same class of mistake reaching a real recipient: a bare
+// phone number is never a message anyone means to send.
+if (/^\+?[\d\s().-]{7,}$/.test(text.trim())) {
+  console.error(`Refusing to send ${JSON.stringify(text)} — that looks like a phone number, not a message.`);
+  console.error('The message must come FIRST, then the recipients.');
   process.exit(1);
 }
 
