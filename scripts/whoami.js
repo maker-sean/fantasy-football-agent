@@ -45,17 +45,28 @@ const CAN_INITIATE = new Set(['dedicated', 'shared']);
 
   console.log('\n--- what this means ---');
   for (const n of list) {
-    const type = String(n.allocation || n.type || n.allocation_type || 'unknown').toLowerCase();
+    // Blooio returns this as `plan_kind`; the others are defensive fallbacks.
+    const type = String(
+      n.plan_kind || n.allocation || n.type || n.allocation_type || 'unknown'
+    ).toLowerCase();
     const label = n.phone_number || n.number || n.id || '(unknown number)';
+    const state = n.suspended ? 'SUSPENDED' : (n.status || (n.is_active ? 'active' : 'inactive'));
+
+    console.log(`${label}  [${type}]  status=${state}`);
+
     if (REPLY_ONLY.has(type)) {
-      console.log(`${label}  [${type}]  REPLY-ONLY`);
-      console.log('  M0/M1 fine (both are reply-first).');
+      console.log('  REPLY-ONLY. M0/M1 fine (both reply-first).');
       console.log('  BLOCKED: unprompted recaps, power rankings, lineup reminders.');
-      console.log('  Sends to a group with no prior inbound -> 403 inbound_only_no_prior_inbound');
+      console.log('  Sends with no prior inbound -> 403 inbound_only_no_prior_inbound');
     } else if (CAN_INITIATE.has(type)) {
-      console.log(`${label}  [${type}]  can initiate outbound — proactive posts are viable`);
+      console.log('  Can initiate outbound — proactive posts are viable.');
+    } else if (type === 'trial') {
+      console.log('  Trial number: real and iMessage-capable, so M0 runs on it as-is.');
+      console.log('  Whether it may INITIATE is undocumented. Settle it empirically:');
+      console.log('    node scripts/send.js "+1<your-personal-cell>" "probe"');
+      console.log('  202 -> can initiate.  403 inbound_only_no_prior_inbound -> reply-only.');
     } else {
-      console.log(`${label}  [${type}]  UNKNOWN allocation — confirm reply-only status before planning M2`);
+      console.log('  UNKNOWN allocation — confirm reply-only status before planning M2.');
     }
   }
 })().catch(err => {

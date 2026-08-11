@@ -28,5 +28,19 @@ provider.send(chatId, text)
   .then(res => {
     console.log('202 Accepted (QUEUED, not delivered):', JSON.stringify(res));
     console.log('Delivery confirmation arrives later as a message.status webhook.');
+    console.log('\nIf this chat had never messaged you before, your number CAN');
+    console.log('initiate outbound — proactive weekly recaps are viable.');
   })
-  .catch(err => { console.error('ERROR:', err.message); process.exit(1); });
+  .catch(err => {
+    console.error('ERROR:', err.message);
+    if (err.status === 403 && /inbound_only_no_prior_inbound/.test(err.message)) {
+      console.error('\n--- REPLY-ONLY NUMBER ---');
+      console.error('This number cannot start a conversation; it can only reply to');
+      console.error('someone who messaged it first.');
+      console.error('  Milestone 0 and 1: unaffected, both are reply-first.');
+      console.error('  Milestone 2: blocked. Unprompted recaps, power rankings, and');
+      console.error('  lineup reminders are all initiated messages.');
+      console.error('  Fix is a dedicated number, not a product redesign.');
+    }
+    process.exit(1);
+  });
