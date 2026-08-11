@@ -1,21 +1,26 @@
 #!/usr/bin/env node
 /**
- * Create a group and send it one message. This is Milestone 0 test (b).
+ * Send one message to a real group chat. This is Milestone 0 test (b).
  *
- * Per docs.blooio.com (POST /groups):
- *   "Omit chat_guid to create a new group. When you send the first message, a
- *    new iMessage chat will be created."
+ * WHY THE grp_ PATH FAILED SILENTLY (from the OpenAPI spec, POST /chats/{chatId}/messages):
  *
- * The group therefore does not exist as a real thread until the first send —
- * so this script does both in sequence.
+ *   "The chatId can be: (1) E.164 phone number, (2) email address, (3) group ID
+ *    (grp_xxxx), or (4) comma-separated list of phone/email for multi-recipient
+ *    chats. For multi-recipient, an unnamed group is automatically created or
+ *    reused if the exact participant combination already exists. For explicit
+ *    groups, the group must be linked to an existing iMessage chat."
  *
- * CAVEAT worth holding onto: a bot-CREATED group is not the same deployment
- * path as the bot being ADDED to a league's existing 12-person thread. This
- * validates the mechanism cheaply. It does not validate the real rollout.
+ * A group created via POST /groups WITHOUT chat_guid has no linked iMessage
+ * chat, so sending to its grp_ id is accepted (202) and then goes nowhere.
+ * The 202 means queued, never delivered.
+ *
+ * So this script uses mode (4): the comma-separated participant list, which
+ * creates the real chat as a side effect of the send.
  *
  * Usage:
- *   node scripts/group-message.js --dry-run "Test Group" "message" 4805551111 4805552222
- *   node scripts/group-message.js "Test Group" "message" 4805551111 4805552222 4805553333
+ *   node scripts/group-message.js --dry-run "message" 4805551111 4805552222
+ *   node scripts/group-message.js "message" 4805551111 4805552222 4805553333
+ *   node scripts/group-message.js --via-group grp_abc123 "message"
  */
 
 require('dotenv').config();
@@ -23,11 +28,16 @@ const { BlooioProvider } = require('../src/provider');
 
 const argv = process.argv.slice(2);
 const dryRun = argv.includes('--dry-run');
-const rest = argv.filter(a => a !== '--dry-run');
-const [groupName, text, ...rawMembers] = rest;
+const viaGroupIdx = argv.indexOf('--via-group');
+const viaGroup = viaGroupIdx !== -1 ? argv[viaGroupIdx + 1] : null;
 
-if (!groupName || !text || !rawMembers.length) {
-  console.error('usage: node scripts/group-message.js [--dry-run] "<group name>" "<message>" <number> [<number> ...]');
+const rest = argv.filter((a, i) =>
+  a !== '--dry-run' && a !== '--via-group' && i !== viaGroupIdx + 1);
+const [text, ...rawMembers] = rest;
+
+if (!text || (!rawMembers.length && !viaGroup)) {
+  console.error('usage: node scripts/group-message.js [--dry-run] "<message>" <number> [<number> ...]');
+  console.error('       node scripts/group-message.js --via-group <grp_id> "<message>"');
   process.exit(1);
 }
 
@@ -45,71 +55,67 @@ const members = rawMembers.map(toE164);
 const provider = new BlooioProvider(process.env.BLOOIO_API_KEY);
 
 (async () => {
-  console.log(`Group:   ${JSON.stringify(groupName)}`);
-  console.log(`Members: ${members.join(', ')}  (+ your number makes ${members.length + 1})`);
+  // Mode (4): the participant list IS the chat id. This is what creates a real
+  // multi-recipient thread; an unlinked grp_ id does not.
+  const chatId = viaGroup || members.join(',');
+
+  console.log(`chatId:  ${chatId}`);
   console.log(`Message: ${JSON.stringify(text)}`);
+  if (members.length) console.log(`Participants: ${members.length} + your number = ${members.length + 1}`);
 
   if (members.length + 1 > 10) {
-    console.warn('\nWARNING: >10 participants. Group MMS is carrier-capped around 10.');
-    console.warn('If any member is non-Apple this may fragment or hard-error.');
+    console.warn('\nWARNING: >10 participants — group MMS is carrier-capped near 10.');
+  }
+
+  if (!viaGroup) {
+    console.log('\nCapabilities:');
+    let anyNonApple = false;
+    for (const m of members) {
+      try {
+        const cap = await provider.capabilities(m);
+        const im = cap?.capabilities?.imessage;
+        if (im === false) anyNonApple = true;
+        console.log(`  ${m}  imessage=${im}  sms=${cap?.capabilities?.sms}`);
+      } catch (err) {
+        console.log(`  ${m}  (lookup failed: ${err.status || err.message})`);
+      }
+    }
+    if (anyNonApple) {
+      console.log('\n  Mixed group: at least one member has no iMessage. An all-Apple');
+      console.log('  iMessage group is impossible here — this must degrade to group');
+      console.log('  MMS/RCS or fragment. That degradation IS the Milestone 0 question.');
+    }
   }
 
   if (dryRun) {
-    console.log('\nDRY RUN — no group created, nothing sent.');
+    console.log('\nDRY RUN — nothing sent.');
     return;
   }
 
-  console.log('\n1. Checking capabilities (who is Apple, who is not)...');
-  for (const m of members) {
-    try {
-      console.log(`   ${m}  ${JSON.stringify(await provider.capabilities(m))}`);
-    } catch (err) {
-      console.log(`   ${m}  (lookup failed: ${err.status || err.message})`);
-    }
+  console.log('\nSending...');
+  const res = await provider.send(chatId, text, { idempotencyKey: `grp-${Date.now()}` });
+  console.log('202 Accepted:', JSON.stringify(res));
+
+  const messageId = res?.message_id || res?.id;
+  console.log('\n--- 202 IS NOT DELIVERY ---');
+  if (messageId) {
+    console.log('Check what actually happened:');
+    console.log(`  node scripts/inspect.js status ${JSON.stringify(chatId)} ${messageId}`);
+  } else {
+    console.log('No message_id in the response body. List the chat instead:');
+    console.log(`  node scripts/inspect.js messages ${JSON.stringify(chatId)}`);
   }
-
-  console.log('\n2. Creating group (no chat_guid -> new iMessage chat on first send)...');
-  const group = await provider.createGroup({ name: groupName, members });
-  console.log(JSON.stringify(group, null, 2));
-
-  const groupId = group.group_id || group.id;
-  if (!groupId) throw new Error('no group_id in response — inspect the payload above');
-
-  // Did Blooio actually attach the members to the real thread? For a LINKED
-  // group the docs say members are bookkeeping only. For a CREATED group this
-  // is the field that tells us.
-  if ('added_members' in group) {
-    console.log(`\n   added_members: ${JSON.stringify(group.added_members)}`);
-    console.log('   ^ if this is empty, the members were recorded but NOT put in the real chat.');
-  }
-
-  console.log(`\n3. Sending first message to group ${groupId}...`);
-  let sentTo = groupId;
-  try {
-    await provider.send(groupId, text, { idempotencyKey: `grp-${groupId}-${Date.now()}` });
-  } catch (err) {
-    // Fall back to the BlueBubbles chat guid if the group id isn't the chat handle.
-    if (group.chat_guid) {
-      console.log(`   group_id send failed (${err.status}); retrying with chat_guid...`);
-      await provider.send(group.chat_guid, text, { idempotencyKey: `grp-${group.chat_guid}-${Date.now()}` });
-      sentTo = group.chat_guid;
-    } else {
-      throw err;
-    }
-  }
-
-  console.log(`   202 Accepted — queued to ${sentTo}`);
-  console.log('\n--- what to check now ---');
-  console.log('1. Did all members land in ONE thread, or did some get a separate 1:1?');
-  console.log('2. Have EACH of them reply in that thread (include the Android user).');
-  console.log('3. With the receiver running (npm start), read the verdict:');
-  console.log('     curl -s localhost:3000/m0');
-  console.log(`   PASS = one chat id, is_group true, every sender distinct, protocols spanning`);
-  console.log('   imessage and sms/rcs. More than one group chat id = fragmentation.');
+  console.log('\nStatus meanings: queued -> waiting for Apple/carrier; sent -> handed off');
+  console.log('(protocol resolves here); delivered -> receipt received; failed -> see `error`.');
 })().catch(err => {
   console.error('\nERROR:', err.message);
-  if (err.status === 404) {
-    console.error('POST /groups 404 — confirm the path at docs.blooio.com/reference/v2/groups.');
+  const code = err.body?.code;
+  if (code) console.error(`code: ${code}`);
+  if (code === 'conversation_content_restricted') {
+    console.error('Links/media are blocked before the recipient first writes back. Send plain text.');
+  }
+  if (code === 'conversation_awaiting_reply') {
+    console.error('Cap of 3 messages to a new recipient before they respond.');
   }
   process.exit(1);
 });

@@ -14,6 +14,7 @@
     "send": "node scripts/send.js",
     "broadcast": "node scripts/broadcast.js",
     "group-message": "node scripts/group-message.js",
+    "inspect": "node scripts/inspect.js",
     "simulate": "node scripts/simulate-webhook.js"
   },
   "dependencies": {
