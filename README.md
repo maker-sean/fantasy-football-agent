@@ -3,8 +3,46 @@
 An AI agent that sustains fantasy football league engagement year-round — the
 dead period after the draft when league chatter dies off.
 
-**Current state: Milestone 0 instrument.** The agent brain is deliberately a
-stub. Nothing else gets built until the group surface is proven.
+**Current state: Milestone 0 ran. It failed. Read the result before building.**
+
+## MILESTONE 0 RESULT — in-group is not viable on Blooio
+
+Measured on a real trial number (`+15555550101`), 2026-08-11:
+
+| Target | Composition | Transport | Result |
+|---|---|---|---|
+| `grp_AAAAAAAAAAAAAAAA` | all-Apple group | `imessage` | **sent** ✅ |
+| `+15555550105` (1:1) | single Android | `rcs` | **delivered** ✅ |
+| `grp_CCCCCCCCCCCCCCCC` | mixed group | `pending` | **failed** — `device_send_error` 4 ❌ |
+| `grp_BBBBBBBBBBBBBBBB` | mixed group | `pending` | **failed** — `device_send_error` 4 ❌ |
+
+The sending hardware reaches Apple users in groups, and reaches Android users
+1:1 over RCS. It cannot send into a group containing a non-iMessage member.
+Two endpoints (`POST /groups` + `grp_` id, and the multi-recipient participant
+list) hit the identical failure, while the same multi-recipient path succeeds
+on an all-Apple group. Composition is the variable, not the API.
+
+`protocol: pending` means no wire service was ever resolved — the send died at
+Blooio's Mac before a transport was chosen. Mechanistically consistent: a Mac
+composes iMessage natively but cannot originate an MMS/RCS *group*.
+
+**Inbound is unaffected.** Mixed-group messages arrive correctly, `delivered`,
+on a single chat id, with per-message `protocol`. The bot can listen to a real
+mixed league. It just cannot speak into it.
+
+### Why this is not a Blooio problem
+
+- iMessage groups require every participant on iMessage — excluded by one Android member.
+- Group MMS is carrier-capped near 10 participants; leagues run 10–12, plus the bot.
+- A2P RCS group messaging is not generally available.
+
+A 12-person mixed-device league group works fine between humans. The constraint
+is that a rented API identity cannot join one. Swapping providers changes which
+wall you hit, not whether you hit one.
+
+**Consequence:** the in-group vs. 1:1-concierge fork is not an open product
+choice. In-group is unavailable at league size with mixed devices. Concierge is
+proven working (the RCS delivery above) and is the only path currently open.
 
 ## Why this order
 
