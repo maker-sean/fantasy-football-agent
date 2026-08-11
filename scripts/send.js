@@ -27,9 +27,13 @@ const provider = new BlooioProvider(process.env.BLOOIO_API_KEY);
 provider.send(chatId, text)
   .then(res => {
     console.log('202 Accepted (QUEUED, not delivered):', JSON.stringify(res));
-    console.log('Delivery confirmation arrives later as a message.status webhook.');
-    console.log('\nIf this chat had never messaged you before, your number CAN');
-    console.log('initiate outbound — proactive weekly recaps are viable.');
+    const id = res?.message_id || res?.id;
+    console.log('\n--- 202 PROVES NOTHING ---');
+    console.log('A send can be accepted and then fail at the device with no transport');
+    console.log('ever resolved. Only the status endpoint tells you what happened:');
+    if (id) console.log(`  node scripts/inspect.js status ${JSON.stringify(chatId)} ${id}`);
+    else console.log(`  node scripts/inspect.js verdict ${JSON.stringify(chatId)}`);
+    console.log('\nsent/delivered = real. failed = read the `error`. queued/pending = wait a few seconds.');
   })
   .catch(err => {
     console.error('ERROR:', err.message);
