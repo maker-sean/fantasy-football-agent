@@ -50,11 +50,20 @@ nothing about Blooio's real group behavior.
 
 ## Milestone 0 runbook
 
-**Prereqs (human, not automatable):** a paid Blooio account, a provisioned
-number, and someone adding that number to the real league group **from an
-iPhone**. Per Blooio's docs, `members[]` on `POST /groups` is bookkeeping — it
-does *not* add anyone to the real iMessage thread.
+**Prereqs.** The free trial gives you a real iMessage-enabled number and full
+API access — M0 needs no paid plan. The one genuinely non-automatable step is
+**someone adding that number to the real league group from an iPhone**. Per
+Blooio's docs, `members[]` on `POST /groups` is bookkeeping — it does *not* add
+anyone to the real iMessage thread.
 
+0. Find out what your number is allowed to do — this gates Milestone 2, not M0:
+   ```bash
+   npm run whoami
+   ```
+   An `inbound` allocation is **reply-only**: sends to a group with no prior
+   inbound return `403 inbound_only_no_prior_inbound`. Fine for M0/M1 (both are
+   reply-first). Fatal for unprompted weekly recaps — see *The reply-only
+   problem* below.
 1. Profile your members so you know who's non-Apple going in:
    ```bash
    node scripts/capabilities.js +15551110001 +15551110002 +15551110003
@@ -96,6 +105,37 @@ if the parsed field names turn out wrong.
 - A **v4 beta** exists (`POST /v4/messages`, flat `{to, text}`). We're on v2
   deliberately: v4 is beta, and v2 carries Groups, Reactions, Polls, and Typing
   Indicators — the actual engagement primitives this product wants.
+
+## The reply-only problem
+
+Blooio number allocations are `shared`, `dedicated`, `inbound`, `trial`, `2fa`.
+**Inbound numbers are reply-only** — they "cannot start new conversations," and
+the check is `(allocation, group_id)` for groups. There is no warmup period: the
+first outbound to a group succeeds the moment an inbound from that group is
+recorded.
+
+This does not touch M0 or M1 — both are reply-first by design, so a reply-only
+number tests them faithfully. It lands squarely on **M2**. The product spec is
+"posts weekly recaps / power rankings / lineup reminders," and every one of
+those is an *initiated* message. A reply-only number cannot send them.
+
+The tempting workaround — make everything trigger-driven (`@bot recap`) — is
+worth resisting on reflex. The premise of the product is that league chatter
+*dies*. If nobody's talking, nobody's there to trigger the bot, and a
+trigger-only agent is silent exactly when it's most needed. The unprompted
+Tuesday-morning recap is plausibly the whole product, not a nice-to-have.
+
+Verify your allocation with `npm run whoami` before scoping M2. If it's
+reply-only, budget a dedicated number rather than redesigning the product
+around the constraint.
+
+## Ban risk (sharpened)
+
+Per Blooio: they never ban numbers — **carriers do**, and "once a number is
+banned, it cannot be recovered," you buy a new one. Combined with the known
+constraint that a banned identity can't rejoin an existing group thread, this
+is the single largest technical risk to the in-group architecture at scale.
+Guidance for initiated outbound is 20–50 new conversations/day/number.
 
 ## Still open
 

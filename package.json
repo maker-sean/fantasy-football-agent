@@ -8,6 +8,7 @@
   "scripts": {
     "start": "node index.js",
     "m0": "curl -s localhost:3000/m0 | node -e \"let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{const v=JSON.parse(s);console.log(v.notes.join('\\n'));console.table(v.chats)})\"",
+    "whoami": "node scripts/whoami.js",
     "capabilities": "node scripts/capabilities.js",
     "groups": "node scripts/groups.js",
     "send": "node scripts/send.js",
