@@ -112,13 +112,20 @@ const provider = new BlooioProvider(process.env.BLOOIO_API_KEY);
   console.log('202 Accepted:', JSON.stringify(res));
 
   const messageId = res?.message_id || res?.id;
+  // A comma-separated participant list is valid for SEND but rejected by the
+  // read endpoints ("Invalid chat ID format"). The response's group_id is the
+  // handle that works for status/verdict lookups.
+  const readHandle = res?.group_id || viaGroup || chatId;
+  if (res?.group_created) console.log(`Group created: ${res.group_id}`);
+
   console.log('\n--- 202 IS NOT DELIVERY ---');
   if (messageId) {
     console.log('Check what actually happened:');
-    console.log(`  node scripts/inspect.js status ${JSON.stringify(chatId)} ${messageId}`);
+    console.log(`  node scripts/inspect.js status ${readHandle} ${messageId}`);
+    console.log(`  node scripts/inspect.js verdict ${readHandle}`);
   } else {
     console.log('No message_id in the response body. List the chat instead:');
-    console.log(`  node scripts/inspect.js messages ${JSON.stringify(chatId)}`);
+    console.log(`  node scripts/inspect.js verdict ${readHandle}`);
   }
   console.log('\nStatus meanings: queued -> waiting for Apple/carrier; sent -> handed off');
   console.log('(protocol resolves here); delivered -> receipt received; failed -> see `error`.');
