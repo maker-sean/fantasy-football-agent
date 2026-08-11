@@ -13,6 +13,7 @@
     "groups": "node scripts/groups.js",
     "send": "node scripts/send.js",
     "broadcast": "node scripts/broadcast.js",
+    "group-message": "node scripts/group-message.js",
     "simulate": "node scripts/simulate-webhook.js"
   },
   "dependencies": {
