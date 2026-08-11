@@ -1,0 +1,20 @@
+{
+  "name": "fantasy-agent",
+  "version": "0.1.0",
+  "private": true,
+  "description": "AI agent that sustains fantasy football league engagement in the league group chat.",
+  "main": "index.js",
+  "engines": { "node": ">=18" },
+  "scripts": {
+    "start": "node index.js",
+    "m0": "curl -s localhost:3000/m0 | node -e \"let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{const v=JSON.parse(s);console.log(v.notes.join('\\n'));console.table(v.chats)})\"",
+    "capabilities": "node scripts/capabilities.js",
+    "groups": "node scripts/groups.js",
+    "send": "node scripts/send.js",
+    "simulate": "node scripts/simulate-webhook.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2"
+  }
+}
