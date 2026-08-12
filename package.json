@@ -17,6 +17,7 @@
     "inspect": "node scripts/inspect.js",
     "sendblue-preflight": "node scripts/sendblue-preflight.js",
     "sendblue-group": "node scripts/sendblue-group.js",
+    "sendblue-status": "node scripts/sendblue-status.js",
     "sendblue-send": "node scripts/sendblue-send.js",
     "simulate": "node scripts/simulate-webhook.js"
   },
