@@ -21,10 +21,12 @@
 
 const { MessagingProvider } = require('./provider');
 
-const SENDBLUE_BASE = 'https://api.sendblue.com';
+// The account quickstart specifies api.sendblue.co. (api.sendblue.com also
+// answers, but .co is what Sendblue documents for this account.)
+const SENDBLUE_BASE = 'https://api.sendblue.co';
 
 class SendblueProvider extends MessagingProvider {
-  constructor(keyId, secretKey, { base = SENDBLUE_BASE } = {}) {
+  constructor(keyId, secretKey, { base = SENDBLUE_BASE, fromNumber = null } = {}) {
     super();
     if (!keyId || !secretKey) {
       throw new Error('SENDBLUE_API_KEY_ID and SENDBLUE_API_SECRET_KEY must both be set');
@@ -32,6 +34,8 @@ class SendblueProvider extends MessagingProvider {
     this.keyId = keyId;
     this.secretKey = secretKey;
     this.base = base;
+    // Required on sends. Get it from `sendblue lines`.
+    this.fromNumber = fromNumber;
   }
 
   get headers() {
@@ -74,16 +78,24 @@ class SendblueProvider extends MessagingProvider {
     const body = isGroup
       ? { group_id: chatId, content: text }
       : { number: chatId, content: text };
+    // from_number is REQUIRED on sends — omitting it fails every call.
+    if (this.fromNumber) body.from_number = this.fromNumber;
     if (opts.statusCallback) body.status_callback = opts.statusCallback;
+    if (opts.sendStyle) body.send_style = opts.sendStyle;
     return this.request('POST', path, body);
   }
 
   /** Create a group by sending its first message to a list of numbers. */
   async sendNewGroup(numbers, text, opts = {}) {
     const body = { numbers, content: text };
+    if (this.fromNumber) body.from_number = this.fromNumber;
     if (opts.statusCallback) body.status_callback = opts.statusCallback;
     return this.request('POST', '/api/send-group-message', body);
   }
+
+  /** Free tier caps at 10 verified contacts; these manage that list. */
+  listContacts() { return this.request('GET', '/api/v2/contacts'); }
+  listLines() { return this.request('GET', '/api/lines'); }
 
   looksLikeGroupId(chatId) {
     const s = String(chatId || '');

@@ -28,7 +28,8 @@ if (!number || (!lookupOnly && !text)) {
 
 const provider = new SendblueProvider(
   process.env.SENDBLUE_API_KEY_ID,
-  process.env.SENDBLUE_API_SECRET_KEY
+  process.env.SENDBLUE_API_SECRET_KEY,
+  { fromNumber: process.env.SENDBLUE_FROM_NUMBER }
 );
 
 (async () => {

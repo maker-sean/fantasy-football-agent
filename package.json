@@ -15,6 +15,7 @@
     "broadcast": "node scripts/broadcast.js",
     "group-message": "node scripts/group-message.js",
     "inspect": "node scripts/inspect.js",
+    "sendblue-preflight": "node scripts/sendblue-preflight.js",
     "sendblue-group": "node scripts/sendblue-group.js",
     "sendblue-send": "node scripts/sendblue-send.js",
     "simulate": "node scripts/simulate-webhook.js"
