@@ -71,8 +71,20 @@ class SendblueProvider extends MessagingProvider {
     return json;
   }
 
+  /** Sendblue rejects any send without from_number — fail before the round trip. */
+  requireFromNumber() {
+    if (this.fromNumber) return;
+    throw new Error(
+      'SENDBLUE_FROM_NUMBER is not set in .env.\n' +
+      '  Sendblue requires from_number on every send.\n' +
+      '  Get your line:  sendblue lines      (or Dashboard -> Phone Lines)\n' +
+      '  Then add to .env:  SENDBLUE_FROM_NUMBER=+1XXXXXXXXXX'
+    );
+  }
+
   /** chatId is either a phone number (1:1) or a Sendblue group_id. */
   async send(chatId, text, opts = {}) {
+    this.requireFromNumber();
     const isGroup = this.looksLikeGroupId(chatId);
     const path = isGroup ? '/api/send-group-message' : '/api/send-message';
     const body = isGroup
@@ -87,6 +99,7 @@ class SendblueProvider extends MessagingProvider {
 
   /** Create a group by sending its first message to a list of numbers. */
   async sendNewGroup(numbers, text, opts = {}) {
+    this.requireFromNumber();
     const body = { numbers, content: text };
     if (this.fromNumber) body.from_number = this.fromNumber;
     if (opts.statusCallback) body.status_callback = opts.statusCallback;
