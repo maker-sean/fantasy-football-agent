@@ -68,37 +68,77 @@ function toEvent(m) {
  * emitting — so starting the poller doesn't replay weeks of history into the
  * agent and blast the group with catch-up replies.
  */
-async function pollOnce(provider, cursor, { limit = 25, bootstrap = false } = {}) {
-  const res = await provider.request('GET', `/api/v2/messages?limit=${limit}`);
-  const rows = res?.messages || res?.data || (Array.isArray(res) ? res : []);
+// The endpoint is account-wide (every chat in one feed), newest first, and caps
+// at 100 per request. `offset` pages backwards through history.
+const PAGE_SIZE = 100;
+const MAX_PAGES = 20;   // 2,000 messages in one tick before we give up and warn
 
-  const inbound = rows.filter(m => !m.is_outbound);
-  const fresh = [];
+/**
+ * Fetch every message newer than the cursor, paging until we reach known
+ * ground.
+ *
+ * A single fixed-size request silently loses traffic: if more messages arrive
+ * between ticks than the page holds, the oldest scroll out of the window and
+ * are never fetched again — no error, no gap in any counter. At one league on a
+ * 10s tick that is unlikely; across many leagues on a Sunday it is inevitable.
+ *
+ * Stopping condition is a message we've already handled, by handle or by
+ * timestamp. The timestamp check matters because the `seen` set is bounded and
+ * cannot vouch for old history.
+ */
+async function pollOnce(provider, cursor, { bootstrap = false, pageSize = PAGE_SIZE } = {}) {
+  const collected = [];
+  let offset = 0;
+  let pages = 0;
+  let reachedKnown = false;
+  let total = null;
 
-  for (const m of inbound) {
-    const handle = m.message_handle;
-    if (!handle || cursor.seen.has(handle)) continue;
+  while (pages < MAX_PAGES) {
+    const res = await provider.request('GET', `/api/v2/messages?limit=${pageSize}&offset=${offset}`);
+    const rows = res?.messages || res?.data || (Array.isArray(res) ? res : []);
+    total = res?.pagination?.total ?? total;
+    pages += 1;
+    if (!rows.length) break;
 
-    if (bootstrap) {
-      // Bootstrap deliberately marks history as seen without emitting, so
-      // starting the poller does not replay days of chat into the agent.
-      cursor.seen.add(handle);
-      const ts = m.date_sent;
-      if (ts && (!cursor.since || ts > cursor.since)) cursor.since = ts;
-      continue;
+    for (const m of rows) {
+      const handle = m.message_handle;
+      if (!handle) continue;
+
+      // Known ground: either we've handled this exact message, or it predates
+      // the cursor. Everything older is already accounted for.
+      if (cursor.seen.has(handle) || (cursor.since && m.date_sent && m.date_sent <= cursor.since)) {
+        reachedKnown = true;
+        break;
+      }
+      if (!m.is_outbound) collected.push(m);
     }
 
-    // NOT marked seen here. The cursor must advance only after the handler has
-    // actually processed the message — see commit() below. Advancing on read
-    // meant that any message read during a run whose handler failed (or whose
-    // persistence was off) was skipped permanently, with no error and no way to
-    // notice except comparing against the provider by hand.
-    fresh.push(toEvent(m));
+    if (reachedKnown) break;
+    const hasMore = res?.pagination?.hasMore;
+    if (hasMore === false || rows.length < pageSize) break;
+    offset += pageSize;
   }
 
-  fresh.sort((a, b) => a.timestamp - b.timestamp);
-  if (bootstrap) saveCursor(cursor);
-  return fresh;
+  if (pages >= MAX_PAGES && !reachedKnown) {
+    console.warn(`[poll] stopped after ${MAX_PAGES} pages without reaching known messages` +
+      `${total ? ` (${total} total on provider)` : ''} — backlog may be incomplete.` +
+      ' Recover with: node scripts/messages-backfill.js');
+  }
+
+  if (bootstrap) {
+    // Bootstrap marks history seen without emitting, so starting the poller
+    // does not replay days of chat into the agent.
+    for (const m of collected) {
+      cursor.seen.add(m.message_handle);
+      if (m.date_sent && (!cursor.since || m.date_sent > cursor.since)) cursor.since = m.date_sent;
+    }
+    saveCursor(cursor);
+    return [];
+  }
+
+  // NOT marked seen here — commit() does that, and only after the handler has
+  // actually processed the message.
+  return collected.map(toEvent).sort((a, b) => a.timestamp - b.timestamp);
 }
 
 /** Mark one message durably handled. Call only after the handler succeeded. */
