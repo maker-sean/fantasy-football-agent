@@ -6,17 +6,16 @@
  * out loud should be computed here and handed to the model as a fact. The model
  * supplies voice, never math.
  *
- * That split also makes the interesting half testable: this file can be checked
- * against a real week without an API key.
- *
- * Sleeper matchup shape:
- *   { roster_id, matchup_id, points, starters: [pid], starters_points: [num],
- *     players: [pid], players_points: { pid: num } }
+ * Fantasy rules are enforced in src/lineup.js — a bench QB cannot replace a
+ * starting WR, and "points left on the bench" is meaningless without slot
+ * eligibility. The honest number is optimal-lineup minus actual-lineup.
  */
+
+const { activeSlots, optimalLineup, bestLegalSwap, canFill, describeRules } = require('./lineup');
 
 const round = n => Math.round(Number(n || 0) * 100) / 100;
 
-/** roster_id -> { name, ownerId } from the snapshot's users + rosters. */
+/** roster_id -> team/manager/record from the snapshot's users + rosters. */
 function teamNames(payload) {
   const byUser = new Map((payload.users || []).map(u => [u.user_id, u]));
   const out = new Map();
@@ -32,50 +31,63 @@ function teamNames(payload) {
   return out;
 }
 
-/** Points a manager left on the bench, and the single worst individual case. */
-function benchAnalysis(m, players) {
-  const starters = new Set(m.starters || []);
+const nameOf = (players, pid) => players.get(pid)?.full_name || pid;
+const posOf = (players, pid) => players.get(pid)?.position || null;
+
+/**
+ * Slot-aware lineup analysis for one team-week.
+ *
+ * `starters[i]` occupies the i-th non-BN slot, so the slot each player actually
+ * filled is knowable — which is what makes a swap claim legal or nonsense.
+ */
+function lineupAnalysis(m, players, slots) {
   const pts = m.players_points || {};
-  const bench = [];
 
-  for (const pid of m.players || []) {
-    if (starters.has(pid)) continue;
-    const p = Number(pts[pid] || 0);
-    bench.push({ pid, points: round(p), name: players.get(pid)?.full_name || pid, position: players.get(pid)?.position || null });
-  }
-  bench.sort((a, b) => b.points - a.points);
-
-  const startedList = (m.starters || []).map((pid, i) => ({
+  const starters = (m.starters || []).map((pid, i) => ({
     pid,
-    points: round((m.starters_points || [])[i] ?? 0),
-    name: players.get(pid)?.full_name || pid,
-    position: players.get(pid)?.position || null,
+    slot: slots[i] || 'UNKNOWN',
+    slotIndex: i,
+    points: round((m.starters_points || [])[i] ?? pts[pid] ?? 0),
+    name: nameOf(players, pid),
+    position: posOf(players, pid),
   })).filter(s => s.pid && s.pid !== '0');
-  startedList.sort((a, b) => a.points - b.points);
 
-  const topBench = bench[0] || null;
-  const worstStarter = startedList[0] || null;
+  const startedIds = new Set(starters.map(s => s.pid));
+  const bench = (m.players || [])
+    .filter(pid => !startedIds.has(pid))
+    .map(pid => ({
+      pid,
+      points: round(pts[pid] ?? 0),
+      name: nameOf(players, pid),
+      position: posOf(players, pid),
+    }))
+    .sort((a, b) => b.points - a.points);
 
-  // The classic fantasy indictment: a bench player who outscored someone the
-  // manager actually started, at the same position.
-  let regret = null;
-  if (topBench && worstStarter && topBench.points > worstStarter.points) {
-    const samePos = bench.find(b => b.position && b.position === worstStarter.position && b.points > worstStarter.points);
-    const pick = samePos || topBench;
-    regret = {
-      benched: pick,
-      started: worstStarter,
-      swing: round(pick.points - worstStarter.points),
-      samePosition: Boolean(samePos),
-    };
-  }
+  // Every rostered player is a candidate for the optimal lineup — including
+  // the ones who were actually started.
+  const all = [...starters.map(s => ({ pid: s.pid, points: s.points, position: s.position })),
+               ...bench.map(b => ({ pid: b.pid, points: b.points, position: b.position }))];
+
+  const optimal = optimalLineup(all, slots);
+  const actual = round(starters.reduce((s, x) => s + x.points, 0));
+  const swap = bestLegalSwap(starters, bench);
 
   return {
-    benchTotal: round(bench.reduce((s, b) => s + b.points, 0)),
-    topBench,
-    worstStarter,
-    regret,
-    zeroStarters: startedList.filter(s => s.points === 0),
+    starters,
+    bench,
+    actualPoints: actual,
+    optimalPoints: optimal.total,
+    // The honest "you blew it by this much" number: what a perfect lineup from
+    // the SAME roster would have scored, minus what they actually started.
+    pointsLeftOnTable: round(Math.max(0, optimal.total - actual)),
+    optimalLineup: optimal.assignment.map(a => ({
+      slot: a.slot, name: nameOf(players, a.pid), points: round(a.points), position: a.position,
+    })),
+    bestLegalSwap: swap,
+    zeroStarters: starters.filter(s => s.points === 0),
+    // Bench players who could not have started anywhere — the reason raw
+    // "bench points" overstates the mistake.
+    unusableBench: bench.filter(b => !slots.some(sl => canFill(sl, b.position))),
   };
 }
 
@@ -85,7 +97,14 @@ function benchAnalysis(m, players) {
  */
 function weekFacts(payload, players = new Map()) {
   const names = teamNames(payload);
+  const rosterPositions = payload.league?.roster_positions || [];
+  const slots = activeSlots(rosterPositions);
   const matchups = payload.matchups || [];
+
+  // Rules come from THIS league's own roster_positions — a 2QB league, a
+  // superflex league, and a league whose flex excludes TE all resolve
+  // correctly without any per-league configuration.
+  const rules = describeRules(rosterPositions);
 
   const teams = matchups.map(m => {
     const t = names.get(m.roster_id) || { name: `Roster ${m.roster_id}` };
@@ -96,11 +115,10 @@ function weekFacts(payload, players = new Map()) {
       manager: t.manager,
       record: t.record,
       points: round(m.points),
-      ...benchAnalysis(m, players),
+      ...lineupAnalysis(m, players, slots),
     };
   });
 
-  // Pair rosters by matchup_id into head-to-head results.
   const byMatchup = new Map();
   for (const t of teams) {
     if (t.matchupId == null) continue;
@@ -116,18 +134,32 @@ function weekFacts(payload, players = new Map()) {
       winner: a.team, winnerPoints: a.points,
       loser: b.team, loserPoints: b.points,
       margin: round(a.points - b.points),
+      // The cruellest fact in fantasy: their optimal lineup would have won it.
+      loserCouldHaveWon: b.optimalPoints > a.points
+        ? { team: b.team, optimal: b.optimalPoints, neededToWin: round(a.points - b.points) }
+        : null,
     });
   }
   games.sort((a, b) => b.margin - a.margin);
 
   const scored = [...teams].sort((a, b) => b.points - a.points);
-  const withRegret = teams.filter(t => t.regret).sort((a, b) => b.regret.swing - a.regret.swing);
+  const byLeft = [...teams].sort((a, b) => b.pointsLeftOnTable - a.pointsLeftOnTable);
+  const withSwap = teams.filter(t => t.bestLegalSwap)
+    .sort((a, b) => b.bestLegalSwap.swing - a.bestLegalSwap.swing);
 
   return {
     season: payload.league?.season,
     week: payload.week,
     leagueName: payload.league?.name,
     teamCount: teams.length,
+    rules,
+    // Non-empty means the optimal-lineup numbers are unreliable for this
+    // league. Callers must refuse to publish rather than publish a wrong
+    // "points left on the table" figure.
+    rulesWarning: rules.unknown.length
+      ? `Unrecognized lineup slot(s): ${rules.unknown.join(', ')}. Optimal-lineup figures are unreliable — do not publish.`
+      : null,
+    slots,
     games,
     standingsThisWeek: scored.map(t => ({ team: t.team, points: t.points, record: t.record })),
     highScore: scored[0] ? { team: scored[0].team, points: scored[0].points } : null,
@@ -136,26 +168,40 @@ function weekFacts(payload, players = new Map()) {
       : null,
     blowout: games[0] || null,
     nailbiter: games.length ? games[games.length - 1] : null,
-    // The single most roastable decision of the week.
-    biggestRegret: withRegret[0]
+
+    // Slot-legal: the benched player was eligible for the exact slot the
+    // started player occupied.
+    biggestRegret: withSwap[0]
       ? {
-          team: withRegret[0].team,
-          benched: withRegret[0].regret.benched.name,
-          benchedPoints: withRegret[0].regret.benched.points,
-          started: withRegret[0].regret.started.name,
-          startedPoints: withRegret[0].regret.started.points,
-          swing: withRegret[0].regret.swing,
-          samePosition: withRegret[0].regret.samePosition,
+          team: withSwap[0].team,
+          slot: withSwap[0].bestLegalSwap.slot,
+          benched: withSwap[0].bestLegalSwap.benched.name,
+          benchedPosition: withSwap[0].bestLegalSwap.benched.position,
+          benchedPoints: withSwap[0].bestLegalSwap.benched.points,
+          started: withSwap[0].bestLegalSwap.started.name,
+          startedPoints: withSwap[0].bestLegalSwap.started.points,
+          swing: withSwap[0].bestLegalSwap.swing,
         }
       : null,
-    mostBenchPoints: [...teams].sort((a, b) => b.benchTotal - a.benchTotal)[0]
-      ? { team: [...teams].sort((a, b) => b.benchTotal - a.benchTotal)[0].team,
-          points: [...teams].sort((a, b) => b.benchTotal - a.benchTotal)[0].benchTotal }
+
+    mostPointsLeftOnTable: byLeft[0] && byLeft[0].pointsLeftOnTable > 0
+      ? {
+          team: byLeft[0].team,
+          started: byLeft[0].actualPoints,
+          optimal: byLeft[0].optimalPoints,
+          left: byLeft[0].pointsLeftOnTable,
+        }
       : null,
+
     gooseEggs: teams
       .filter(t => t.zeroStarters.length)
-      .map(t => ({ team: t.team, players: t.zeroStarters.map(s => `${s.name} (${s.position || '?'})`) })),
+      .map(t => ({ team: t.team, players: t.zeroStarters.map(s => `${s.name} (${s.slot})`) })),
+
+    // Kept for the recap's own use; not surfaced as a headline.
+    perTeam: teams.map(t => ({
+      team: t.team, points: t.points, optimal: t.optimalPoints, left: t.pointsLeftOnTable,
+    })),
   };
 }
 
-module.exports = { weekFacts, teamNames, benchAnalysis, round };
+module.exports = { weekFacts, teamNames, lineupAnalysis, round };

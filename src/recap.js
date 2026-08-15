@@ -52,6 +52,14 @@ function factsBlock(facts) {
   // here is something it is forbidden to say.
   const lines = [];
   lines.push(`Week ${facts.week} of the ${facts.season} season. League: ${facts.leagueName}.`);
+  // The model needs the format to reason about lineups correctly — a swap that
+  // is legal in a superflex league is nonsense in a single-QB one.
+  if (facts.rules) {
+    lines.push(`Lineup format: ${facts.rules.summary}.${facts.rules.superflex ? ' This league starts more than one QB.' : ''}`);
+    for (const f of facts.rules.flexTypes || []) {
+      lines.push(`  ${f.slot} may be filled by: ${f.accepts.join(', ')} only.`);
+    }
+  }
 
   if (facts.highScore) lines.push(`High score: ${facts.highScore.team} with ${facts.highScore.points}.`);
   if (facts.lowScore) lines.push(`Low score: ${facts.lowScore.team} with ${facts.lowScore.points}.`);
@@ -65,13 +73,19 @@ function factsBlock(facts) {
 
   if (facts.biggestRegret) {
     const r = facts.biggestRegret;
-    lines.push(`Worst lineup decision: ${r.team} benched ${r.benched} (${r.benchedPoints} points) and started ${r.started} (${r.startedPoints} points), a swing of ${r.swing}${r.samePosition ? ' at the same position' : ''}.`);
+    lines.push(`Worst lineup decision: ${r.team} started ${r.started} (${r.startedPoints} points) in the ${r.slot} slot while ${r.benched} (${r.benchedPosition}, ${r.benchedPoints} points) sat on their bench — a legal swap they missed, worth ${r.swing}.`);
   }
-  if (facts.mostBenchPoints) {
-    lines.push(`Most points left on the bench: ${facts.mostBenchPoints.team} with ${facts.mostBenchPoints.points}.`);
+  if (facts.mostPointsLeftOnTable) {
+    const t = facts.mostPointsLeftOnTable;
+    lines.push(`Most points left on the table: ${t.team} started ${t.started} when their best legal lineup from the same roster was ${t.optimal} — ${t.left} wasted.`);
   }
   for (const g of facts.gooseEggs || []) {
     lines.push(`${g.team} started ${g.players.join(' and ')} for zero points.`);
+  }
+  for (const g of facts.games || []) {
+    if (g.loserCouldHaveWon) {
+      lines.push(`${g.loserCouldHaveWon.team} lost by ${g.margin} but their optimal lineup (${g.loserCouldHaveWon.optimal}) would have beaten ${g.winner}'s ${g.winnerPoints}.`);
+    }
   }
 
   lines.push('');
