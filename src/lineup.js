@@ -13,26 +13,56 @@
  *   starters         = [QB,   RB,  RB,  WR,  WR,  TE,  RB,    K,   DEF]
  */
 
-/** Which player positions may fill each lineup slot. */
+/**
+ * Which player positions may fill each lineup slot.
+ *
+ * The granular defensive positions are load-bearing, not thoroughness. Sleeper
+ * labels defenders with specific positions, and a league's slots are generic:
+ * an OLB or ILB must be startable in an `LB` slot, a CB/SS/FS in a `DB` slot,
+ * a DE/DT/NT in a `DL` slot. Counts from a real 12,218-player pull:
+ *   LB 1162 · CB 1034 · DB 861 · DE 691 · DT 645 · DL 303 · OLB 215
+ *   SS 162 · FS 145 · ILB 129 · NT 89 · S 45 · DEF 32
+ * Omitting any of them makes those players silently unstartable — the optimal
+ * lineup under-reports and a legal swap is never suggested.
+ */
+const DL_POSITIONS = ['DL', 'DE', 'DT', 'NT'];
+const LB_POSITIONS = ['LB', 'OLB', 'ILB', 'MLB'];
+const DB_POSITIONS = ['DB', 'CB', 'S', 'SS', 'FS'];
+const IDP_POSITIONS = [...DL_POSITIONS, ...LB_POSITIONS, ...DB_POSITIONS];
+
+// A fullback is a running back for fantasy purposes in every league that
+// rosters one.
+const RB_POSITIONS = ['RB', 'FB'];
+
 const SLOT_ELIGIBILITY = {
   QB: ['QB'],
-  RB: ['RB'],
+  RB: RB_POSITIONS,
   WR: ['WR'],
   TE: ['TE'],
-  K: ['K'],
-  DEF: ['DEF'],
-  DL: ['DL', 'DE', 'DT'],
-  LB: ['LB'],
-  DB: ['DB', 'CB', 'S'],
-  FLEX: ['RB', 'WR', 'TE'],
-  WRRB_FLEX: ['WR', 'RB'],
-  WRRB_WRT: ['WR', 'RB', 'TE'],
+  K: ['K', 'K/P'],
+  DEF: ['DEF', 'DST', 'D/ST'],
+
+  // Individual defensive players.
+  DL: DL_POSITIONS,
+  LB: LB_POSITIONS,
+  DB: DB_POSITIONS,
+  IDP_FLEX: IDP_POSITIONS,
+  IDP: IDP_POSITIONS,
+  DP: IDP_POSITIONS,
+  DEF_FLEX: IDP_POSITIONS,
+
+  // Offensive flexes.
+  FLEX: [...RB_POSITIONS, 'WR', 'TE'],
+  WRRB_FLEX: ['WR', ...RB_POSITIONS],
+  WRRB_WRT: ['WR', ...RB_POSITIONS, 'TE'],
   REC_FLEX: ['WR', 'TE'],
-  SUPER_FLEX: ['QB', 'RB', 'WR', 'TE'],
-  IDP_FLEX: ['DL', 'LB', 'DB', 'DE', 'DT', 'CB', 'S'],
+  SUPER_FLEX: ['QB', ...RB_POSITIONS, 'WR', 'TE'],
 };
 
 const BENCH_SLOTS = new Set(['BN', 'IR', 'TAXI']);
+
+/** Every position any slot in this table can start. */
+const STARTABLE_POSITIONS = new Set(Object.values(SLOT_ELIGIBILITY).flat());
 
 function eligiblePositions(slot) {
   return SLOT_ELIGIBILITY[String(slot).toUpperCase()] || [];
@@ -66,10 +96,32 @@ function unknownSlots(rosterPositions = []) {
 }
 
 /**
+ * Rostered positions that cannot fill ANY slot in this league.
+ *
+ * The mirror of `unknownSlots`, and the same silent failure in the other
+ * direction: if a league has an `LB` slot and our table doesn't map `OLB`, that
+ * player is treated as unstartable — the optimal lineup under-reports and a
+ * legal swap is never suggested. No error is raised anywhere.
+ *
+ * Some hits are legitimate (a stashed offensive lineman, a punter), so this is
+ * a signal to check the map, not proof of a bug.
+ */
+function unstartablePositions(rosterPositionsList, leagueSlots) {
+  const slots = activeSlots(leagueSlots);
+  const out = new Set();
+  for (const pos of rosterPositionsList) {
+    if (!pos) continue;
+    const p = String(pos).toUpperCase();
+    if (!slots.some(s => canFill(s, p))) out.add(p);
+  }
+  return [...out];
+}
+
+/**
  * Human-readable description of one league's actual lineup rules, derived from
  * that league's own roster_positions. Nothing here is hardcoded to a format —
- * a 2QB league, a SUPERFLEX league, and a TE-premium league all describe
- * themselves correctly.
+ * a 2QB league, a SUPERFLEX league, an IDP league, and a TE-premium league all
+ * describe themselves correctly.
  */
 function describeRules(rosterPositions = []) {
   const slots = activeSlots(rosterPositions);
@@ -80,6 +132,7 @@ function describeRules(rosterPositions = []) {
   }
 
   const qbCapable = slots.filter(s => canFill(s, 'QB')).length;
+  const idp = slots.filter(s => canFill(s, 'LB') || canFill(s, 'DL') || canFill(s, 'DB')).length;
   const flexish = [...counts.keys()].filter(k => (SLOT_ELIGIBILITY[k] || []).length > 1);
 
   return {
@@ -89,6 +142,9 @@ function describeRules(rosterPositions = []) {
     counts: Object.fromEntries(counts),
     qbSlots: qbCapable,
     superflex: qbCapable > 1,
+    idpSlots: idp,
+    idp: idp > 0,
+    teamDefense: slots.some(sl => canFill(sl, 'DEF')),
     flexTypes: flexish.map(k => ({ slot: k, accepts: SLOT_ELIGIBILITY[k] })),
     unknown: unknownSlots(rosterPositions),
     summary: [...counts].map(([k, n]) => (n > 1 ? `${n}×${k}` : k)).join(', '),
@@ -111,71 +167,105 @@ function describeRules(rosterPositions = []) {
 function optimalLineup(roster, slots) {
   const S = slots.length;
   if (!S) return { total: 0, assignment: [] };
-  const FULL = 1 << S;
 
-  // Precompute which slots each player can fill.
+  // Group identical slots. Two RB slots are interchangeable, so the state only
+  // needs to know HOW MANY of each type are filled — not which ones.
+  //
+  // This is the difference between shipping and crashing on IDP leagues. A
+  // bitmask over individual slots is 2^S: a 20-slot IDP league costs ~344MB and
+  // ~450ms, and a 22-slot league OOMs. Counting types instead collapses that
+  // same league to ~37k states and ~12MB, because 3×DL is one type with
+  // capacity 3 rather than three independent bits.
+  const typeNames = [];
+  const typeIndex = new Map();
+  const typeSlotIdx = [];
+  for (let s = 0; s < S; s++) {
+    const key = String(slots[s]).toUpperCase();
+    if (!typeIndex.has(key)) {
+      typeIndex.set(key, typeNames.length);
+      typeNames.push(key);
+      typeSlotIdx.push([]);
+    }
+    typeSlotIdx[typeIndex.get(key)].push(s);
+  }
+
+  const T = typeNames.length;
+  const cap = typeSlotIdx.map(a => a.length);
+
+  // Mixed-radix encoding: state = Σ usedₜ · multₜ
+  const mult = new Array(T);
+  let states = 1;
+  for (let t = 0; t < T; t++) { mult[t] = states; states *= (cap[t] + 1); }
+
+  // Which slot TYPES each player can fill.
   const cand = roster.map(p => {
-    let mask = 0;
-    for (let s = 0; s < S; s++) if (canFill(slots[s], p.position)) mask |= (1 << s);
-    return mask;
+    const list = [];
+    for (let t = 0; t < T; t++) if (canFill(typeNames[t], p.position)) list.push(t);
+    return list;
   });
 
-  // dp[i][mask] = max points using the first i players with `mask` filled.
-  //
-  // The full 2D table matters: a rolling 1D array gives the right TOTAL but an
-  // unreliable backtrack, because a parent pointer can reference a state from a
-  // later player generation — which silently assigns one player to two slots.
-  // Rosters are tiny (≤ ~25 players × 2^11 masks), so keep the history.
+  // Full 2D history. A rolling 1D array gives the right TOTAL but an unreliable
+  // backtrack — a parent pointer can reference a later player's generation,
+  // which silently assigns one player to two slots.
   const N = roster.length;
-  const dp = Array.from({ length: N + 1 }, () => new Float64Array(FULL).fill(-Infinity));
+  const dp = Array.from({ length: N + 1 }, () => new Float64Array(states).fill(-Infinity));
   dp[0][0] = 0;
 
   for (let i = 0; i < N; i++) {
     const p = roster[i];
-    const m = cand[i];
-    for (let mask = 0; mask < FULL; mask++) {
-      const cur = dp[i][mask];
-      if (cur === -Infinity) continue;
-      if (cur > dp[i + 1][mask]) dp[i + 1][mask] = cur;   // skip player i
-      if (!m) continue;
-      for (let s = 0; s < S; s++) {
-        const bit = 1 << s;
-        if (!(m & bit) || (mask & bit)) continue;
-        const val = cur + p.points;
-        if (val > dp[i + 1][mask | bit]) dp[i + 1][mask | bit] = val;
+    const cs = cand[i];
+    const cur = dp[i];
+    const next = dp[i + 1];
+    for (let st = 0; st < states; st++) {
+      const v = cur[st];
+      if (v === -Infinity) continue;
+      if (v > next[st]) next[st] = v;                     // skip player i
+      for (const t of cs) {
+        const used = Math.floor(st / mult[t]) % (cap[t] + 1);
+        if (used >= cap[t]) continue;
+        const ns = st + mult[t];
+        const val = v + p.points;
+        if (val > next[ns]) next[ns] = val;
       }
     }
   }
 
   // The best reachable state may not fill every slot (e.g. no kicker rostered).
-  let bestMask = 0;
-  for (let mask = 0; mask < FULL; mask++) {
-    if (dp[N][mask] > dp[N][bestMask]) bestMask = mask;
-  }
+  let bestState = 0;
+  for (let st = 0; st < states; st++) if (dp[N][st] > dp[N][bestState]) bestState = st;
 
-  // Walk backwards: at each step, either player i-1 was skipped (value carried
-  // over unchanged) or it filled exactly one slot in the current mask.
-  const assignment = [];
-  let mask = bestMask;
+  // Walk backwards: player i-1 was either skipped (value carried over) or
+  // filled exactly one slot type.
+  const perType = typeSlotIdx.map(() => []);
+  let st = bestState;
   for (let i = N; i > 0; i--) {
-    if (dp[i][mask] === dp[i - 1][mask]) continue;        // player i-1 unused
+    if (dp[i][st] === dp[i - 1][st]) continue;            // player i-1 unused
     const p = roster[i - 1];
-    for (let s = 0; s < S; s++) {
-      const bit = 1 << s;
-      if (!(mask & bit)) continue;
-      if (!(cand[i - 1] & bit)) continue;
-      if (dp[i - 1][mask ^ bit] + p.points === dp[i][mask]) {
-        assignment.push({
-          slot: slots[s], slotIndex: s, pid: p.pid, points: p.points, position: p.position,
-        });
-        mask ^= bit;
+    for (const t of cand[i - 1]) {
+      const used = Math.floor(st / mult[t]) % (cap[t] + 1);
+      if (used === 0) continue;
+      if (dp[i - 1][st - mult[t]] + p.points === dp[i][st]) {
+        perType[t].push(p);
+        st -= mult[t];
         break;
       }
     }
   }
-  assignment.reverse();
 
-  return { total: Math.round(dp[N][bestMask] * 100) / 100, assignment };
+  // Expand type counts back onto concrete slot indices, so callers still see
+  // "FLEX" vs "RB" and the original lineup order.
+  const assignment = [];
+  for (let t = 0; t < T; t++) {
+    perType[t].forEach((p, k) => {
+      const slotIndex = typeSlotIdx[t][k];
+      assignment.push({
+        slot: slots[slotIndex], slotIndex, pid: p.pid, points: p.points, position: p.position,
+      });
+    });
+  }
+  assignment.sort((a, b) => a.slotIndex - b.slotIndex);
+
+  return { total: Math.round(dp[N][bestState] * 100) / 100, assignment };
 }
 
 /**
@@ -205,6 +295,7 @@ function bestLegalSwap(starters, bench) {
 
 module.exports = {
   SLOT_ELIGIBILITY, BENCH_SLOTS,
-  eligiblePositions, canFill, activeSlots, unknownSlots, describeRules,
+  eligiblePositions, canFill, activeSlots, unknownSlots, unstartablePositions, describeRules,
+  STARTABLE_POSITIONS, IDP_POSITIONS,
   optimalLineup, bestLegalSwap,
 };

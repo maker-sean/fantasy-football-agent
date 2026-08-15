@@ -11,7 +11,7 @@
  * eligibility. The honest number is optimal-lineup minus actual-lineup.
  */
 
-const { activeSlots, optimalLineup, bestLegalSwap, canFill, describeRules } = require('./lineup');
+const { activeSlots, optimalLineup, bestLegalSwap, canFill, describeRules, unstartablePositions } = require('./lineup');
 
 const round = n => Math.round(Number(n || 0) * 100) / 100;
 
@@ -156,9 +156,24 @@ function weekFacts(payload, players = new Map()) {
     // Non-empty means the optimal-lineup numbers are unreliable for this
     // league. Callers must refuse to publish rather than publish a wrong
     // "points left on the table" figure.
-    rulesWarning: rules.unknown.length
-      ? `Unrecognized lineup slot(s): ${rules.unknown.join(', ')}. Optimal-lineup figures are unreliable — do not publish.`
-      : null,
+    rulesWarning: (() => {
+      const rostered = [...new Set(teams.flatMap(t =>
+        [...t.starters, ...t.bench].map(p => p.position).filter(Boolean)))];
+      const orphanPositions = unstartablePositions(rostered, rosterPositions)
+        // Genuinely unstartable everywhere (stashed linemen, punters) is normal
+        // and not a signal about our map.
+        .filter(p => !['OL','OT','OG','G','T','C','P','LS','ATH'].includes(p));
+      const problems = [];
+      if (rules.unknown.length) {
+        problems.push(`Unrecognized lineup slot(s): ${rules.unknown.join(', ')}.`);
+      }
+      if (orphanPositions.length) {
+        problems.push(`Rostered position(s) that fit no slot: ${orphanPositions.join(', ')}.`);
+      }
+      return problems.length
+        ? `${problems.join(' ')} Optimal-lineup figures may be understated — verify src/lineup.js before publishing.`
+        : null;
+    })(),
     slots,
     games,
     standingsThisWeek: scored.map(t => ({ team: t.team, points: t.points, record: t.record })),

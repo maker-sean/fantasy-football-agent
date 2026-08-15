@@ -55,7 +55,10 @@ function factsBlock(facts) {
   // The model needs the format to reason about lineups correctly — a swap that
   // is legal in a superflex league is nonsense in a single-QB one.
   if (facts.rules) {
-    lines.push(`Lineup format: ${facts.rules.summary}.${facts.rules.superflex ? ' This league starts more than one QB.' : ''}`);
+    const tags = [];
+    if (facts.rules.superflex) tags.push('starts more than one QB');
+    if (facts.rules.idp) tags.push('starts individual defensive players (IDP)');
+    lines.push(`Lineup format: ${facts.rules.summary}.${tags.length ? ' This league ' + tags.join(' and ') + '.' : ''}`);
     for (const f of facts.rules.flexTypes || []) {
       lines.push(`  ${f.slot} may be filled by: ${f.accepts.join(', ')} only.`);
     }
