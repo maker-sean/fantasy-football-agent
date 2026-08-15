@@ -10,6 +10,7 @@
 const { BurstCollector } = require('./burst');
 const { conversationState } = require('./convo');
 const { decide } = require('./decide');
+const { handleControl } = require('./control');
 
 const PERSIST = Boolean(process.env.DATABASE_URL);
 const db = PERSIST ? require('./db') : null;
@@ -41,6 +42,24 @@ class Responder {
   }
 
   async handleBurst(chatId, burst, meta = {}) {
+    // Operator commands first. Approving a recap is not a conversational reply
+    // and must not be gated by mention rules or rate limits — otherwise the one
+    // message that has to get through is the one suppressed.
+    if (db) {
+      try {
+        const ctl = await handleControl({
+          burst, provider: this.provider,
+          providerName: this.providerName, dryRun: this.dryRun,
+        });
+        if (ctl?.handled) {
+          console.log(`[control] ${ctl.action}${ctl.draftId ? ` draft=${ctl.draftId}` : ''}`);
+          return { verdict: { layer: 'control', reply: false, reason: ctl.action }, replied: null };
+        }
+      } catch (err) {
+        console.error('[control] threw, falling through:', err.message);
+      }
+    }
+
     const league = db ? await db.leagueByChat(this.providerName, chatId).catch(() => null) : null;
     const state = db
       ? await conversationState(chatId, this.providerName).catch(() => emptyState(chatId, this.providerName))

@@ -24,6 +24,7 @@ const poller = require('./src/poller');
 const inbound = require('./src/inbound');
 const { SendblueProvider } = require('./src/sendblue');
 const { Responder } = require('./src/responder');
+const { runWeeklyRecaps } = require('./src/weekly');
 
 const TZ = process.env.CRON_TZ || 'America/New_York';
 const POLL_MS = Number(process.env.POLL_INTERVAL_SECONDS || 10) * 1000;
@@ -55,6 +56,10 @@ const JOBS = [
   // Housekeeping.
   ['players',        '0 4 * * *',   () => snapshots.refreshPlayers()],
   ['members',        '30 4 * * *',  () => snapshots.syncMembers()],
+  // The weekly recap — Tuesday morning, after Monday night has settled and the
+  // postscore capture has run. Queues a draft and texts the owner; it does not
+  // post to a league unless that league has opted into autoPost.
+  ['recap_weekly',   '0 9 * * 2',   () => runWeeklyRecaps(sendblue, { dryRun: DRY_RUN })],
 ];
 
 async function preflight() {
