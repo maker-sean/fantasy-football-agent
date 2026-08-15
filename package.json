@@ -34,7 +34,8 @@
     "backfill": "node scripts/backfill.js",
     "recap": "node scripts/recap.js",
     "league-rules": "node scripts/league-rules.js",
-    "test": "node test/lineup.test.js"
+    "test": "node test/lineup.test.js && node test/decide.test.js",
+    "decide-replay": "node scripts/decide-replay.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.117.1",

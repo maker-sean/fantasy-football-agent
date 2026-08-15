@@ -23,6 +23,7 @@ const snapshots = require('./src/snapshots');
 const poller = require('./src/poller');
 const inbound = require('./src/inbound');
 const { SendblueProvider } = require('./src/sendblue');
+const { Responder } = require('./src/responder');
 
 const TZ = process.env.CRON_TZ || 'America/New_York';
 const POLL_MS = Number(process.env.POLL_INTERVAL_SECONDS || 10) * 1000;
@@ -30,6 +31,9 @@ const POLL_ENABLED = process.env.POLL_ENABLED !== 'false';
 // Off by default: the worker runs unattended, and a bot that starts replying in
 // a real group without someone watching is how you annoy a league into muting it.
 const ECHO = process.env.ECHO === 'true';
+// DRY_RUN decides and logs every burst but never sends — the safe way to watch
+// the reply logic against live traffic before letting it speak.
+const DRY_RUN = process.env.REPLY_DRY_RUN === 'true';
 
 const sendblue = (process.env.SENDBLUE_API_KEY_ID && process.env.SENDBLUE_API_SECRET_KEY)
   ? new SendblueProvider(
@@ -78,6 +82,21 @@ async function preflight() {
 }
 
 let stopPolling = null;
+let responder = null;
+
+/**
+ * What the bot says once it has decided to speak.
+ *
+ * Deliberately thin and separate from the decision. Layer 1 only fires on a
+ * direct address, so this is the "someone asked me something" path — wiring it
+ * to real league context and tools is the next piece of work, and keeping it
+ * behind one function keeps that from touching the reply logic.
+ */
+async function generateReply({ burst, league }) {
+  const asked = burst.map(m => m.text).filter(Boolean).join(' ').slice(0, 200);
+  console.log(`[reply] addressed in ${league?.name || 'unrouted'}: ${JSON.stringify(asked)}`);
+  return null;   // no content layer yet — decision is logged either way
+}
 
 (async () => {
   console.log(`[worker] starting, tz=${TZ}`);
@@ -102,13 +121,21 @@ let stopPolling = null;
 
   if (POLL_ENABLED && sendblue) {
     console.log(`[worker] polling sendblue every ${POLL_MS / 1000}s  echo=${ECHO ? 'ON' : 'off'}`);
+    // Persistence and the reply decision are separate concerns: every message
+    // is stored, only some are answered.
+    responder = new Responder(sendblue, generateReply, {
+      providerName: 'sendblue',
+      dryRun: DRY_RUN || !ECHO,
+    });
+
     stopPolling = poller.startPolling(sendblue, async msg => {
       const result = await inbound.handleInbound(msg, sendblue, {
         providerName: 'sendblue',
-        echo: ECHO,
+        echo: false,          // the Responder owns replying now
         source: 'worker-poll',
       });
       console.log('[in] ' + inbound.describe(msg, result));
+      responder.observe(msg);
     }, { intervalMs: POLL_MS, bootstrap: true });
   } else if (!sendblue) {
     console.warn('[worker] sendblue not configured — inbound polling disabled');
@@ -121,6 +148,7 @@ let stopPolling = null;
 
 const shutdown = async () => {
   if (stopPolling) stopPolling();
+  if (responder) await responder.shutdown().catch(() => {});
   console.log('\n[worker] shutting down');
   await db.pool.end().catch(() => {});
   process.exit(0);
