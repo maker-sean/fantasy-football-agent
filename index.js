@@ -21,6 +21,43 @@ const { SendblueProvider } = require('./src/sendblue');
 const { registerLeague, leagueByChat, allLeagues } = require('./src/leagues');
 const { runAgent, allowedToSend, noteSend } = require('./src/agent');
 const observer = require('./src/observer');
+const db = require('./src/db');
+
+const PERSIST = Boolean(process.env.DATABASE_URL);
+
+/**
+ * Write inbound to Postgres. Idempotent on (provider, provider_message_id), so
+ * a webhook retry does not become a second row — Phase 2's whole metric is
+ * "human replies per bot message" and duplicates would inflate it silently.
+ *
+ * Persistence failures never block the ack or the reply: the transcript is
+ * valuable, but dropping a live conversation to save a log line is a bad trade.
+ */
+async function persist(providerName, msg, direction = 'inbound') {
+  if (!PERSIST) return null;
+  try {
+    const league = await db.leagueByChat(providerName, msg.chatId);
+    const row = await db.recordMessage({
+      leagueId: league?.id || null,
+      provider: providerName,
+      providerMessageId: msg.messageId,
+      direction,
+      chatId: msg.chatId,
+      senderPhone: msg.senderId,
+      isGroup: msg.isGroup,
+      protocol: msg.protocol,
+      body: msg.text,
+      raw: msg.raw || {},
+      occurredAt: msg.timestamp,
+    });
+    if (!row) console.log(`[db] duplicate ${providerName} message ${msg.messageId} — ignored`);
+    else if (!league) console.log(`[db] stored, but chat ${msg.chatId} maps to no league yet`);
+    return row;
+  } catch (err) {
+    console.error('[db] persist failed:', err.message);
+    return null;
+  }
+}
 
 const PORT = Number(process.env.PORT || 3000);
 // M0 mode accepts inbound from chats we haven't registered yet. This is the
@@ -107,7 +144,9 @@ app.post('/webhooks/blooio', (req, res) => {
   observer.recordParsed(msg);
   console.log('[inbound]', observer.describe(msg));
 
-  handleInbound(msg).catch(err => console.error('[handleInbound]', err));
+  persist('blooio', msg)
+    .then(() => handleInbound(msg))
+    .catch(err => console.error('[handleInbound]', err));
 });
 
 /**
@@ -140,7 +179,9 @@ app.post('/webhooks/sendblue', (req, res) => {
   observer.recordParsed(msg);
   console.log('[sendblue inbound]', observer.describe(msg));
 
-  handleInbound(msg, sendblue).catch(err => console.error('[handleInbound sendblue]', err));
+  persist('sendblue', msg)
+    .then(() => handleInbound(msg, sendblue))
+    .catch(err => console.error('[handleInbound sendblue]', err));
 });
 
 /** The Milestone 0 verdict. Hit this after everyone has posted to the group. */
