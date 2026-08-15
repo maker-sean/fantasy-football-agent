@@ -1,4 +1,13 @@
 node_modules/
+
+# Secrets — never commit
 .env
-logs/*.jsonl
+.env.*
+!.env.example
+
+# Runtime state and captured message content
+logs/
+!logs/.gitkeep
+
 .DS_Store
+*.log
