@@ -40,7 +40,11 @@ it('case insensitive', () => assert.strictEqual(mentionsBot('BOT!', ['bot']), 'b
 it('start of message', () => assert.strictEqual(mentionsBot('bot, who do I start', ['bot']), 'bot'));
 it('does NOT match inside a word — robot', () => assert.strictEqual(mentionsBot('robots cant play ball', ['bot']), null));
 it('does NOT match inside a word — botched', () => assert.strictEqual(mentionsBot('he botched that lineup', ['bot']), null));
-it('matches a second configured name', () => assert.strictEqual(mentionsBot('commish help', ['bot', 'commish']), 'commish'));
+it('matches a second configured name', () => assert.strictEqual(mentionsBot('kings help', ['bot', 'kings']), 'kings'));
+it('"commish" is NOT a default trigger — it is a human in every league', () => {
+  assert.strictEqual(mentionsBot('commish can you fix the waiver order', DEFAULTS.botNames), null);
+  assert.strictEqual(mentionsBot('commish is asleep at the wheel again', DEFAULTS.botNames), null);
+});
 it('empty text is not a mention', () => assert.strictEqual(mentionsBot('', ['bot']), null));
 
 console.log('\nlayer 1 — direct address');

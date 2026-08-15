@@ -16,7 +16,13 @@
 const DEFAULTS = {
   // Names that count as addressing the bot. Word-boundary matched, so "robot"
   // and "botched" do not trigger it.
-  botNames: ['bot', 'commish'],
+  //
+  // "commish" was here and was removed: in a fantasy league the commissioner is
+  // a real person, so "commish can you fix the waiver order" is addressed to a
+  // human and would have made the bot interrupt every message aimed at them.
+  // Any trigger word that doubles as a league role or a common noun will do the
+  // same — pick a distinctive name per league via leagues.config.botNames.
+  botNames: ['bot'],
 
   // Hard rate limits. These are survival, not politeness — a number that talks
   // constantly gets carrier-flagged and league-muted.
