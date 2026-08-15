@@ -3,66 +3,78 @@
 An AI agent that sustains fantasy football league engagement year-round — the
 dead period after the draft when league chatter dies off.
 
-**Current state: Milestone 0 ran. It failed. Read the result before building.**
+## TRANSPORT: SENDBLUE. Blooio is retired.
 
-## MILESTONE 0 RESULT — in-group is not viable on Blooio
+**Sendblue is the active provider.** Blooio failed Milestone 0 and remains in
+the tree only as a negative control and as proof the adapter seam works. Do not
+build against it.
 
-Measured on a real trial number (`+15555550101`), 2026-08-11:
+| Provider | Mixed-device group send | Status |
+|---|---|---|
+| **Sendblue** | **works** — Android member received it | **ACTIVE** |
+| Blooio | fails — `device_send_error` 4 | retired, do not use |
+
+### Milestone 0 result
+
+Blooio, on trial number `+15555550101`, 2026-08-11:
 
 | Target | Composition | Transport | Result |
 |---|---|---|---|
-| `grp_AAAAAAAAAAAAAAAA` | all-Apple group | `imessage` | **sent** ✅ |
-| `+15555550105` (1:1) | single Android | `rcs` | **delivered** ✅ |
-| `grp_CCCCCCCCCCCCCCCC` | mixed group | `pending` | **failed** — `device_send_error` 4 ❌ |
-| `grp_BBBBBBBBBBBBBBBB` | mixed group | `pending` | **failed** — `device_send_error` 4 ❌ |
+| `grp_AAAAAAAAAAAAAAAA` | all-Apple group | `imessage` | sent ✅ |
+| `+15555550105` (1:1) | single Android | `rcs` | delivered ✅ |
+| `grp_CCCCCCCCCCCCCCCC` | mixed group | `pending` | **failed** — `device_send_error` 4 |
+| `grp_BBBBBBBBBBBBBBBB` | mixed group | `pending` | **failed** — `device_send_error` 4 |
 
-The sending hardware reaches Apple users in groups, and reaches Android users
-1:1 over RCS. It cannot send into a group containing a non-iMessage member.
-Two endpoints (`POST /groups` + `grp_` id, and the multi-recipient participant
-list) hit the identical failure, while the same multi-recipient path succeeds
-on an all-Apple group. Composition is the variable, not the API.
+Blooio reaches Apple users in groups and Android users 1:1 over RCS, but cannot
+send into a group containing a non-iMessage member. Two endpoints hit the
+identical failure while the same path succeeded on an all-Apple group, so
+composition was the variable, not the API. `protocol: pending` means no wire
+service ever resolved — the send died at Blooio's Mac before a transport was
+chosen, consistent with a Mac being unable to originate an MMS/RCS *group*.
 
-`protocol: pending` means no wire service was ever resolved — the send died at
-Blooio's Mac before a transport was chosen. Mechanistically consistent: a Mac
-composes iMessage natively but cannot originate an MMS/RCS *group*.
+Sendblue, on line `+15555550100`, same participants:
 
-**Inbound is unaffected.** Mixed-group messages arrive correctly, `delivered`,
-on a single chat id, with per-message `protocol`. The bot can listen to a real
-mixed league. It just cannot speak into it.
+| Target | Composition | Result |
+|---|---|---|
+| `sb_group_22222222-2222-2222-2222-222222222222...` | all-Apple group (2 + line) | **sent** ✅ |
+| mixed group (2 iMessage + 1 Android) | mixed | **Android member received it** ✅ |
 
-### Why this is not a Blooio problem
+Sendblue also creates groups on the **Free Tier** (`"plan": "free_api"`,
+`"message_type": "group"`), contrary to its docs claiming Blue Ocean is
+required.
 
-- iMessage groups require every participant on iMessage — excluded by one Android member.
-- Group MMS is carrier-capped near 10 participants; leagues run 10–12, plus the bot.
-- A2P RCS group messaging is not generally available.
+**Consequence:** in-group is viable. The 1:1-concierge fork stays closed unless
+something later reopens it.
 
-A 12-person mixed-device league group works fine between humans. The constraint
-is that a rented API identity cannot join one. Swapping providers changes which
-wall you hit, not whether you hit one.
+### Still unproven — do not treat these as closed
 
-**Consequence:** the in-group vs. 1:1-concierge fork is not an open product
-choice. In-group is unavailable at league size with mixed devices. Concierge is
-proven working (the RCS delivery above) and is the only path currently open.
+1. **Inbound correlation on Sendblue.** Outbound is proven; replies from both
+   device types correlating to one `group_id` are not. Phase 2's reactive path
+   depends on it.
+2. **Group size.** Tested at 4 participants. Leagues are 11–13, and group MMS
+   caps bite at 8–10 across carriers. This is a kill risk of the same class as
+   device mix.
 
-## Why this order
+### Vendor landscape (surveyed 2026-08)
 
-Milestone 0 asks whether a bot can even live in a real league's group chat when
-that group is mixed iMessage + Android. If the answer is no, the in-group
-architecture is wrong and a fully-built agent would be sitting on a foundation
-that fragments. That test costs $39 and one evening. Find out first.
-
-Note that M0 cannot be observed without a running webhook receiver — so the
-receiver is a *prerequisite* of M0, not a later milestone. What's gated behind
-M0 is the brain (Milestone 2+), not the plumbing.
+| Provider | Mixed devices in one group? | Cap |
+|---|---|---|
+| Sendblue | **yes** (measured) | untested above 4 |
+| Blooio | no (measured) | ~29 all-Apple |
+| LoopMessage | no — iMessage groups only | ~29 all-Apple |
+| Twilio Conversations | yes (group MMS) | 10 total |
+| Telnyx | yes (group MMS) | 9 total |
+| Linq | unclear — worth asking | 31 array; carrier ~10–20 |
 
 ## Architecture (non-negotiable)
 
 | Seam | Where | Why |
 |---|---|---|
-| `MessagingProvider` | [src/provider.js](src/provider.js) | Agent + league logic never import Blooio. Swapping to Sendblue/Linq/Twilio is one new class. This is the difference between a pivot and a rewrite. |
-| League registry | [src/leagues.js](src/leagues.js) | One service, many leagues. Routing resolves league by chat id. Never hardcode one league. |
-| Reply-first + rate limit | [src/agent.js](src/agent.js) | UX *and* survival — chatty automated numbers get deregistered. |
-| Identity ≠ phone number | [src/leagues.js](src/leagues.js) | A number rotation or ban is a re-notify, not a lost customer. |
+| `MessagingProvider` | [src/provider.js](src/provider.js), [src/sendblue.js](src/sendblue.js) | Agent and league logic never import a vendor. Swapping transports is one new class — this is what let Blooio be replaced by Sendblue in an hour instead of a rewrite. |
+| League registry | [src/db.js](src/db.js) `leagues` | One service, many leagues. Inbound routes on `(provider, chat_id)`. Never hardcode a league. |
+| Reply-first + rate limit | [src/agent.js](src/agent.js) | UX *and* survival — chatty automated numbers get carrier-flagged. |
+| Identity = normalized E.164 | [src/db.js](src/db.js) `members` | NOT a provider contact id. Blooio minted two `contact_id`s for one human in one group; a roster keyed on those would double-count every league. |
+| Snapshots are insert-only | [0001_init.sql](supabase/migrations/0001_init.sql) | A kickoff lineup cannot be reconstructed later. A re-run must never overwrite the original capture. |
 
 ## Setup
 
@@ -70,138 +82,119 @@ M0 is the brain (Milestone 2+), not the plumbing.
 npm install && cp .env.example .env
 ```
 
-Put your Blooio key in `.env`, then:
+Fill in `.env`:
+
+| Var | Where from |
+|---|---|
+| `SENDBLUE_API_KEY_ID` / `SENDBLUE_API_SECRET_KEY` | `sendblue show-keys` |
+| `SENDBLUE_FROM_NUMBER` | `sendblue lines` — **required on every send** |
+| `DATABASE_URL` | Supabase → Project Settings → Database → Connection string (URI) |
+
+Apply the schema, then register a league:
 
 ```bash
-npm start
+psql "$DATABASE_URL" -f supabase/migrations/0001_init.sql
 ```
-
-### Verify the pipeline before spending money
 
 ```bash
-node scripts/simulate-webhook.js
+node scripts/register-league.js --name "My League" --sleeper <sleeper_league_id> --chat <sb_group_id> --from +1XXXXXXXXXX
 ```
 
-Posts synthetic v2-shaped payloads (one iMessage sender, one SMS sender, same
-group id) and prints the `/m0` verdict. This proves *our* code works. It proves
-nothing about Blooio's real group behavior.
+Two processes:
 
-## Milestone 0 runbook
+```bash
+npm start     # web: webhook receiver, persists inbound
+```
 
-**Prereqs.** The free trial gives you a real iMessage-enabled number and full
-API access — M0 needs no paid plan. The one genuinely non-automatable step is
-**someone adding that number to the real league group from an iPhone**. Per
-Blooio's docs, `members[]` on `POST /groups` is bookkeeping — it does *not* add
-anyone to the real iMessage thread.
+```bash
+npm run worker  # cron: Sleeper ingestion + kickoff snapshots
+```
 
-0. Find out what your number is allowed to do — this gates Milestone 2, not M0:
-   ```bash
-   npm run whoami
-   ```
-   An `inbound` allocation is **reply-only**: sends to a group with no prior
-   inbound return `403 inbound_only_no_prior_inbound`. Fine for M0/M1 (both are
-   reply-first). Fatal for unprompted weekly recaps — see *The reply-only
-   problem* below.
-1. Profile your members so you know who's non-Apple going in:
-   ```bash
-   node scripts/capabilities.js +15551110001 +15551110002 +15551110003
-   ```
-2. Expose the webhook and register `<tunnel-url>/webhooks/blooio` in the Blooio dashboard:
-   ```bash
-   npx cloudflared tunnel --url http://localhost:3000
-   ```
-3. Have the bot number added to the real league group from an iPhone.
-4. **Test (a) — does the group hold together inbound?** Get at least one iPhone
-   member and the Android member to post. Then:
-   ```bash
-   curl -s localhost:3000/m0
-   ```
-   - **PASS:** one chat id, `isGroup: true`, ≥2 distinct senders, protocols
-     spanning Apple and non-Apple.
-   - **FAIL:** more than one group chat id for one human thread. The group
-     fragmented — in-group is wrong for real leagues.
-5. **Test (b) — does one reply land in one thread?** Using the chat id from step 4:
-   ```bash
-   node scripts/send.js "<chatId>" "testing, ignore me"
-   ```
-   Ask every member whether it appeared in the group thread. Anyone who got it
-   as a separate 1:1 is a fragmentation failure.
+## Sendblue notes (verified by measurement)
 
-Raw verbatim payloads land in `logs/webhooks.jsonl` — that file is ground truth
-if the parsed field names turn out wrong.
+- Base URL `https://api.sendblue.co`. Auth is **two** headers: `sb-api-key-id`, `sb-api-secret-key`.
+- **`from_number` is required on every send.** Omitting it fails everything with a generic 400.
+- `POST /api/send-group-message` with `numbers[]` creates a group and returns `group_id`.
+  Follow up with `{group_id, content}` — no `numbers`.
+- `QUEUED` is **not** delivery. Lifecycle: `REGISTERED → PENDING → QUEUED → ACCEPTED → SENT → DELIVERED`,
+  with `DECLINED`/`ERROR` terminal. Always confirm with `npm run sendblue-status`.
+- Inbound webhook: `from_number`, `to_number`, `content`, `media_url`, `service`, `group_id`, `date_sent`.
+  There is **no event field** — inbound and status callbacks arrive on different URLs, so the route supplies the type.
+- Free Tier is **reply-only**: contacts must text the line first, max 10, shared number.
+  Same shape as Blooio's `inbound` allocation. A shared line is fine for testing and
+  wrong for a league that expects a persistent bot identity.
+- `was_downgraded` and `service` are the fields that reveal whether a mixed group
+  got pushed off iMessage.
 
-## What the docs actually say (verified)
+Useful commands:
 
-- Base URL `https://api.blooio.com/v2/api`. **Not** `backend.` — that open item is closed.
-- Auth `Authorization: Bearer <key>`. Sends return **202 Accepted** = queued, *not* delivered.
-- Inbound webhook fields: `event`, `message_id`, `external_id`, `internal_id`,
-  `protocol`, `text`, `sender`, `is_group`, `timestamp`.
-  (The original scaffold read `chat_id` and `from`; neither exists.)
-- `protocol` is per-message `imessage` / `sms` / `rcs` — free mixed-device instrumentation.
-- Groups link to a **BlueBubbles** `chat_guid`. Omit it to create a new chat on
-  first send; provide it to join an existing thread.
-- A **v4 beta** exists (`POST /v4/messages`, flat `{to, text}`). We're on v2
-  deliberately: v4 is beta, and v2 carries Groups, Reactions, Polls, and Typing
-  Indicators — the actual engagement primitives this product wants.
+```bash
+npm run sendblue-preflight -- 5555550103 5555550105   # who still needs to text the line
+npm run sendblue-group -- 'message' 5555550103 5555550105
+npm run sendblue-status                               # what actually happened
+```
 
-## The reply-only problem
+## Phase 1 — snapshots (the deadline-bound work)
 
-Blooio number allocations are `shared`, `dedicated`, `inbound`, `trial`, `2fa`.
-**Inbound numbers are reply-only** — they "cannot start new conversations," and
-the check is `(allocation, group_id)` for groups. There is no warmup period: the
-first outbound to a group succeeds the moment an inbound from that group is
-recorded.
+Sleeper serves *current* state only. Once games kick off, the pre-kickoff
+starting lineup is gone — you can no longer tell who benched a 30-point week.
+That is most of the roast material and it has a hard deadline of the season's
+first kickoff.
 
-This does not touch M0 or M1 — both are reply-first by design, so a reply-only
-number tests them faithfully. It lands squarely on **M2**. The product spec is
-"posts weekly recaps / power rankings / lineup reminders," and every one of
-those is an *initiated* message. A reply-only number cannot send them.
+```bash
+node scripts/snapshot.js lock_sun_early --force   # prove it works in preseason
+node scripts/snapshot.js --list                   # what has been captured
+node scripts/snapshot.js --jobs                   # did the cron actually fire
+```
 
-The tempting workaround — make everything trigger-driven (`@bot recap`) — is
-worth resisting on reflex. The premise of the product is that league chatter
-*dies*. If nobody's talking, nobody's there to trigger the bot, and a
-trigger-only agent is silent exactly when it's most needed. The unprompted
-Tuesday-morning recap is plausibly the whole product, not a nice-to-have.
+Captures are gated on `season_type === 'regular'` (currently `pre`), so
+`--force` is how you exercise the path before it matters.
 
-Verify your allocation with `npm run whoami` before scoping M2. If it's
-reply-only, budget a dedicated number rather than redesigning the product
-around the constraint.
-
-## Ban risk (sharpened)
-
-Per Blooio: they never ban numbers — **carriers do**, and "once a number is
-banned, it cannot be recovered," you buy a new one. Combined with the known
-constraint that a banned identity can't rejoin an existing group thread, this
-is the single largest technical risk to the in-group architecture at scale.
-Guidance for initiated outbound is 20–50 new conversations/day/number.
+Cron (ET, in `worker.js`): `lock_thu` Thu 20:15 · `lock_sun_early` Sun 12:55 ·
+`lock_sun_late` Sun 15:55 · `lock_sun_night` Sun 20:10 · `lock_mon` Mon 20:10 ·
+`postscore` Tue 06:00 · `players` daily 04:00 · `members` daily 04:30.
 
 ## Still open
 
-- [ ] What `external_id` contains for a group message (answered by M0).
-- [ ] Webhook signature verification scheme — the receiver logs any
-      signature-ish headers so we can identify it. **Not verified yet; do not
-      run this in production as-is.**
-- [ ] Whether `members[]` populates a *newly created* group differently than a linked one.
-- [ ] Blooio's participant ceiling for a 12-person league.
+- [ ] **Inbound correlation on Sendblue** — replies from both device types landing on one `group_id`. Phase 2 depends on it.
+- [ ] **Group size** — tested at 4 participants; leagues are 11–13, group MMS caps at 8–10.
+- [ ] Webhook signature verification. **Not implemented — do not run in production as-is.**
+- [ ] Per-league unit economics (MMS cost vs price) — the Phase 4 gate.
 
 ## Constraints (researched — don't re-derive)
 
-- No official iMessage API. Blooio runs real Apple hardware; **ban risk is
-  real**. Rent the transport, never self-host a Mac farm.
-- Group MMS caps ~10 participants (carrier-enforced). Leagues run 10–12 — this
-  is size-marginal. iMessage groups allow ~29 but only if everyone is on iMessage.
-- Bans degrade gracefully in 1:1, catastrophically in groups — a banned identity
-  can't rejoin an existing thread.
-- **Unresolved product fork:** bot-in-group vs. 1:1 concierge that broadcasts.
-  This prototype tests in-group. The adapter seam keeps the pivot cheap.
-- Side bets are state-by-state regulated. Later, carefully scoped. The messaging
-  layer does not make wagering legal.
+- No official iMessage API. These vendors run real Apple hardware; **ban risk is real**. Rent, never self-host a Mac farm.
+- Bans come from carriers, not vendors, and a banned number is unrecoverable. A banned identity cannot rejoin an existing group thread.
+- iMessage groups require every participant on iMessage (~29 cap). Group MMS is carrier-capped near 10. Leagues run 10–12.
+- Sendblue clears the device-mix wall. The **size** wall is untested.
+- Side bets are state-by-state regulated. Later, carefully scoped. The messaging layer does not make wagering legal.
 
-## Roadmap
+## Roadmap (phased by risk retirement, not feature completeness)
 
-- **M0** — validate the group surface. ← *you are here*
-- **M1** — echo loop. (receiver + send path; already scaffolded)
-- **M2** — agent brain: wire `runAgent` to the Anthropic API, league context, reply-first policy.
-- **M3** — fantasy data. Sleeper API is friendliest; ESPN/Yahoo are read-only and messier.
-- **M4** — multi-tenant + billing: onboarding, per-league numbers, Stripe, signature
-  verification, ban-recovery re-notify.
+- **P0** — transport proof. Device mix ✅ (Sendblue). Inbound correlation and group size ⬜
+- **P1** — echo loop + Sleeper snapshot capture. ← *you are here*
+- **P2** — thinnest valuable bot. Metric: **human replies per bot message**. This is the product go/no-go.
+- **P3** — narrative memory, league culture, spiciness/presence dials. Pilot in a league you don't run.
+- **P4** — productize: onboarding, multi-tenant, Stripe, ban recovery. Gate: unit economics.
+- **P5** — harden and scale only as load demands.
+
+## Historical: why Blooio was retired
+
+Kept because the reasoning is load-bearing and re-deriving it costs a day.
+
+Blooio's group send requires a linked iMessage chat; `POST /groups` without
+`chat_guid` creates a record with no thread, so sends returned `202` and went
+nowhere. The multi-recipient participant-list form worked on all-Apple groups
+and failed on mixed ones with `device_send_error` code 4 and `protocol: pending`
+— no wire service ever resolved. Its allocations are `shared`/`dedicated`/
+`inbound`/`trial`/`2fa`, where `inbound` is reply-only
+(`403 inbound_only_no_prior_inbound`). Its messaging-safety caps are worth
+remembering for any vendor: max 3 messages to a new recipient before they
+respond, a consecutive-message streak cap, one re-engagement message after 14
+days silent, and no links or media before the recipient writes back — **a
+tapback clears the streak counter**, which makes "get one reaction" a real
+engagement mechanic rather than a nicety.
+
+`scripts/whoami.js`, `scripts/groups.js`, `scripts/inspect.js`,
+`scripts/capabilities.js`, and `scripts/simulate-webhook.js` are Blooio-only and
+retained for reference.

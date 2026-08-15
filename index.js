@@ -193,8 +193,13 @@ app.get('/health', (_req, res) => res.json({ ok: true, m0Mode: M0_MODE, echo: EC
 
 app.listen(PORT, () => {
   console.log(`listening on :${PORT}`);
-  console.log(`  webhook  POST /webhooks/blooio`);
+  // Sendblue is the active transport. Blooio failed Milestone 0 (mixed-device
+  // groups) and is kept only as a negative control — see README.
+  console.log(`  ACTIVE   sendblue ${sendblue ? 'configured' : 'NOT CONFIGURED'}`);
+  console.log(`  webhook  POST /webhooks/sendblue   <- register this one`);
+  console.log(`  retired  POST /webhooks/blooio     (${provider ? 'configured' : 'off'}, do not build against)`);
   console.log(`  verdict  GET  /m0`);
+  console.log(`  persist  ${PERSIST ? 'postgres' : 'OFF — set DATABASE_URL'}`);
   console.log(`  raw log  ${observer.RAW_LOG}`);
   console.log(`  m0Mode=${M0_MODE} echo=${ECHO}`);
 });
