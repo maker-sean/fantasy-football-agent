@@ -27,7 +27,8 @@
     "register-league": "node scripts/register-league.js",
     "simulate-sendblue": "node scripts/simulate-sendblue.js",
     "sendblue-webhooks": "node scripts/sendblue-webhooks.js",
-    "db-check": "node scripts/db-check.js"
+    "db-check": "node scripts/db-check.js",
+    "messages": "node scripts/messages.js"
   },
   "dependencies": {
     "dotenv": "^16.4.5",
