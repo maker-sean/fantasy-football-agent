@@ -78,15 +78,36 @@ async function pollOnce(provider, cursor, { limit = 25, bootstrap = false } = {}
   for (const m of inbound) {
     const handle = m.message_handle;
     if (!handle || cursor.seen.has(handle)) continue;
-    cursor.seen.add(handle);
-    if (!bootstrap) fresh.push(toEvent(m));
-    const ts = m.date_sent;
-    if (ts && (!cursor.since || ts > cursor.since)) cursor.since = ts;
+
+    if (bootstrap) {
+      // Bootstrap deliberately marks history as seen without emitting, so
+      // starting the poller does not replay days of chat into the agent.
+      cursor.seen.add(handle);
+      const ts = m.date_sent;
+      if (ts && (!cursor.since || ts > cursor.since)) cursor.since = ts;
+      continue;
+    }
+
+    // NOT marked seen here. The cursor must advance only after the handler has
+    // actually processed the message — see commit() below. Advancing on read
+    // meant that any message read during a run whose handler failed (or whose
+    // persistence was off) was skipped permanently, with no error and no way to
+    // notice except comparing against the provider by hand.
+    fresh.push(toEvent(m));
   }
 
   fresh.sort((a, b) => a.timestamp - b.timestamp);
-  saveCursor(cursor);
+  if (bootstrap) saveCursor(cursor);
   return fresh;
+}
+
+/** Mark one message durably handled. Call only after the handler succeeded. */
+function commit(cursor, event) {
+  if (!event?.messageId) return;
+  cursor.seen.add(event.messageId);
+  const ts = event.raw?.date_sent;
+  if (ts && (!cursor.since || ts > cursor.since)) cursor.since = ts;
+  saveCursor(cursor);
 }
 
 /**
@@ -109,8 +130,14 @@ function startPolling(provider, onMessage, { intervalMs = 10_000, bootstrap = tr
         console.log(`[poll] bootstrapped — ${cursor.seen.size} existing message(s) marked seen, not replayed`);
       }
       for (const e of events) {
-        try { await onMessage(e); }
-        catch (err) { console.error('[poll] handler threw:', err.message); }
+        try {
+          await onMessage(e);
+          // Only now is it safe to forget. A handler failure leaves the message
+          // uncommitted so the next poll retries it, rather than losing it.
+          commit(cursor, e);
+        } catch (err) {
+          console.error(`[poll] handler threw for ${e.messageId}, will retry:`, err.message);
+        }
       }
     } catch (err) {
       consecutiveErrors += 1;
@@ -131,4 +158,4 @@ function startPolling(provider, onMessage, { intervalMs = 10_000, bootstrap = tr
   return () => { stopped = true; };
 }
 
-module.exports = { pollOnce, startPolling, loadCursor, saveCursor, toEvent, CURSOR_FILE };
+module.exports = { pollOnce, startPolling, commit, loadCursor, saveCursor, toEvent, CURSOR_FILE };
