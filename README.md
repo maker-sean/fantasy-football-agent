@@ -46,14 +46,44 @@ required.
 **Consequence:** in-group is viable. The 1:1-concierge fork stays closed unless
 something later reopens it.
 
-### Still unproven — do not treat these as closed
+### Inbound: use POLLING, not webhooks
 
-1. **Inbound correlation on Sendblue.** Outbound is proven; replies from both
-   device types correlating to one `group_id` are not. Phase 2's reactive path
-   depends on it.
-2. **Group size.** Tested at 4 participants. Leagues are 11–13, and group MMS
-   caps bite at 8–10 across carriers. This is a kill risk of the same class as
-   device mix.
+**Sendblue's `receive` webhook does not fire for group messages.** Measured
+2026-08-15 with a verified, reachable receive webhook registered:
+
+| Message | `message_type` | Webhook fired? |
+|---|---|---|
+| 1:1 iMessage | `message` | **yes** |
+| group reply (×3, all after registration) | `group` | **no** |
+
+Every one of those group replies *was* recorded server-side and is readable at
+`GET /api/v2/messages` with a correct, stable `group_id`. The data is there;
+the push is not. Since the entire product lives in a group thread, webhooks
+cannot drive the reactive path on this provider.
+
+`src/poller.js` + `npm run poll` is the inbound transport. This is not purely a
+downgrade — it needs no tunnel and no public URL, it survives restarts via a
+durable cursor instead of losing whatever arrived while the process was down,
+and group and 1:1 share one code path. The cost is one poll interval of latency.
+
+`/webhooks/sendblue` still works and is kept for 1:1 and for the day Sendblue
+fixes this. Do not rely on it for groups.
+
+### Inbound correlation: PASSED
+
+From live data, all replies in the mixed group:
+
+- **one** `group_id` (`sb_group_00000000-0000-0000-0000-000000000000...`) across every message
+- **three** distinct senders resolved correctly, including the Android member
+- group traffic is `RCS` for *all* members — one non-Apple participant pulls the
+  whole thread off iMessage, exactly as Blooio showed
+- 1:1 to an iMessage member stays `iMessage` and is correctly not counted as group
+
+### Still unproven
+
+1. **Group size.** Tested at 4 participants. Leagues are 11–13, and group MMS
+   caps bite at 8–10 across carriers. Kill risk of the same class as device mix.
+2. **Poll latency and rate limits** under a real league's message volume.
 
 ### Vendor landscape (surveyed 2026-08)
 
