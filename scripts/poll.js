@@ -18,8 +18,7 @@ require('dotenv').config();
 
 const { SendblueProvider } = require('../src/sendblue');
 const poller = require('../src/poller');
-const observer = require('../src/observer');
-const agent = require('../src/agent');
+const inbound = require('../src/inbound');
 
 const argv = process.argv.slice(2);
 const has = f => argv.includes(`--${f}`);
@@ -39,51 +38,12 @@ let db = null;
 if (PERSIST) db = require('../src/db');
 
 async function onMessage(msg) {
-  observer.recordRaw(msg.raw, { source: 'poll', provider: 'sendblue' });
-  observer.recordParsed(msg);
-
-  const where = msg.isGroup ? `grp ${String(msg.chatId).slice(0, 24)}` : '1:1';
-  console.log(`[in] ${new Date(msg.timestamp).toISOString().slice(11, 19)} ${msg.senderId} ${msg.protocol} ${where}`);
-  console.log(`     ${JSON.stringify(String(msg.text || '').slice(0, 90))}`);
-
-  if (db) {
-    try {
-      const league = await db.leagueByChat('sendblue', msg.chatId);
-      const row = await db.recordMessage({
-        leagueId: league?.id || null,
-        provider: 'sendblue',
-        providerMessageId: msg.messageId,
-        direction: 'inbound',
-        chatId: msg.chatId,
-        senderPhone: msg.senderId,
-        isGroup: msg.isGroup,
-        protocol: msg.protocol,
-        body: msg.text,
-        raw: msg.raw,
-        occurredAt: msg.timestamp,
-      });
-      if (!row) console.log('     (duplicate, not stored)');
-      else if (!league) console.log('     (stored, UNROUTED — no league for this chat)');
-    } catch (err) {
-      console.error('     [db]', err.message);
-    }
-  }
-
-  if (!ECHO) return;
-
-  const reply = await agent.runAgent({ id: 'poll' }, msg);
-  if (!reply) return;
-
-  const gate = agent.allowedToSend(msg.chatId);
-  if (!gate.ok) return console.log(`     [rate] suppressed: ${gate.reason}`);
-
-  try {
-    await provider.send(msg.chatId, reply);
-    agent.noteSend(msg.chatId);
-    console.log(`[out] ${JSON.stringify(reply)}`);
-  } catch (err) {
-    console.error('[out] failed:', err.message);
-  }
+  const result = await inbound.handleInbound(msg, provider, {
+    providerName: 'sendblue',
+    echo: ECHO,
+    source: 'poll-script',
+  });
+  console.log('[in] ' + inbound.describe(msg, result));
 }
 
 (async () => {

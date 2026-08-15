@@ -1,15 +1,18 @@
 /**
- * Phase 1 worker — separate process from the web receiver.
+ * Phase 1 worker — all background work, separate from the web receiver.
  *
- * Its only job right now is capturing the thing that cannot be backfilled.
- * No agent, no LLM, no content generation. Those have no deadline; the first
- * kickoff of the season does.
+ * Two jobs:
+ *   1. Snapshot capture. The only artifact that cannot be backfilled, with a
+ *      hard deadline of the season's first kickoff.
+ *   2. Inbound polling. Sendblue does not fire webhooks for GROUP messages
+ *      (measured 2026-08-15), and the product lives in a group, so polling is
+ *      the inbound transport — not a fallback.
  *
  * Run:  npm run worker
  *
- * Lock snapshots fire just BEFORE each slate starts, because the point is to
- * record the lineup as submitted — a capture taken after kickoff has already
- * lost the bench decisions that make the recap worth reading.
+ * Lock snapshots fire just BEFORE each slate starts: a capture taken after
+ * kickoff has already lost the bench decisions that make the recap worth
+ * reading.
  */
 
 require('dotenv').config();
@@ -17,8 +20,24 @@ require('dotenv').config();
 const cron = require('node-cron');
 const db = require('./src/db');
 const snapshots = require('./src/snapshots');
+const poller = require('./src/poller');
+const inbound = require('./src/inbound');
+const { SendblueProvider } = require('./src/sendblue');
 
 const TZ = process.env.CRON_TZ || 'America/New_York';
+const POLL_MS = Number(process.env.POLL_INTERVAL_SECONDS || 10) * 1000;
+const POLL_ENABLED = process.env.POLL_ENABLED !== 'false';
+// Off by default: the worker runs unattended, and a bot that starts replying in
+// a real group without someone watching is how you annoy a league into muting it.
+const ECHO = process.env.ECHO === 'true';
+
+const sendblue = (process.env.SENDBLUE_API_KEY_ID && process.env.SENDBLUE_API_SECRET_KEY)
+  ? new SendblueProvider(
+      process.env.SENDBLUE_API_KEY_ID,
+      process.env.SENDBLUE_API_SECRET_KEY,
+      { fromNumber: process.env.SENDBLUE_FROM_NUMBER }
+    )
+  : null;
 
 // NFL slates in ET. Each fires a few minutes ahead of the real kickoff.
 const JOBS = [
@@ -58,6 +77,8 @@ async function preflight() {
   }
 }
 
+let stopPolling = null;
+
 (async () => {
   console.log(`[worker] starting, tz=${TZ}`);
   try {
@@ -79,10 +100,27 @@ async function preflight() {
     console.log(`[worker] scheduled ${name.padEnd(15)} ${expr}  (${TZ})`);
   }
 
+  if (POLL_ENABLED && sendblue) {
+    console.log(`[worker] polling sendblue every ${POLL_MS / 1000}s  echo=${ECHO ? 'ON' : 'off'}`);
+    stopPolling = poller.startPolling(sendblue, async msg => {
+      const result = await inbound.handleInbound(msg, sendblue, {
+        providerName: 'sendblue',
+        echo: ECHO,
+        source: 'worker-poll',
+      });
+      console.log('[in] ' + inbound.describe(msg, result));
+    }, { intervalMs: POLL_MS, bootstrap: true });
+  } else if (!sendblue) {
+    console.warn('[worker] sendblue not configured — inbound polling disabled');
+  } else {
+    console.log('[worker] polling disabled (POLL_ENABLED=false)');
+  }
+
   console.log('[worker] running. ctrl-c to stop.');
 })();
 
 const shutdown = async () => {
+  if (stopPolling) stopPolling();
   console.log('\n[worker] shutting down');
   await db.pool.end().catch(() => {});
   process.exit(0);
