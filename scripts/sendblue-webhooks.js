@@ -1,11 +1,17 @@
 #!/usr/bin/env node
 /**
- * List / register Sendblue webhooks over the API.
+ * List / register Sendblue webhooks.
  *
- * The CLI (`sendblue webhooks set-receive <url>`) does the same thing and is
- * fine. This exists so you can VERIFY registration without guessing — the most
- * common reason "replies aren't arriving" is that the receive webhook points at
- * a tunnel URL that died, and nothing tells you that until you look.
+ * The usual reason "replies aren't arriving" is a receive webhook still
+ * pointing at a tunnel URL that died. Nothing surfaces that — messages just
+ * vanish — so verifying registration is worth its own command.
+ *
+ * Measured contract (not documented anywhere I could find):
+ *   GET  /api/account/webhooks -> { status:"OK", webhooks: { receive: [...] } }
+ * The GET returns an object keyed by webhook type, NOT an array. A POST of
+ * { url, type } is rejected with "Missing or invalid webhooks array", so the
+ * write shape differs from the read shape; the candidates below are tried in
+ * order until one is accepted.
  *
  * Usage:
  *   node scripts/sendblue-webhooks.js list
@@ -22,42 +28,46 @@ const provider = new SendblueProvider(
 );
 
 const [cmd, url] = process.argv.slice(2);
+const PATH = '/api/account/webhooks';
 
-// Endpoint shape isn't fully documented; try the known paths in order.
-const PATHS = ['/api/account/webhooks', '/api/webhooks', '/api/v2/webhooks'];
-
-async function tryPaths(method, body) {
-  const errors = [];
-  for (const p of PATHS) {
-    try {
-      const res = await provider.request(method, p, body);
-      return { path: p, res };
-    } catch (err) {
-      errors.push(`${p} -> ${err.status || '?'}`);
-      if (err.status && ![404, 405].includes(err.status)) throw err;
+/** Flattens either shape into [{type, url}]. */
+function normalize(res) {
+  const w = res?.webhooks ?? res?.data ?? res;
+  const out = [];
+  if (Array.isArray(w)) {
+    for (const h of w) {
+      if (typeof h === 'string') out.push({ type: 'unknown', url: h });
+      else out.push({ type: h.type || h.event || 'unknown', url: h.url || h.endpoint });
+    }
+  } else if (w && typeof w === 'object') {
+    for (const [type, val] of Object.entries(w)) {
+      const list = Array.isArray(val) ? val : (val ? [val] : []);
+      for (const h of list) {
+        out.push({ type, url: typeof h === 'string' ? h : (h.url || h.endpoint) });
+      }
     }
   }
-  const e = new Error(`no webhook endpoint responded (${errors.join(', ')})`);
-  e.tried = errors;
-  throw e;
+  return out;
+}
+
+async function list({ quiet = false } = {}) {
+  const res = await provider.request('GET', PATH);
+  if (!quiet) console.log(JSON.stringify(res, null, 2));
+  return normalize(res);
 }
 
 (async () => {
   if (cmd === 'list' || !cmd) {
-    const { path, res } = await tryPaths('GET');
-    console.log(`(via ${path})\n`);
-    console.log(JSON.stringify(res, null, 2));
-
-    const hooks = res?.webhooks || res?.data || (Array.isArray(res) ? res : []);
-    const receive = hooks.filter(h => /receive/i.test(h.type || h.event || ''));
+    const hooks = await list();
+    const receive = hooks.filter(h => /receive/i.test(h.type));
     console.log('\n--- receive webhooks ---');
     if (!receive.length) {
-      console.log('NONE. Inbound replies are going nowhere. Register one:');
+      console.log('NONE REGISTERED. Inbound replies are going nowhere.');
       console.log('  node scripts/sendblue-webhooks.js set <tunnel-url>/webhooks/sendblue');
     } else {
-      for (const h of receive) console.log(`  ${h.url || h.endpoint}  (${h.type || h.event})`);
-      console.log('\nIf that URL is a dead tunnel, replies silently vanish. Re-register');
-      console.log('every time cloudflared restarts — the URL changes.');
+      for (const h of receive) console.log(`  ${h.url}`);
+      console.log('\nIf that URL is a dead tunnel, replies silently vanish.');
+      console.log('Re-register every time cloudflared restarts — the hostname changes.');
     }
     return;
   }
@@ -66,12 +76,51 @@ async function tryPaths(method, body) {
     if (!url) throw new Error('usage: sendblue-webhooks.js set <https url>');
     if (!/^https:\/\//.test(url)) throw new Error('webhook URL must be https');
     if (!url.endsWith('/webhooks/sendblue')) {
-      console.warn(`WARNING: url does not end in /webhooks/sendblue — that is the route this app serves.\n`);
+      console.warn('WARNING: url does not end in /webhooks/sendblue — that is the route this app serves.\n');
     }
-    const { path, res } = await tryPaths('POST', { url, type: 'receive' });
-    console.log(`(via ${path})`);
-    console.log(JSON.stringify(res, null, 2));
-    console.log('\nVerify it stuck:  node scripts/sendblue-webhooks.js list');
+
+    // Preserve anything that isn't a receive hook; a whole-payload write would
+    // otherwise silently drop the others.
+    let others = [];
+    try {
+      others = (await list({ quiet: true })).filter(h => !/receive/i.test(h.type) && h.url);
+      if (others.length) console.log(`preserving ${others.length} non-receive hook(s)`);
+    } catch {
+      console.warn('could not read existing webhooks first — writing receive only');
+    }
+
+    const grouped = {};
+    for (const h of others) (grouped[h.type] ||= []).push(h.url);
+    grouped.receive = [url];
+
+    const candidates = [
+      ['{webhooks:{receive:[url]}}', { webhooks: grouped }],
+      ['{webhooks:[url]}',           { webhooks: [url], type: 'receive' }],
+      ['{webhooks:[{url,type}]}',    { webhooks: [...others.map(h => ({ url: h.url, type: h.type })), { url, type: 'receive' }] }],
+    ];
+
+    const failures = [];
+    for (const [label, body] of candidates) {
+      try {
+        const res = await provider.request('POST', PATH, body);
+        console.log(`accepted shape: ${label}`);
+        console.log(JSON.stringify(res, null, 2));
+        const after = await list({ quiet: true });
+        const receive = after.filter(h => /receive/i.test(h.type)).map(h => h.url);
+        console.log(`\nreceive now: ${receive.length ? receive.join(', ') : '(still empty — the write did not take)'}`);
+        if (!receive.includes(url)) process.exitCode = 1;
+        return;
+      } catch (err) {
+        failures.push(`${label} -> ${err.status} ${(err.body?.message || '').slice(0, 80)}`);
+      }
+    }
+
+    console.error('No payload shape was accepted:');
+    for (const f of failures) console.error('  ' + f);
+    console.error('\nUse the Sendblue dashboard (Settings -> Webhooks) or the CLI:');
+    console.error('  npm install -g @sendblue/cli && sendblue login');
+    console.error(`  sendblue webhooks set-receive ${url}`);
+    process.exitCode = 1;
     return;
   }
 
@@ -79,9 +128,5 @@ async function tryPaths(method, body) {
   process.exitCode = 1;
 })().catch(err => {
   console.error('ERROR:', err.message);
-  if (err.tried) {
-    console.error('\nFall back to the CLI, which is authoritative:');
-    console.error('  sendblue webhooks set-receive <tunnel-url>/webhooks/sendblue');
-  }
   process.exit(1);
 });
