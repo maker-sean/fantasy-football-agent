@@ -37,7 +37,7 @@ const SUPERLATIVES = /\b(only|biggest|largest|smallest|closest|widest|narrowest|
  * @param factsText  the exact FACTS block handed to the model
  */
 function verifyRecap(text, facts, factsText, opts = {}) {
-  const targetWords = opts.targetWords || 90;
+  const targetWords = opts.targetWords || 100;
   const known = numbersIn(factsText);
   const used = numbersIn(text);
 

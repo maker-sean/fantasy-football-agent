@@ -115,17 +115,17 @@ function factsBlock(facts) {
  * @param opts.spice 0-2 — how hard the bot punches. The "spiciness dial" from
  *                   the product plan, wired in from the start because it is far
  *                   harder to retrofit tone than to carry it through.
- * @param opts.words target length. The default was assumed, not measured: a
- *                   group text is skimmed and a wall of text ends a conversation
- *                   rather than starting one. But a 12-team week has six games,
- *                   and 100 words covers two or three of them — so the right
- *                   length is an open question the engagement metric should
- *                   settle, not a constant.
+ * @param opts.words target length, default 100. ASSUMED, NOT MEASURED — revisit.
+ *                   The reasoning: a group text is skimmed, and a wall of text
+ *                   ends a conversation rather than starting one. The cost: a
+ *                   12-team week has six games and 100 words covers two or
+ *                   three, so real jokes get dropped. Settle it with reply rate
+ *                   once the bot is posting weekly (RECAP_WORDS, or --words).
  */
 async function generateRecap(facts, opts = {}) {
   const {
     spice = 1, effort = 'medium', model = MODEL,
-    words = Number(process.env.RECAP_WORDS || 90),
+    words = Number(process.env.RECAP_WORDS || 100),
     client = new Anthropic(),
   } = opts;
 

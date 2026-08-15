@@ -205,6 +205,17 @@ Cron (ET, in `worker.js`): `lock_thu` Thu 20:15 · `lock_sun_early` Sun 12:55 ·
 `lock_sun_late` Sun 15:55 · `lock_sun_night` Sun 20:10 · `lock_mon` Mon 20:10 ·
 `postscore` Tue 06:00 · `players` daily 04:00 · `members` daily 04:30.
 
+## Assumed, not measured — revisit with real data
+
+- **Recap length: 100 words** (`RECAP_WORDS`, or `--words`). Short keeps it
+  reading as a group text rather than an announcement, and announcements get
+  acknowledged instead of answered. The cost is real: a six-game week produces
+  more good material than 100 words can carry. Decide it on reply rate once the
+  bot posts weekly — generate the same week at 100 and 180 and compare.
+- **Spice default: 1 of 3** (`--spice`). Never tested against a live league.
+- **Burst debounce: 8s quiet / 30s ceiling** (`BURST_QUIET_MS`). Picked to feel
+  natural at a 10s poll; never measured against real conversation rhythm.
+
 ## Still open
 
 - [ ] **Inbound correlation on Sendblue** — replies from both device types landing on one `group_id`. Phase 2 depends on it.
