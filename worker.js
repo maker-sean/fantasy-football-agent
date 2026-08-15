@@ -93,9 +93,40 @@ let responder = null;
  * behind one function keeps that from touching the reply logic.
  */
 async function generateReply({ burst, league }) {
-  const asked = burst.map(m => m.text).filter(Boolean).join(' ').slice(0, 200);
-  console.log(`[reply] addressed in ${league?.name || 'unrouted'}: ${JSON.stringify(asked)}`);
-  return null;   // no content layer yet — decision is logged either way
+  const asked = burst.map(m => m.text).filter(Boolean).join(' ').trim();
+  console.log(`[reply] addressed in ${league?.name || 'unrouted'}: ${JSON.stringify(asked.slice(0, 120))}`);
+
+  if (!league) {
+    console.log('[reply] chat is not linked to a league — nothing to ground an answer in');
+    return null;
+  }
+  if (!process.env.ANTHROPIC_API_KEY) {
+    console.log('[reply] ANTHROPIC_API_KEY not set — decision logged, no answer generated');
+    return null;
+  }
+
+  try {
+    const { leagueContext } = require('./src/context');
+    const { generateAnswer } = require('./src/answer');
+    const ctx = await leagueContext(league.id);
+
+    const { rows: recent } = await db.query(
+      `select sender_phone, direction, body from messages
+       where league_id = $1 order by occurred_at desc limit 6`,
+      [league.id]
+    );
+    const recentChat = recent.reverse().map(r => ({
+      who: r.direction === 'outbound' ? 'bot' : (r.sender_phone || 'someone'),
+      text: String(r.body || '').slice(0, 120),
+    }));
+
+    const out = await generateAnswer(asked, ctx, { recentChat });
+    console.log(`[reply] generated ${out.text.split(/\s+/).length} words`);
+    return out.text;
+  } catch (err) {
+    console.error('[reply] answer failed:', err.message);
+    return null;   // silence beats a broken reply in a live group
+  }
 }
 
 (async () => {

@@ -1,0 +1,180 @@
+/**
+ * Assemble what the bot knows about a league, for answering questions.
+ *
+ * Same discipline as the recap: everything here is computed, and the model is
+ * only allowed to phrase it. A bot that invents a standing or a record in a
+ * league chat is worse than a bot that says "I don't know" — the people reading
+ * it can check, and they will.
+ *
+ * The hard part is not the numbers, it's identity. Chat identity is a phone
+ * number; league identity is a Sleeper user. Nothing joins them except the
+ * members table, so an unlinked league can compute perfect standings and still
+ * not know which team is Marcus's. When that link is missing this says so
+ * explicitly rather than guessing from name similarity.
+ */
+
+const db = require('./db');
+
+const round = n => Math.round(Number(n || 0) * 100) / 100;
+
+/** Standings from a snapshot's roster settings (wins/losses/points). */
+function standingsFrom(payload) {
+  const byUser = new Map((payload.users || []).map(u => [u.user_id, u]));
+  const rows = (payload.rosters || []).map(r => {
+    const u = byUser.get(r.owner_id);
+    const s = r.settings || {};
+    return {
+      team: u?.metadata?.team_name || u?.display_name || u?.username || `Roster ${r.roster_id}`,
+      manager: u?.display_name || u?.username || null,
+      sleeperUserId: r.owner_id,
+      rosterId: r.roster_id,
+      wins: s.wins ?? 0,
+      losses: s.losses ?? 0,
+      ties: s.ties ?? 0,
+      pointsFor: round((s.fpts ?? 0) + (s.fpts_decimal ?? 0) / 100),
+      pointsAgainst: round((s.fpts_against ?? 0) + (s.fpts_against_decimal ?? 0) / 100),
+    };
+  });
+  rows.sort((a, b) => (b.wins - a.wins) || (b.pointsFor - a.pointsFor));
+  return rows.map((r, i) => ({ rank: i + 1, ...r }));
+}
+
+/**
+ * @param leagueId  our uuid
+ * @param opts.includeArchive  pull last season too, so the bot has something to
+ *                             say before the new season has any games
+ */
+async function leagueContext(leagueId, opts = {}) {
+  const { rows: lrows } = await db.query('select * from leagues where id = $1', [leagueId]);
+  const league = lrows[0];
+  if (!league) return null;
+
+  const { rows: snaps } = await db.query(
+    `select season, week, kind, payload, captured_at from snapshots
+     where league_id = $1 order by season desc, week desc, captured_at desc limit 1`,
+    [leagueId]
+  );
+  const latest = snaps[0] || null;
+
+  const { rows: members } = await db.query(
+    `select phone, sleeper_user_id, sleeper_roster_id, display_name
+     from members where league_id = $1`,
+    [leagueId]
+  );
+
+  const ctx = {
+    leagueName: league.name,
+    identityLinked: members.length,
+    members: members.map(m => ({
+      name: m.display_name,
+      phone: m.phone,
+      sleeperUserId: m.sleeper_user_id,
+      rosterId: m.sleeper_roster_id,
+    })),
+    season: null,
+    status: null,
+    week: null,
+    standings: [],
+    // Explicitly stated so the model can decline instead of guessing.
+    unknowns: [],
+  };
+
+  if (!latest) {
+    ctx.unknowns.push('No league data has been captured yet.');
+    return ctx;
+  }
+
+  const p = latest.payload;
+  ctx.season = p.league?.season || latest.season;
+  ctx.status = p.league?.status || null;
+  ctx.week = latest.week;
+  ctx.teamCount = p.league?.total_rosters ?? null;
+
+  const played = (p.rosters || []).some(r => (r.settings?.wins ?? 0) + (r.settings?.losses ?? 0) > 0);
+  ctx.gamesPlayed = played;
+
+  if (played) {
+    ctx.standings = standingsFrom(p);
+  } else {
+    ctx.unknowns.push(
+      `The ${ctx.season} season has not started — league status is "${ctx.status}" and no games have been played, so there are no standings, records, or results for ${ctx.season}.`
+    );
+  }
+
+  // Attach team names to linked members so the bot can answer "whose team".
+  const byUserId = new Map((ctx.standings.length ? ctx.standings : standingsFrom(p))
+    .map(s => [s.sleeperUserId, s]));
+  for (const m of ctx.members) {
+    const s = byUserId.get(m.sleeperUserId);
+    if (s) { m.team = s.team; m.record = `${s.wins}-${s.losses}`; }
+  }
+
+  const unlinked = (p.users || []).length - ctx.members.filter(m => m.team).length;
+  if (unlinked > 0) {
+    ctx.unknowns.push(
+      `${unlinked} of ${(p.users || []).length} managers are not linked to a phone number, so the bot does not know which chat participant owns which team unless they are listed under KNOWN PEOPLE.`
+    );
+  }
+
+  // Last completed season, so the bot has real material before the new one
+  // starts. This is what makes a pre-draft league answerable at all.
+  if (opts.includeArchive !== false && league.sleeper_league_id) {
+    const { rows: arch } = await db.query(
+      `select s.season, s.week, s.payload from snapshots s
+       join leagues l on l.id = s.league_id
+       where l.provider = 'archive' and s.season < $1
+       order by s.season desc, s.week desc limit 1`,
+      [String(ctx.season)]
+    );
+    if (arch.length) {
+      const a = arch[0];
+      ctx.lastSeason = {
+        season: a.season,
+        throughWeek: a.week,
+        standings: standingsFrom(a.payload).slice(0, 12),
+      };
+    }
+  }
+
+  return ctx;
+}
+
+/** Render context as the fact sheet handed to the model. */
+function contextBlock(ctx) {
+  const L = [];
+  L.push(`League: ${ctx.leagueName}. Season ${ctx.season || 'unknown'}, status ${ctx.status || 'unknown'}${ctx.teamCount ? `, ${ctx.teamCount} teams` : ''}.`);
+
+  if (ctx.members.length) {
+    L.push('');
+    L.push('KNOWN PEOPLE (chat participant -> their team):');
+    for (const m of ctx.members) {
+      L.push(`  ${m.name || m.phone} = ${m.team || '(team unknown)'}${m.record ? `, ${m.record}` : ''}`);
+    }
+  }
+
+  if (ctx.standings.length) {
+    L.push('');
+    L.push(`STANDINGS (${ctx.season}, through week ${ctx.week}):`);
+    for (const s of ctx.standings) {
+      L.push(`  ${String(s.rank).padStart(2)}. ${s.team} — ${s.wins}-${s.losses}${s.ties ? '-' + s.ties : ''}, ${s.pointsFor} points for`);
+    }
+  }
+
+  if (ctx.lastSeason?.standings?.length) {
+    L.push('');
+    L.push(`LAST SEASON (${ctx.lastSeason.season} final, through week ${ctx.lastSeason.throughWeek}):`);
+    for (const s of ctx.lastSeason.standings) {
+      L.push(`  ${String(s.rank).padStart(2)}. ${s.team} — ${s.wins}-${s.losses}, ${s.pointsFor} points for`);
+    }
+  }
+
+  if (ctx.unknowns.length) {
+    L.push('');
+    L.push('WHAT YOU DO NOT KNOW — say so plainly if asked about any of this:');
+    for (const u of ctx.unknowns) L.push(`  - ${u}`);
+  }
+
+  return L.join('\n');
+}
+
+module.exports = { leagueContext, contextBlock, standingsFrom };
