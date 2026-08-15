@@ -10,6 +10,7 @@
  *   node scripts/recap.js --week 10                      # archive league, most recent
  *   node scripts/recap.js --league <uuid> --week 10
  *   node scripts/recap.js --week 10 --spice 2
+ *   node scripts/recap.js --week 10 --words 180        # longer recap
  *   node scripts/recap.js --week 10 --model claude-opus-4-8   # A/B the model
  *   node scripts/recap.js --week 10 --facts-only         # no API key needed
  *   node scripts/recap.js --week 10 --send <sb_group_id> # post it for real
@@ -29,6 +30,7 @@ const spice = Number(flag('spice') ?? 1);
 const effort = flag('effort') || 'medium';
 const sendTo = flag('send');
 const model = flag('model');
+const words = flag('words') ? Number(flag('words')) : undefined;
 
 if (!week) {
   console.error('usage: node scripts/recap.js --week <n> [--league <uuid>] [--spice 0|1|2] [--facts-only] [--send <chat_id>]');
@@ -80,14 +82,14 @@ if (!week) {
   console.log('='.repeat(64));
 
   const { generateRecap } = require('../src/recap');
-  const out = await generateRecap(facts, { spice, effort, ...(model ? { model } : {}) });
+  const out = await generateRecap(facts, { spice, effort, ...(model ? { model } : {}), ...(words ? { words } : {}) });
 
   console.log('\n' + out.text + '\n');
   console.log('-'.repeat(64));
-  console.log(`${out.text.split(/\s+/).length} words | audience=${out.audience} | ${out.meta.model} | stop=${out.meta.stopReason}`);
+  console.log(`${out.text.split(/\s+/).length} words (target ${out.meta.targetWords}) | audience=${out.audience} | ${out.meta.model} | stop=${out.meta.stopReason}`);
   console.log(`tokens in=${out.meta.usage.input_tokens} out=${out.meta.usage.output_tokens} cache_read=${out.meta.usage.cache_read_input_tokens ?? 0}`);
   const { verifyRecap, report } = require('../src/verify');
-  const v = verifyRecap(out.text, facts, factsBlock(facts));
+  const v = verifyRecap(out.text, facts, factsBlock(facts), { targetWords: out.meta.targetWords });
   console.log('\n' + '-'.repeat(64));
   console.log('VERIFICATION');
   console.log('-'.repeat(64));

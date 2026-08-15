@@ -42,9 +42,10 @@ Voice:
 
 Format:
 - Plain text for a phone screen. No markdown, no headers, no bullet characters.
-- 60-110 words. This is a group text, not a newsletter.
+- LENGTH_RULE
 - Open with the single most interesting thing that happened, not a summary of the slate.
 - End on something that invites a reply — a callout, a question, a challenge. Never end with a summary sentence.
+- Cover only as many stories as the length allows, chosen by how interesting they are. Never list every game to be complete.
 
 Absolute rules:
 - Every number and name you use MUST come verbatim from the FACTS provided. Do not compute, estimate, round, or infer any figure.
@@ -114,9 +115,23 @@ function factsBlock(facts) {
  * @param opts.spice 0-2 — how hard the bot punches. The "spiciness dial" from
  *                   the product plan, wired in from the start because it is far
  *                   harder to retrofit tone than to carry it through.
+ * @param opts.words target length. The default was assumed, not measured: a
+ *                   group text is skimmed and a wall of text ends a conversation
+ *                   rather than starting one. But a 12-team week has six games,
+ *                   and 100 words covers two or three of them — so the right
+ *                   length is an open question the engagement metric should
+ *                   settle, not a constant.
  */
 async function generateRecap(facts, opts = {}) {
-  const { spice = 1, effort = 'medium', model = MODEL, client = new Anthropic() } = opts;
+  const {
+    spice = 1, effort = 'medium', model = MODEL,
+    words = Number(process.env.RECAP_WORDS || 90),
+    client = new Anthropic(),
+  } = opts;
+
+  const lo = Math.max(20, Math.round(words * 0.75));
+  const hi = Math.round(words * 1.25);
+  const lengthRule = `${lo}-${hi} words. This is a group text, not a newsletter.`;
 
   const spiceNote = [
     'Keep it gentle this week. Observational, barely any edge.',
@@ -130,7 +145,9 @@ async function generateRecap(facts, opts = {}) {
     thinking: { type: 'adaptive' },
     output_config: { effort },
     system: [
-      { type: 'text', text: PERSONA, cache_control: { type: 'ephemeral' } },
+      // Length is part of the cached prefix, so changing it invalidates the
+      // cache — fine, it changes rarely and per-league at most.
+      { type: 'text', text: PERSONA.replace('LENGTH_RULE', lengthRule), cache_control: { type: 'ephemeral' } },
     ],
     messages: [
       {
@@ -155,6 +172,7 @@ async function generateRecap(facts, opts = {}) {
       usage: response.usage,
       week: facts.week,
       season: facts.season,
+      targetWords: words,
     },
   };
 }

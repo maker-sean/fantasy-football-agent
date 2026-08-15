@@ -36,7 +36,8 @@ const SUPERLATIVES = /\b(only|biggest|largest|smallest|closest|widest|narrowest|
  * @param facts  the weekFacts object it was generated from
  * @param factsText  the exact FACTS block handed to the model
  */
-function verifyRecap(text, facts, factsText) {
+function verifyRecap(text, facts, factsText, opts = {}) {
+  const targetWords = opts.targetWords || 90;
   const known = numbersIn(factsText);
   const used = numbersIn(text);
 
@@ -68,7 +69,11 @@ function verifyRecap(text, facts, factsText) {
   }
 
   const words = String(text).trim().split(/\s+/).length;
-  if (words > 130) issues.push({ severity: 'review', kind: 'length', detail: `${words} words — long for a group text` });
+  // Keyed to the configured target rather than a fixed number — length is a
+  // dial, so the check has to move with it.
+  if (words > Math.round(targetWords * 1.6)) {
+    issues.push({ severity: 'review', kind: 'length', detail: `${words} words vs a ${targetWords}-word target` });
+  }
   if (/[*_#`]|^\s*[-•]/m.test(text)) {
     issues.push({ severity: 'review', kind: 'formatting', detail: 'Markdown or bullets — renders badly on a phone' });
   }
