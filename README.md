@@ -1,4 +1,12 @@
-# Fantasy League Agent
+# commish-agent
+
+> **PRIVATE REPO — do not make public without scrubbing history.**
+> Real phone numbers of league members appear in commit messages and docs from
+> Milestone 0 testing (~139 occurrences across history). Making this public
+> exposes other people's personal data permanently, and a later rewrite does not
+> help anyone who already cloned it. If it ever needs to be public, rewrite
+> history with `git filter-repo` FIRST.
+
 
 An AI agent that sustains fantasy football league engagement year-round — the
 dead period after the draft when league chatter dies off.
