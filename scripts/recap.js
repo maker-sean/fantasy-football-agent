@@ -84,8 +84,26 @@ if (!week) {
   console.log('-'.repeat(64));
   console.log(`${out.text.split(/\s+/).length} words | audience=${out.audience} | ${out.meta.model} | stop=${out.meta.stopReason}`);
   console.log(`tokens in=${out.meta.usage.input_tokens} out=${out.meta.usage.output_tokens} cache_read=${out.meta.usage.cache_read_input_tokens ?? 0}`);
-  console.log('\nVERIFY: every number above must appear in FACTS. If one does not, that is a bug worth fixing before this ever posts to a real league.');
+  const { verifyRecap, report } = require('../src/verify');
+  const v = verifyRecap(out.text, facts, factsBlock(facts));
+  console.log('\n' + '-'.repeat(64));
+  console.log('VERIFICATION');
+  console.log('-'.repeat(64));
+  console.log(report(v));
 
+  if (!v.ok) {
+    console.error('\nBLOCKED: verification found an error. Not safe to send.');
+    process.exitCode = 1;
+    return;
+  }
+  if (v.superlatives.length) {
+    console.log('\nRead the ranking words above against the results list before sending.');
+  }
+
+  if (sendTo && !v.ok) {
+    console.error('Refusing to send a recap that failed verification.');
+    return;
+  }
   if (sendTo) {
     const { SendblueProvider } = require('../src/sendblue');
     const provider = new SendblueProvider(

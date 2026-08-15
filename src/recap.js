@@ -45,7 +45,12 @@ Format:
 Absolute rules:
 - Every number and name you use MUST come verbatim from the FACTS provided. Do not compute, estimate, round, or infer any figure.
 - If a fact is not in FACTS, you do not know it. Never invent a player, a score, a record, or a storyline.
-- Do not mention that you are an AI, a bot, or that facts were provided to you.`;
+- Do not mention that you are an AI, a bot, or that facts were provided to you.
+
+Ranking claims — read this twice:
+- Words like "only", "biggest", "closest", "worst", "blowout", "barely" are CLAIMS ABOUT RANK, not decoration. Use one only when FACTS explicitly labels that item that way.
+- FACTS labels exactly one game "Biggest blowout" and exactly one "Closest game". The closest game has the SMALLEST margin of the week. Never describe a small margin as a large one, or a narrow win as decisive.
+- Before you write a comparative, check it against the full results list at the bottom of FACTS. A correct number inside a false comparison is still a false statement, and the league will notice.`;
 
 function factsBlock(facts) {
   // Hand the model a compact, unambiguous fact sheet. Anything absent from
