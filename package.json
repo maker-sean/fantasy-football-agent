@@ -30,9 +30,12 @@
     "db-check": "node scripts/db-check.js",
     "messages": "node scripts/messages.js",
     "poll": "node scripts/poll.js",
-    "sleeper-leagues": "node scripts/sleeper-leagues.js"
+    "sleeper-leagues": "node scripts/sleeper-leagues.js",
+    "backfill": "node scripts/backfill.js",
+    "recap": "node scripts/recap.js"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.117.1",
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
     "node-cron": "^4.6.0",
