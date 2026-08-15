@@ -65,6 +65,19 @@ const has = name => argv.includes(`--${name}`);
   console.log('\nRegistered:');
   console.log(JSON.stringify(row, null, 2));
 
+  // Messages logged before the league existed are stored but unattributed.
+  // Claim them now rather than leaving a permanent hole at the start of the
+  // chat history — that early banter is exactly what narrative memory wants.
+  if (chatId) {
+    const { rows: claimed } = await db.query(
+      `update messages m set league_id = $1
+       where m.league_id is null and m.provider = $2 and m.chat_id = $3
+       returning m.id`,
+      [row.id, provider, chatId]
+    );
+    if (claimed.length) console.log(`\nBackfilled ${claimed.length} previously unrouted message(s) to this league.`);
+  }
+
   if (!chatId) {
     console.log('\nNo --chat yet. Get it from a Sendblue group send (group_id in the response),');
     console.log('then re-run with --chat to enable inbound routing.');
