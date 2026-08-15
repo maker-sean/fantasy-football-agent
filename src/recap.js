@@ -18,7 +18,11 @@
 
 const Anthropic = require('@anthropic-ai/sdk');
 
-const MODEL = process.env.RECAP_MODEL || 'claude-opus-4-8';
+// Sonnet while the voice is being tuned — the recap is ~100 words once a week,
+// so the model choice is about output quality, not cost at this volume. Bump
+// back to claude-opus-4-8 before production and compare on real weeks:
+//   node scripts/recap.js --week 10 --model claude-opus-4-8
+const MODEL = process.env.RECAP_MODEL || 'claude-sonnet-5';
 
 /**
  * Stable across every league and week — this is the cache prefix. Nothing
@@ -112,7 +116,7 @@ function factsBlock(facts) {
  *                   harder to retrofit tone than to carry it through.
  */
 async function generateRecap(facts, opts = {}) {
-  const { spice = 1, effort = 'medium', client = new Anthropic() } = opts;
+  const { spice = 1, effort = 'medium', model = MODEL, client = new Anthropic() } = opts;
 
   const spiceNote = [
     'Keep it gentle this week. Observational, barely any edge.',
@@ -121,7 +125,7 @@ async function generateRecap(facts, opts = {}) {
   ][Math.max(0, Math.min(2, spice))];
 
   const response = await client.messages.create({
-    model: MODEL,
+    model,
     max_tokens: 16000,
     thinking: { type: 'adaptive' },
     output_config: { effort },

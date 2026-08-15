@@ -10,6 +10,7 @@
  *   node scripts/recap.js --week 10                      # archive league, most recent
  *   node scripts/recap.js --league <uuid> --week 10
  *   node scripts/recap.js --week 10 --spice 2
+ *   node scripts/recap.js --week 10 --model claude-opus-4-8   # A/B the model
  *   node scripts/recap.js --week 10 --facts-only         # no API key needed
  *   node scripts/recap.js --week 10 --send <sb_group_id> # post it for real
  */
@@ -27,6 +28,7 @@ const leagueId = flag('league');
 const spice = Number(flag('spice') ?? 1);
 const effort = flag('effort') || 'medium';
 const sendTo = flag('send');
+const model = flag('model');
 
 if (!week) {
   console.error('usage: node scripts/recap.js --week <n> [--league <uuid>] [--spice 0|1|2] [--facts-only] [--send <chat_id>]');
@@ -78,7 +80,7 @@ if (!week) {
   console.log('='.repeat(64));
 
   const { generateRecap } = require('../src/recap');
-  const out = await generateRecap(facts, { spice, effort });
+  const out = await generateRecap(facts, { spice, effort, ...(model ? { model } : {}) });
 
   console.log('\n' + out.text + '\n');
   console.log('-'.repeat(64));

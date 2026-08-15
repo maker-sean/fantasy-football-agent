@@ -56,7 +56,8 @@ const question = argv.filter(a => !a.startsWith('--') && argv[argv.indexOf(a) - 
   }));
 
   const { generateAnswer } = require('../src/answer');
-  const out = await generateAnswer(question, ctx, { recentChat });
+  const model = flag('model');
+  const out = await generateAnswer(question, ctx, { recentChat, ...(model ? { model } : {}) });
 
   console.log('\n' + '='.repeat(66));
   console.log(`Q: ${question}`);

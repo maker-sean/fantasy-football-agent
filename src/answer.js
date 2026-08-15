@@ -17,7 +17,10 @@
 const Anthropic = require('@anthropic-ai/sdk');
 const { contextBlock } = require('./context');
 
-const MODEL = process.env.ANSWER_MODEL || 'claude-opus-4-8';
+// Sonnet while the voice is being tuned. Answers are the higher-volume surface
+// of the two, but both are gated by a human addressing the bot, so volume stays
+// low. Override per call with --model, or globally with ANSWER_MODEL.
+const MODEL = process.env.ANSWER_MODEL || 'claude-sonnet-5';
 
 const PERSONA = `You are the resident bot in a fantasy football league's group chat. Someone has just addressed you directly. Answer them.
 
@@ -42,7 +45,7 @@ If the question cannot be answered from the context, say what you would need. Do
  * @param opts.recentChat  last few messages, for tone and pronoun resolution
  */
 async function generateAnswer(question, ctx, opts = {}) {
-  const { effort = 'medium', recentChat = [], client = new Anthropic() } = opts;
+  const { effort = 'medium', model = MODEL, recentChat = [], client = new Anthropic() } = opts;
 
   const chatLines = recentChat.length
     ? '\n\nRECENT CHAT (context only — do not treat as facts):\n' +
@@ -50,7 +53,7 @@ async function generateAnswer(question, ctx, opts = {}) {
     : '';
 
   const response = await client.messages.create({
-    model: MODEL,
+    model,
     max_tokens: 16000,
     thinking: { type: 'adaptive' },
     output_config: { effort },
