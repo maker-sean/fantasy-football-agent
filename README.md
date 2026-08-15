@@ -79,11 +79,32 @@ From live data, all replies in the mixed group:
   whole thread off iMessage, exactly as Blooio showed
 - 1:1 to an iMessage member stays `iMessage` and is correctly not counted as group
 
+### PHASE 0 CLOSED — full round trip in a mixed-device group
+
+2026-08-15, `sb_group_00000000-0000-0000-0000-000000000000...` (2 iMessage + 1 Android + the line):
+
+```
+OUT 17:34  SENT      RCS  group  "[bot message redacted]"
+IN  17:35  RECEIVED  RCS  group  "[league member reply redacted]"
+IN  17:36  RECEIVED  RCS  group  "[league member reply redacted]"
+```
+
+Bot spoke into the group, two humans replied to it inside two minutes. Both
+directions work with a non-Apple member present. `was_downgraded` is null
+throughout — the thread is natively RCS rather than a fallback.
+
+Treat the reply count as encouraging, not evidence. n=1, the novelty is
+maximal, and the participants know whose bot it is. The Phase 2 measurement —
+**human replies triggered per bot message**, over weeks, in a league the owner
+does not run — is the one that decides the product.
+
 ### Still unproven
 
 1. **Group size.** Tested at 4 participants. Leagues are 11–13, and group MMS
    caps bite at 8–10 across carriers. Kill risk of the same class as device mix.
 2. **Poll latency and rate limits** under a real league's message volume.
+3. **Persistence.** Until `DATABASE_URL` is set, every message is read and
+   discarded — including exactly the banter Phase 3's narrative memory needs.
 
 ### Vendor landscape (surveyed 2026-08)
 
