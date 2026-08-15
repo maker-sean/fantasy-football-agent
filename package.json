@@ -24,7 +24,9 @@
     "simulate": "node scripts/simulate-webhook.js",
     "worker": "node worker.js",
     "snapshot": "node scripts/snapshot.js",
-    "register-league": "node scripts/register-league.js"
+    "register-league": "node scripts/register-league.js",
+    "simulate-sendblue": "node scripts/simulate-sendblue.js",
+    "sendblue-webhooks": "node scripts/sendblue-webhooks.js"
   },
   "dependencies": {
     "dotenv": "^16.4.5",
