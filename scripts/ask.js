@@ -9,6 +9,7 @@
  * Usage:
  *   node scripts/ask.js --context-only
  *   node scripts/ask.js "do you think nathan is going to win the league?"
+ *   node scripts/ask.js "..." --send        # actually post it to the league thread
  */
 
 require('dotenv').config();
@@ -23,7 +24,7 @@ const question = argv.filter(a => !a.startsWith('--') && argv[argv.indexOf(a) - 
 (async () => {
   const leagueName = flag('league');
   const { rows } = await db.query(
-    `select id, name from leagues where ($1::text is null or name = $1)
+    `select id, name, chat_id, provider from leagues where ($1::text is null or name = $1)
      order by (chat_id is not null) desc, created_at limit 1`,
     [leagueName || null]
   );
@@ -66,6 +67,50 @@ const question = argv.filter(a => !a.startsWith('--') && argv[argv.indexOf(a) - 
   console.log('\nCheck every name and number above against the context. Anything not');
   console.log('there is a hallucination, and it is worse in an answer than a recap —');
   console.log('someone asked, and will act on it.');
+
+  if (!has('send')) {
+    console.log('\nNothing was sent. To post this to the league thread, re-run with --send.');
+    return;
+  }
+
+  const league = rows[0];
+  if (!league.chat_id) {
+    console.error('\nThis league has no chat_id — nothing to send to.');
+    console.error('Link one:  node scripts/register-league.js --name "' + league.name + '" --chat <group_id>');
+    process.exitCode = 1;
+    return;
+  }
+
+  // Sending goes to the league's OWN thread, read from the database. Passing a
+  // group id by hand is how a message ends up in the wrong chat.
+  const { SendblueProvider } = require('../src/sendblue');
+  const provider = new SendblueProvider(
+    process.env.SENDBLUE_API_KEY_ID,
+    process.env.SENDBLUE_API_SECRET_KEY,
+    { fromNumber: process.env.SENDBLUE_FROM_NUMBER }
+  );
+
+  console.log(`\nSending to ${league.name} (${league.chat_id})...`);
+  const res = await provider.send(league.chat_id, out.text);
+  console.log(`${res.status} ${res.message_handle || ''}`);
+
+  // Record our own message immediately: the engagement metric is human replies
+  // PER BOT MESSAGE, and the denominator has to exist before the next poll.
+  await db.recordMessage({
+    leagueId: league.id,
+    provider: league.provider,
+    providerMessageId: res.message_handle || null,
+    direction: 'outbound',
+    chatId: league.chat_id,
+    senderPhone: null,
+    isGroup: true,
+    protocol: null,
+    body: out.text,
+    raw: { source: 'ask.js', question },
+    occurredAt: Date.now(),
+  });
+
+  console.log('\nQUEUED is not delivery. Confirm with:  npm run sendblue-status');
 })()
   .catch(err => { console.error('ERROR:', err.message); process.exitCode = 1; })
   .finally(() => db.pool.end().catch(() => {}));
