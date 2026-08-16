@@ -60,6 +60,21 @@ class Responder {
       }
     }
 
+    // Signups run before the reply gate. A stranger texting START is precisely
+    // the unbound sender that gate exists to silence, and silencing them would
+    // break the website's only call to action.
+    if (db && burst.length === 1 && !burst[0].isGroup) {
+      try {
+        const signup = require('./signup');
+        const res = await signup.handle(burst[0], this.provider, { dryRun: this.dryRun });
+        if (res) {
+          return { verdict: { layer: 'signup', reply: false, reason: 'signup', detail: { created: res.created } }, replied: res.reply };
+        }
+      } catch (err) {
+        console.error('[signup] failed:', err.message);
+      }
+    }
+
     const league = db ? await db.leagueByChat(this.providerName, chatId).catch(() => null) : null;
     const state = db
       ? await conversationState(chatId, this.providerName).catch(() => emptyState(chatId, this.providerName))

@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Get started — Commish</title>
+<meta name="description" content="Find your Sleeper league and add Commish to your group chat.">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<nav>
+  <div class="wrap">
+    <a class="brand" href="index.html"><span class="mark">C</span> Commish</a>
+    <ul>
+      <li><a href="index.html#how">What it does</a></li>
+      <li><a href="pricing.html">Pricing</a></li>
+      <li><a href="index.html#messaging">Messaging</a></li>
+    </ul>
+  </div>
+</nav>
+
+<section>
+  <div class="wrap narrow">
+    <p class="eyebrow">Get started</p>
+    <h1 style="font-size:clamp(1.8rem,4.5vw,2.6rem)">Let's find your league.</h1>
+    <p class="lede">Type your Sleeper username. Not your email, not a league ID — the name your
+    league knows you by.</p>
+
+    <!-- Step 1 --------------------------------------------------------------->
+    <div id="step-user" class="step">
+      <label class="field-label" for="username">Sleeper username</label>
+      <div class="row">
+        <input id="username" type="text" autocomplete="username" autocapitalize="none"
+               spellcheck="false" placeholder="e.g. smeadows" aria-describedby="user-msg">
+        <button id="find" class="btn" type="button">Find my leagues</button>
+      </div>
+      <p id="user-msg" class="msg-line" role="status" aria-live="polite"></p>
+    </div>
+
+    <!-- Step 2 --------------------------------------------------------------->
+    <div id="step-league" class="step" hidden>
+      <h2 style="font-size:1.15rem">Which one?</h2>
+      <p class="small muted" id="league-count"></p>
+      <div id="leagues" class="league-list" role="list"></div>
+      <p><button id="back" class="btn ghost" type="button">← Different username</button></p>
+    </div>
+
+    <!-- Step 3 --------------------------------------------------------------->
+    <div id="step-done" class="step" hidden>
+      <div class="picked" id="picked"></div>
+
+      <h2 style="font-size:1.15rem; margin-top:28px">One text and you're in the queue.</h2>
+      <p>Send this from the phone you use in your league's group chat. That's how we know which
+      number belongs to which commissioner.</p>
+
+      <div class="sms-card">
+        <div class="sms-to">
+          <span class="small muted">Text</span>
+          <strong class="todo">[SENDBLUE NUMBER]</strong>
+        </div>
+        <div class="sms-body" id="sms-body"></div>
+        <div class="row">
+          <button id="copy" class="btn ghost" type="button">Copy message</button>
+          <a id="smslink" class="btn" href="#">Open in Messages</a>
+        </div>
+        <p id="copy-msg" class="msg-line" role="status" aria-live="polite"></p>
+      </div>
+
+      <div class="callout">
+        <h3>What happens next — honestly</h3>
+        <p class="small" style="margin-bottom:10px">
+          Commish is in early access and onboarding is not automatic yet. Your text puts your league
+          in the queue and we reply to set it up. We would rather tell you that than take your money
+          and leave you waiting.
+        </p>
+        <p class="small" style="margin-bottom:0">
+          Nothing is charged today. Reply <kbd>STOP</kbd> at any time and you will not hear from us
+          again. See <a href="index.html#messaging">messaging terms</a>.
+        </p>
+      </div>
+
+      <p><button id="restart" class="btn ghost" type="button">← Start over</button></p>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <span>© <span id="yr">2026</span> <span class="todo">[LEGAL BUSINESS NAME]</span></span>
+    <nav><ul>
+      <li><a href="pricing.html">Pricing</a></li>
+      <li><a href="privacy.html">Privacy</a></li>
+      <li><a href="terms.html">Terms</a></li>
+      <li><a href="index.html#messaging">Messaging terms</a></li>
+    </ul></nav>
+  </div>
+</footer>
+
+<script>
+document.getElementById('yr').textContent = new Date().getFullYear();
+
+/*
+ * Sleeper's API allows browser requests (verified: CORS headers present on both
+ * /user and /leagues). So the entire "find your league" step runs client-side
+ * with no backend, no API key, and no rate limit worth worrying about.
+ *
+ * Asking for a username rather than a league ID is the whole point. Everyone
+ * knows their username; almost nobody knows their league ID, and sending a
+ * prospect into app settings to dig one out is where signups die.
+ */
+const SLEEPER = 'https://api.sleeper.app/v1';
+const $ = id => document.getElementById(id);
+const state = { user: null, league: null };
+
+function show(step) {
+  for (const el of document.querySelectorAll('.step')) el.hidden = true;
+  $(step).hidden = false;
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+function say(el, text, kind) {
+  el.textContent = text;
+  el.className = 'msg-line' + (kind ? ' ' + kind : '');
+}
+
+/** Current NFL season. Sleeper rolls over to the new season well before autumn. */
+function seasons() {
+  const now = new Date();
+  const y = now.getFullYear();
+  // Before March, last year's league is still the interesting one.
+  return now.getMonth() < 2 ? [y - 1, y] : [y, y - 1];
+}
+
+async function findLeagues() {
+  const name = $('username').value.trim().replace(/^@/, '');
+  if (!name) { say($('user-msg'), 'Type your Sleeper username first.', 'err'); return; }
+
+  $('find').disabled = true;
+  say($('user-msg'), 'Looking…');
+
+  try {
+    const ures = await fetch(`${SLEEPER}/user/${encodeURIComponent(name)}`);
+    if (!ures.ok) throw new Error('no-user');
+    const user = await ures.json();
+    if (!user || !user.user_id) throw new Error('no-user');
+    state.user = user;
+
+    // Check this season first, then last, so an offseason visitor still sees something.
+    let leagues = [], usedSeason = null;
+    for (const s of seasons()) {
+      const r = await fetch(`${SLEEPER}/user/${user.user_id}/leagues/nfl/${s}`);
+      const got = r.ok ? await r.json() : [];
+      if (got && got.length) { leagues = got; usedSeason = s; break; }
+    }
+
+    if (!leagues.length) {
+      say($('user-msg'), `Found ${user.display_name}, but no NFL leagues on that account. Wrong username?`, 'err');
+      return;
+    }
+
+    renderLeagues(leagues, usedSeason);
+    show('step-league');
+  } catch (err) {
+    say($('user-msg'),
+      err.message === 'no-user'
+        ? `No Sleeper user called "${name}". Check the spelling — it's your username, not your team name.`
+        : 'Could not reach Sleeper just now. Try again in a moment.',
+      'err');
+  } finally {
+    $('find').disabled = false;
+  }
+}
+
+function renderLeagues(leagues, season) {
+  $('league-count').textContent =
+    `${leagues.length} league${leagues.length === 1 ? '' : 's'} on ${state.user.display_name}'s account for ${season}.`;
+  const box = $('leagues');
+  box.innerHTML = '';
+  for (const lg of leagues) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'league-card';
+    b.setAttribute('role', 'listitem');
+    b.innerHTML =
+      `<span class="lg-name"></span>` +
+      `<span class="lg-meta">${lg.total_rosters} teams · ${lg.season} · ${lg.status.replace(/_/g, ' ')}</span>`;
+    // textContent, not innerHTML — league names are user-supplied and some of
+    // them are, let us say, creatively punctuated.
+    b.querySelector('.lg-name').textContent = lg.name;
+    b.addEventListener('click', () => choose(lg));
+    box.appendChild(b);
+  }
+}
+
+function choose(lg) {
+  state.league = lg;
+  $('picked').innerHTML = `<span class="lg-meta">Selected league</span><strong></strong>` +
+    `<span class="lg-meta">${lg.total_rosters} teams · ${lg.season} season · ID ${lg.league_id}</span>`;
+  $('picked').querySelector('strong').textContent = lg.name;
+
+  const body = `START ${lg.league_id}`;
+  $('sms-body').textContent = body;
+  // Both separators in the wild: iOS wants &, Android wants ?. Using ?body=
+  // with an empty address works on both well enough to be worth it.
+  $('smslink').href = `sms:&body=${encodeURIComponent(body)}`;
+
+  show('step-done');
+}
+
+$('find').addEventListener('click', findLeagues);
+$('username').addEventListener('keydown', e => { if (e.key === 'Enter') findLeagues(); });
+$('back').addEventListener('click', () => show('step-user'));
+$('restart').addEventListener('click', () => { $('username').value = ''; say($('user-msg'), ''); show('step-user'); });
+
+$('copy').addEventListener('click', async () => {
+  try {
+    await navigator.clipboard.writeText($('sms-body').textContent);
+    say($('copy-msg'), 'Copied. Paste it into a text to the number above.', 'ok');
+  } catch {
+    say($('copy-msg'), 'Copy failed — select the message above and copy it manually.', 'err');
+  }
+});
+</script>
+</body>
+</html>
