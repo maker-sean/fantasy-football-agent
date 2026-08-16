@@ -11,6 +11,7 @@ const db = require('./db');
 const drafts = require('./drafts');
 const sleeper = require('./sleeper');
 const fanout = require('./fanout');
+const trades = require('./trades');
 const { weekFacts } = require('./stats');
 const { generateRecap, factsBlock } = require('./recap');
 const { verifyRecap } = require('./verify');
@@ -97,11 +98,32 @@ async function runWeeklyRecaps(provider, opts = {}) {
           return entry;
         }
 
+        // Trade verdicts, appended AFTER verification on purpose. These are
+        // deterministic prose built from scored points, not model output, and
+        // their numbers are absent from the facts block the verifier checks —
+        // running them through it would reject arithmetic for being unsourced.
+        let body = out.text;
+        const due = await trades.dueRevisits(league.id, snap.week).catch(() => []);
+        if (due.length) {
+          const names = trades.teamNames(snap.payload);
+          const byWeek = await weekPayloads(league.id, snap.season);
+          const segments = [];
+          for (const t of due) {
+            const verdict = trades.scoreTrade(t, byWeek, players);
+            const text = trades.composeVerdict(t, verdict, names);
+            if (!text) continue;
+            segments.push(text);
+            await trades.markRevisited(t.id, verdict);
+          }
+          if (segments.length) body = `${body}\n\n---\n\n${segments.join('\n\n')}`;
+          entry.tradeVerdicts = segments.length;
+        }
+
         const draft = await drafts.createDraft({
           leagueId: league.id,
           season: snap.season,
           week: snap.week,
-          body: out.text,
+          body,
           facts: {
             highScore: facts.highScore, lowScore: facts.lowScore,
             blowout: facts.blowout, nailbiter: facts.nailbiter,
@@ -115,13 +137,13 @@ async function runWeeklyRecaps(provider, opts = {}) {
         entry.draftId = draft.id;
 
         if (drafts.autoPostEnabled(league) && league.chat_id && !dryRun) {
-          const res = await provider.send(league.chat_id, out.text);
+          const res = await provider.send(league.chat_id, body);
           await drafts.markSent(draft.id, { by: 'autoPost', messageId: res?.message_handle || null });
           await db.recordMessage({
             leagueId: league.id, provider: league.provider,
             providerMessageId: res?.message_handle || null,
             direction: 'outbound', chatId: league.chat_id, senderPhone: null,
-            isGroup: true, protocol: null, body: out.text,
+            isGroup: true, protocol: null, body,
             raw: { source: 'recap_auto', draft_id: draft.id }, occurredAt: Date.now(),
           });
           entry.result = 'auto-posted';
@@ -138,7 +160,7 @@ async function runWeeklyRecaps(provider, opts = {}) {
         const note = [
           `${league.name} — week ${snap.week} recap, ready for you.`,
           '',
-          out.text,
+          body,
           '',
           verification.superlatives.length
             ? `Check these ranking words against the results: ${verification.superlatives.join(', ')}.`
@@ -186,3 +208,15 @@ async function runWeeklyRecaps(provider, opts = {}) {
 }
 
 module.exports = { runWeeklyRecaps, targetWeek };
+
+/** week -> snapshot payload for one league/season, for trade scoring. */
+async function weekPayloads(leagueId, season) {
+  const { rows } = await db.query(
+    `select week, payload from snapshots
+     where league_id = $1 and season = $2 order by week, captured_at desc`,
+    [leagueId, String(season)]
+  );
+  const m = new Map();
+  for (const r of rows) if (!m.has(r.week)) m.set(r.week, r.payload);
+  return m;
+}

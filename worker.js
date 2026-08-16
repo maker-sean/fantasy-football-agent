@@ -26,6 +26,7 @@ const { SendblueProvider } = require('./src/sendblue');
 const { Responder } = require('./src/responder');
 const { runWeeklyRecaps } = require('./src/weekly');
 const gameday = require('./src/gameday');
+const trades = require('./src/trades');
 
 const TZ = process.env.CRON_TZ || 'America/New_York';
 const POLL_MS = Number(process.env.POLL_INTERVAL_SECONDS || 10) * 1000;
@@ -55,6 +56,12 @@ const sendblue = (process.env.SENDBLUE_API_KEY_ID && process.env.SENDBLUE_API_SE
 const JOBS = [
   ['gameday',        '*/15 * * * *', () => gameday.tick(sendblue, { dryRun: DRY_RUN })],
   ['schedule',       '0 5 * * *',    () => gameday.refreshSchedule()],
+  // Trades. The tick is frequent but the Sleeper call is not: only leagues
+  // whose configured window (default 8am/6pm local) has opened are polled, and
+  // that check is a database read. Per-league timing without per-league crons —
+  // a hundred registrations that need a restart to change, and that silently
+  // skip a day whenever the worker was down at the exact minute.
+  ['trades',         '*/15 * * * *', () => trades.poll(sendblue, { dryRun: DRY_RUN })],
   ['lock_thu',       '15 20 * * 4', () => snapshots.captureAll('lock_thu')],
   ['lock_sun_early', '55 12 * * 0', () => snapshots.captureAll('lock_sun_early')],
   ['lock_sun_late',  '55 15 * * 0', () => snapshots.captureAll('lock_sun_late')],
