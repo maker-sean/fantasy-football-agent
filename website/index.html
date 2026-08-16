@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Commish — the league member who actually pays attention</title>
-<meta name="description" content="An agent that lives in your fantasy league's group chat. It reads every box score, remembers what you benched, and roasts you with numbers it pulled from your own league.">
+<meta name="description" content="An agent that lives in your fantasy league's group chat. It catches the lineup mistake before kickoff, writes the Tuesday recap, and settles the trade nobody could agree about — and it's funny about all of it.">
 <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -23,22 +23,40 @@
 <section>
   <div class="wrap">
     <p class="eyebrow">For Sleeper leagues</p>
-    <h1>Every insult, sourced.</h1>
+    <h1>Your league's group chat dies in October. This keeps it alive.</h1>
     <p class="lede">
-      Commish is the thirteenth member of your league's group chat. It reads every box score,
-      remembers exactly what you left on your bench, and brings it up — with numbers you can't
-      argue with, because it pulled them out of your league.
+      Commish is another member of the chat — the one who actually pays attention. It catches the
+      lineup mistake before kickoff, writes the Tuesday recap, and settles the trade nobody could
+      agree about. It is also funny about all of it, which is the part that keeps people reading.
     </p>
     <p style="margin-top:30px">
       <a class="btn" href="pricing.html">Add it to your chat — $19 a season</a>
       <a class="btn ghost" href="#how" style="margin-left:8px">What it does</a>
     </p>
 
-    <!-- Real output from the running agent, spice level 2. Team names swapped;
-         every number, player and turn of phrase is exactly what it wrote. -->
+    <!-- Real output from the running agent. Team names swapped; every number,
+         player and turn of phrase is exactly what it produced.
+
+         Order matters: the save comes first, the roast second. The product is
+         both, and a page showing only the dunking sells half of it. -->
     <div class="thread">
       <div class="thread-bar"><span>League group chat</span><span class="live">● 12 managers</span></div>
       <div class="msgs">
+
+        <div class="msg bot">
+          <div class="who">Commish · Sunday 8:30 AM</div>
+          <div class="bubble">Heads up. Ridgeline FC: Alec Pierce is PUP (ankle) — ATL vs IND in 1h. That's a zero unless you swap him.</div>
+        </div>
+
+        <div class="msg">
+          <div class="who">Dave · Sunday 8:31 AM</div>
+          <div class="bubble">wait that game is at 9:30??</div>
+        </div>
+
+        <div class="msg bot">
+          <div class="who">Commish · Sunday 8:31 AM</div>
+          <div class="bubble">Berlin. Kicks off four hours before the rest of the slate. Your lineup locks with it.</div>
+        </div>
 
         <div class="msg bot">
           <div class="who">Commish · Tuesday 9:02 AM</div>
@@ -47,11 +65,6 @@
 Tank Commanders rostered Achane, Waddle and Dicker and got zero out of all three. Explain yourselves.
 
 Who's got the worse offseason coming?</div>
-        </div>
-
-        <div class="msg">
-          <div class="who">Dave · Tuesday 9:04 AM</div>
-          <div class="bubble">every single week with this thing</div>
         </div>
 
         <div class="msg">
@@ -105,13 +118,14 @@ Who's got the worse offseason coming?</div>
     </div>
 
     <div class="callout" style="margin-top:34px">
-      <h3>It's mean. It's also right.</h3>
+      <h3>It checks its work.</h3>
       <p class="small" style="margin-bottom:0">
-        This is the part that makes the jokes land. Every number in a recap is checked against your
-        league's own data before the message is allowed to send, and a recap that can't back up a
-        claim gets held instead of posted. Nothing is more embarrassing than a bot that talks trash
-        and gets the score wrong. It's also why trades aren't graded on day one — an instant grade
-        means predicting the rest of the season, and it would rather wait three weeks and be right.
+        Every number in a recap is verified against your league's own data before the message is
+        allowed to send, and one that can't back up a claim gets held instead of posted. This
+        matters twice over: an alert you can't trust is worse than no alert, and a bot that talks
+        trash and gets the score wrong is just embarrassing. It's the same reason trades aren't
+        graded on day one — an instant grade means predicting the rest of the season, and it would
+        rather wait three weeks and be right.
       </p>
     </div>
   </div>
