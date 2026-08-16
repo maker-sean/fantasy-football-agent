@@ -54,7 +54,7 @@
       <p>Send it from the phone you use in your league's group chat — that's how we know which
       number belongs to which commissioner.</p>
 
-      <div class="sms-card">
+      <div class="sms-card pending" id="sms-card">
         <div class="sms-lead">
           <div>
             <span class="small muted">Text</span>
@@ -76,18 +76,19 @@
           <button id="copy" class="btn ghost" type="button">Copy message</button>
         </div>
         <p id="copy-msg" class="msg-line" role="status" aria-live="polite"></p>
-      </div>
 
-      <!-- Pending until the text actually lands. Nothing here is a button the
-           visitor can press to declare themselves done — the only thing that
-           moves it is a real message arriving. -->
-      <div class="waiting" id="waiting">
-        <span class="pulse" id="pulse" aria-hidden="true"></span>
-        <div>
-          <strong id="wait-title">Waiting for your text…</strong>
-          <p class="small muted" style="margin:4px 0 0" id="wait-note">
-            This updates by itself the moment it arrives. You can close this once it does.
-          </p>
+        <!-- Inside the card on purpose. As a separate block underneath it read
+             as unrelated and went unnoticed — the status belongs to the thing
+             it is the status of. Nothing here is a button the visitor can press
+             to declare themselves done; only a real message moves it. -->
+        <div class="sms-status" id="waiting">
+          <span class="pulse" id="pulse" aria-hidden="true"></span>
+          <div>
+            <strong id="wait-title">Waiting for your text…</strong>
+            <p class="small muted" style="margin:3px 0 0" id="wait-note">
+              This updates by itself the moment it arrives.
+            </p>
+          </div>
         </div>
       </div>
 
@@ -279,8 +280,9 @@ function watchForText(code) {
       const d = await r.json();
       if (!d.used) return;
       clearInterval(pollTimer); pollTimer = null;
-      const w = $('waiting');
-      w.classList.add('done');
+      $('sms-card').classList.remove('pending');
+      $('sms-card').classList.add('done');
+      $('waiting').classList.add('done');
       $('pulse').textContent = '✓';
       $('pulse').classList.add('check');
       $('wait-title').textContent = "Got it — you're in the queue.";

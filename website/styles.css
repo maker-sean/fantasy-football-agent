@@ -18,6 +18,10 @@
   --line: #2d2d2d;
   --turf: #21a366;
   --turf-dim: #17724a;
+  /* Waiting-on-you amber. Distinct from the error red so an unfinished step
+     never reads as a failure. */
+  --amber: #d9a13b;
+  --amber-dim: #4a3a12;
   --text: #f4f5f6;
   --muted: #9b9b9b;
   --radius: 10px;
@@ -274,10 +278,29 @@ input[type="range"] { accent-color: var(--turf); }
 /* On a phone the QR is useless — you cannot scan the screen you are holding. */
 @media (max-width: 560px) { .qr { display: none; } }
 
-/* The pending -> confirmed state on the signup screen. */
+/* Pending -> confirmed.
+   Amber while it is waiting on the visitor, green once the text lands. Starting
+   green gives away the ending and makes the change invisible; amber says "your
+   move" without implying anything is broken. */
+.sms-card { border-left: 3px solid var(--line); transition: border-color .35s ease; }
+.sms-card.pending { border-left-color: var(--amber); }
+.sms-card.done { border-left-color: var(--turf); }
+
+.sms-status {
+  display: flex; gap: 13px; align-items: flex-start;
+  margin-top: 18px; padding-top: 16px;
+  border-top: 1px solid var(--line);
+}
+.sms-status .pulse { background: var(--amber); margin-top: 5px; }
+.sms-status.done .pulse { background: var(--turf); }
+.sms-status.done strong { color: var(--turf); }
+
+.waiting .pulse { background: var(--amber); }
 .waiting.done { border-left-color: var(--turf); }
+.waiting.done .pulse { background: var(--turf); }
+
 .pulse.check {
-  background: var(--turf); color: #06130c;
+  color: #06130c;
   width: 22px; height: 22px; margin-top: 1px;
   display: grid; place-items: center;
   font-size: .78rem; font-weight: 900; line-height: 1;
