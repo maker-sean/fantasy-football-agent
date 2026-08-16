@@ -75,14 +75,20 @@ services:
       - key: CRON_TZ
         value: America/New_York
 
-      # Decide and log every burst, send nothing. Flip to false only after
-      # reading a few days of the decisions table.
+      # Operational toggles: sync:false so the DASHBOARD owns them.
+      #
+      # These were literal values, and Render re-applies blueprint values on
+      # every deploy — so turning the bot on in the dashboard worked until the
+      # next push silently reset it to dry-run. The bot went quiet and nothing
+      # reported it, because dry-run is a deliberate silence and looks exactly
+      # like a working system with nothing to say.
+      #
+      # Start them at true/false in the dashboard; flip when ready.
       - key: REPLY_DRY_RUN
-        value: "true"
+        sync: false
 
-      # Belt and braces: the responder is also gated on this.
       - key: ECHO
-        value: "false"
+        sync: false
 
       - key: POLL_INTERVAL_SECONDS
         value: "10"

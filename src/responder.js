@@ -68,7 +68,22 @@ class Responder {
         const signup = require('./signup');
         const res = await signup.handle(burst[0], this.provider, { dryRun: this.dryRun });
         if (res) {
-          return { verdict: { layer: 'signup', reply: false, reason: 'signup', detail: { created: res.created } }, replied: res.reply };
+          // Log it like any other decision. This branch used to return early,
+          // so a signup that was processed but not sent left no trace anywhere
+          // — the only evidence was a used code in another table.
+          const verdict = {
+            layer: 'signup',
+            reply: Boolean(res.reply),
+            reason: res.conversational ? 'signup_conversation' : 'signup',
+            detail: { created: res.created ?? null, dryRun: this.dryRun },
+            messageCount: burst.length,
+            triggerMessageId: burst[0].messageId,
+          };
+          if (this.dryRun) {
+            console.warn('[signup] DRY RUN — reply composed but NOT sent. REPLY_DRY_RUN/ECHO are on.');
+          }
+          await this.log(chatId, null, verdict, res.reply);
+          return { verdict, replied: res.reply };
         }
       } catch (err) {
         console.error('[signup] failed:', err.message);
