@@ -31,7 +31,9 @@ const DEFAULTS = {
   maxPerDay: 20,
 
   // Consecutive bot messages with no human in between. Three is already a bot
-  // talking to itself in front of an audience.
+  // talking to itself in front of an audience. THIS is the runaway guard —
+  // it binds even on a direct mention, because a bot answering itself twice
+  // over is the failure that gets a number muted.
   maxBotStreak: 2,
 
   // Ignore anything older than this when a burst is evaluated — protects
@@ -60,7 +62,7 @@ function mentionsBot(text, botNames) {
  * Ordered cheapest and most dangerous first.
  */
 function layerSuppress(ctx) {
-  const { burst, state, cfg, league } = ctx;
+  const { burst, state, cfg, league, addressed } = ctx;
 
   // A bot replying to its own message is a runaway loop in a real group chat.
   // The poller already filters outbound; this is the second lock.
@@ -87,7 +89,14 @@ function layerSuppress(ctx) {
     };
   }
 
-  if (state.msSinceLastBot != null && state.msSinceLastBot < cfg.minGapMs) {
+  // PACING, not safety — and it does not apply to someone talking to us.
+  //
+  // Observed in a live group: the bot answered, and 40 seconds later a second
+  // person asked "Jarvis who won last year?" and got silence. Being ignored
+  // when you ask a direct question is far worse than a bot that speaks twice in
+  // a minute, and this rule adds nothing the streak and hourly caps above do
+  // not already cover. It exists to pace UNPROMPTED interjection (Layer 2).
+  if (!addressed && state.msSinceLastBot != null && state.msSinceLastBot < cfg.minGapMs) {
     return {
       layer: 'suppress', reply: false, reason: 'min_gap',
       detail: { msSinceLastBot: state.msSinceLastBot, minGapMs: cfg.minGapMs },
@@ -173,7 +182,11 @@ const LAYERS = [layerSuppress, layerMention, layerHeuristic, layerGate];
 function decide({ burst, state, league = {}, overrides = {} }) {
   const started = Date.now();
   const cfg = config(league, overrides);
-  const ctx = { burst, state, league, cfg };
+  // Whether we were spoken to is computed up front, because the hard limits and
+  // the pacing limit treat it differently.
+  const addressed = burst.some(m => mentionsBot(m.text, cfg.botNames)) ||
+    burst.some(m => m.raw?.reply_to_bot || m.replyToBot);
+  const ctx = { burst, state, league, cfg, addressed };
 
   for (const layer of LAYERS) {
     const verdict = layer(ctx);

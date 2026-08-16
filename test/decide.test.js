@@ -88,9 +88,27 @@ it('respects a paused league', () => {
   const v = run([msg('@bot hi')], quiet(), { config: { paused: true } });
   assert.strictEqual(v.reason, 'league_paused');
 });
-it('enforces the minimum gap between bot messages', () => {
-  const v = run([msg('@bot hi')], quiet({ msSinceLastBot: 5000, lastBotAt: now - 5000 }));
-  assert.strictEqual(v.reason, 'min_gap');
+it('the pacing gap does NOT silence a direct question', () => {
+  // Observed live: a second person asked the bot something 40s after it spoke
+  // and got ignored. Being unanswered is worse than being slightly chatty.
+  const v = run([msg('jarvis who won last year?')], quiet({ msSinceLastBot: 5000, lastBotAt: now - 5000 }),
+    { config: { botNames: ['jarvis'] } });
+  assert.strictEqual(v.reply, true, 'a direct address should still get through');
+});
+it('the pacing gap still applies when nobody addressed us', () => {
+  // Dead code until Layer 2 exists, which is the point — pacing is for
+  // unprompted interjection, not for answering a question.
+  const { decide: d } = require('../src/decide');
+  const v = d({ burst: [msg('just chatting')], state: quiet({ msSinceLastBot: 5000, lastBotAt: now - 5000 }), league: {} });
+  assert.strictEqual(v.reply, false);
+});
+it('hard caps still bind even on a direct mention', () => {
+  const v = run([msg('@bot hi')], quiet({ sentInLastHour: DEFAULTS.maxPerHour }));
+  assert.strictEqual(v.reason, 'hourly_cap');
+});
+it('the streak cap still binds on a direct mention', () => {
+  const v = run([msg('@bot hi')], quiet({ botStreak: 2, humansSinceBot: 0, msSinceLastBot: 999999 }));
+  assert.strictEqual(v.reason, 'bot_streak');
 });
 it('stops a bot talking to itself', () => {
   const v = run([msg('@bot hi')], quiet({ botStreak: 2, humansSinceBot: 0, msSinceLastBot: 999999 }));
