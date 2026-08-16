@@ -134,6 +134,37 @@ does not run — is the one that decides the product.
 | Identity = normalized E.164 | [src/db.js](src/db.js) `members` | NOT a provider contact id. Blooio minted two `contact_id`s for one human in one group; a roster keyed on those would double-count every league. |
 | Snapshots are insert-only | [0001_init.sql](supabase/migrations/0001_init.sql) | A kickoff lineup cannot be reconstructed later. A re-run must never overwrite the original capture. |
 
+## Deploy (Render)
+
+One **background worker**, not a web service. Inbound is polling, so there is no
+port to bind — and a free Render *web* service sleeps on inactivity, which would
+stop the poller and every kickoff capture with it.
+
+1. Render Dashboard → **New → Blueprint** → point at this repo. It reads
+   [`render.yaml`](render.yaml).
+2. Render prompts for the five secrets (`sync: false` in the blueprint, so they
+   are never in git):
+   `DATABASE_URL`, `SENDBLUE_API_KEY_ID`, `SENDBLUE_API_SECRET_KEY`,
+   `SENDBLUE_FROM_NUMBER`, `ANTHROPIC_API_KEY`.
+3. Apply the migrations against Supabase once, from your laptop:
+   ```bash
+   for f in supabase/migrations/*.sql; do psql "$DATABASE_URL" -f "$f"; done
+   ```
+4. Watch the logs. A healthy boot prints the database time, each registered
+   league, the current NFL state, every scheduled cron, and the poll cursor.
+
+### Things that bite
+
+- **`CRON_TZ=America/New_York`** — NFL slates are Eastern. The wrong timezone
+  fires kickoff captures at the wrong hour and loses lineups with no error.
+- **One instance.** Two pollers double-process every message and the bot answers
+  twice. Inserts are idempotent so nothing corrupts, but the league sees it.
+- **The poll cursor lives in Postgres, not on disk.** Render's filesystem is
+  ephemeral; a file cursor would be wiped on every deploy, and the poller would
+  re-bootstrap and silently skip everything that arrived while it restarted.
+- **Start in `REPLY_DRY_RUN=true`.** It decides and logs against live traffic
+  without speaking. Read a few days of the `decisions` table before flipping it.
+
 ## Setup
 
 ```bash

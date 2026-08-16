@@ -23,23 +23,64 @@ const path = require('path');
 
 const CURSOR_FILE = path.join(__dirname, '..', 'logs', 'poll-cursor.json');
 
-/** Cursor = the set of message_handles already seen, plus the newest timestamp. */
-function loadCursor() {
+/**
+ * Cursor = the message handles already handled, plus the newest timestamp.
+ *
+ * Sourced from Postgres when available, NOT from the local file. Hosted
+ * runtimes have ephemeral disks: a file cursor is wiped on every deploy, the
+ * poller then sees an empty cursor, bootstraps, and marks everything since the
+ * last run as "already seen" — silently skipping every message that arrived
+ * while it was restarting. Exactly the data-loss shape we already fixed once.
+ *
+ * The messages table is the real record of what was handled, so deriving from
+ * it cannot drift. The file remains only for running without a database.
+ */
+async function loadCursor() {
+  if (process.env.DATABASE_URL) {
+    try {
+      const db = require('./db');
+      const { rows } = await db.query(
+        `select provider_message_id, occurred_at
+         from messages
+         where provider = 'sendblue' and provider_message_id is not null
+         order by occurred_at desc limit 500`
+      );
+      if (rows.length) {
+        return {
+          backend: 'postgres',
+          since: new Date(rows[0].occurred_at).toISOString(),
+          seen: new Set(rows.map(r => r.provider_message_id)),
+        };
+      }
+      return { backend: 'postgres', since: null, seen: new Set() };
+    } catch (err) {
+      console.error('[poll] could not read cursor from postgres, falling back to file:', err.message);
+    }
+  }
+
   try {
     const raw = JSON.parse(fs.readFileSync(CURSOR_FILE, 'utf8'));
-    return { since: raw.since || null, seen: new Set(raw.seen || []) };
+    return { backend: 'file', since: raw.since || null, seen: new Set(raw.seen || []) };
   } catch {
-    return { since: null, seen: new Set() };
+    return { backend: 'file', since: null, seen: new Set() };
   }
 }
 
 function saveCursor(cursor) {
-  fs.mkdirSync(path.dirname(CURSOR_FILE), { recursive: true });
-  fs.writeFileSync(CURSOR_FILE, JSON.stringify({
-    since: cursor.since,
-    // Bound the set; handles far older than the cursor can't recur.
-    seen: [...cursor.seen].slice(-500),
-  }, null, 2));
+  // With Postgres backing the cursor, the message row IS the durable record —
+  // writing a file too would just create a second source of truth to disagree
+  // with, and on a hosted runtime that file does not survive anyway.
+  if (cursor.backend === 'postgres') return;
+  try {
+    fs.mkdirSync(path.dirname(CURSOR_FILE), { recursive: true });
+    fs.writeFileSync(CURSOR_FILE, JSON.stringify({
+      since: cursor.since,
+      // Bound the set; handles far older than the cursor can't recur.
+      seen: [...cursor.seen].slice(-500),
+    }, null, 2));
+  } catch (err) {
+    console.error('[poll] could not persist cursor:', err.message);
+  }
 }
 
 /**
@@ -156,13 +197,17 @@ function commit(cursor, event) {
  * must not silently stop inbound for the rest of the day.
  */
 function startPolling(provider, onMessage, { intervalMs = 10_000, bootstrap = true } = {}) {
-  const cursor = loadCursor();
+  let cursor = null;
   let stopped = false;
   let consecutiveErrors = 0;
 
   const tick = async () => {
     if (stopped) return;
     try {
+      if (!cursor) {
+        cursor = await loadCursor();
+        console.log(`[poll] cursor from ${cursor.backend}: ${cursor.seen.size} handled, since ${cursor.since || 'never'}`);
+      }
       const isFirst = bootstrap && !cursor.since && cursor.seen.size === 0;
       const events = await pollOnce(provider, cursor, { bootstrap: isFirst });
       consecutiveErrors = 0;

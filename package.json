@@ -1,11 +1,11 @@
 {
-  "name": "fantasy-agent",
+  "name": "commish-agent",
   "version": "0.1.0",
   "private": true,
-  "description": "AI agent that sustains fantasy football league engagement in the league group chat.",
+  "description": "An AI teammate that lives in a fantasy football league group chat.",
   "main": "index.js",
   "engines": {
-    "node": ">=18"
+    "node": ">=20"
   },
   "scripts": {
     "start": "node index.js",

@@ -1,0 +1,62 @@
+# Render Blueprint — https://render.com/docs/blueprint-spec
+#
+# One background worker. Not a web service: inbound comes from polling, so there
+# is no port to bind and no health check to serve. A free Render *web* service
+# would also sleep on inactivity, which would stop the poller and every kickoff
+# capture with it — the exact failure this deployment exists to prevent.
+#
+# Apply with:  Render Dashboard → New → Blueprint → point at this repo
+# Secrets are NOT in this file. `sync: false` means Render prompts for the value
+# once and stores it; it never lands in git.
+
+services:
+  - type: worker
+    name: commish-agent-worker
+    runtime: node
+    plan: starter
+    region: ohio
+    branch: main
+    autoDeploy: true
+
+    buildCommand: npm ci --omit=dev
+    startCommand: npm run worker
+
+    # ONE instance, always. Two pollers double-process every message and the bot
+    # answers twice — the message insert is idempotent so nothing corrupts, but
+    # the league sees it.
+    numInstances: 1
+
+    envVars:
+      # --- secrets: set once in the Render dashboard ---
+      - key: DATABASE_URL
+        sync: false
+      - key: SENDBLUE_API_KEY_ID
+        sync: false
+      - key: SENDBLUE_API_SECRET_KEY
+        sync: false
+      - key: SENDBLUE_FROM_NUMBER
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+
+      # --- behavior ---
+      # NFL slates are Eastern. Wrong timezone means kickoff captures fire at the
+      # wrong hour and lineups are lost with no error.
+      - key: CRON_TZ
+        value: America/New_York
+
+      # Decide and log every burst, send nothing. Flip to false only after
+      # reading a few days of the decisions table.
+      - key: REPLY_DRY_RUN
+        value: "true"
+
+      # Belt and braces: the responder is also gated on this.
+      - key: ECHO
+        value: "false"
+
+      - key: POLL_INTERVAL_SECONDS
+        value: "10"
+      - key: RECAP_WORDS
+        value: "100"
+      - key: NODE_ENV
+        value: production
