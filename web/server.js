@@ -65,6 +65,38 @@ app.get('/api/config', (_req, res) => {
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY;
 
+/**
+ * Refuse to start on a privileged Supabase key.
+ *
+ * The anon/publishable key and the service_role/secret key sit next to each
+ * other in the dashboard and look almost identical. This one is handed to every
+ * browser by /api/config, so pasting the wrong one is not a small mistake — it
+ * is full read/write on the database for anyone who views source, with row
+ * level security bypassed. Crashing on boot is the kindest possible failure.
+ */
+function assertBrowserSafeKey(key) {
+  if (!key) return;
+  if (/^sb_secret_/.test(key)) throw new Error('SUPABASE_ANON_KEY is a SECRET key (sb_secret_…)');
+  const parts = key.split('.');
+  if (parts.length === 3) {
+    try {
+      const role = JSON.parse(Buffer.from(parts[1], 'base64url').toString()).role;
+      if (role && role !== 'anon') throw new Error(`SUPABASE_ANON_KEY has role "${role}"`);
+    } catch (err) {
+      if (/role/.test(err.message)) throw err;   // rethrow our own verdict, ignore parse noise
+    }
+  }
+}
+
+try {
+  assertBrowserSafeKey(SUPABASE_ANON_KEY);
+} catch (err) {
+  console.error('[web] FATAL: ' + err.message);
+  console.error('[web] This key is served to browsers. Use the key labelled "anon" / "public"');
+  console.error('[web] (or sb_publishable_…), never service_role / sb_secret_.');
+  process.exit(1);
+}
+
 const tokenCache = new Map();          // token -> { user, expires }
 const CACHE_MS = 60 * 1000;
 
