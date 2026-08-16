@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /** START parsing: the website's only call to action lands here. */
 const assert = require('assert');
-const { parse, reply } = require('../src/signup');
+const { parse, reply, KEYWORD, CODE_ALPHABET, newCode } = require('../src/signup');
 
 let pass = 0;
 const it = (n, f) => { try { f(); console.log('  ok   ' + n); pass++; }
@@ -9,12 +9,38 @@ const it = (n, f) => { try { f(); console.log('  ok   ' + n); pass++; }
 
 console.log('parsing what people actually type');
 it('the exact text the site hands them', () =>
-  assert.deepStrictEqual(parse('START 1400000000000000001'), { leagueId: '1400000000000000001' }));
-it('lowercase', () => assert.deepStrictEqual(parse('start 1400000000000000001'), { leagueId: '1400000000000000001' }));
-it('stray whitespace', () => assert.deepStrictEqual(parse('  START   1400000000000000001  '), { leagueId: '1400000000000000001' }));
-it('a colon, because autocorrect', () => assert.deepStrictEqual(parse('START: 1400000000000000001'), { leagueId: '1400000000000000001' }));
-it('START alone still counts — we ask for the league after', () =>
-  assert.deepStrictEqual(parse('START'), { leagueId: null }));
+  assert.deepStrictEqual(parse('COMMISH 4F2K'), { leagueId: null, code: '4F2K' }));
+it('lowercase', () => assert.deepStrictEqual(parse('commish 4f2k'), { leagueId: null, code: '4F2K' }));
+it('stray whitespace', () => assert.deepStrictEqual(parse('  COMMISH   4F2K  '), { leagueId: null, code: '4F2K' }));
+it('a colon, because autocorrect', () =>
+  assert.deepStrictEqual(parse('COMMISH: 4f2k'), { leagueId: null, code: '4F2K' }));
+it('the keyword alone still counts — we ask for the code after', () =>
+  assert.deepStrictEqual(parse('COMMISH'), { leagueId: null, code: null }));
+
+// One keyword is displayed; several are accepted, because people retype from
+// memory and being strict here costs a signup.
+for (const alt of ['DRAFT 4F2K', 'join 4f2k', 'signup 4F2K'])
+  it(`accepts "${alt}"`, () => assert.strictEqual(parse(alt).code, '4F2K'));
+
+// The first version of this flow told people to text a 19-digit league id.
+// Anything already sent or screenshotted has to keep working.
+it('still accepts the old long-form league id', () =>
+  assert.deepStrictEqual(parse('START 1400000000000000001'),
+    { leagueId: '1400000000000000001', code: null }));
+
+console.log('\ncodes are readable when dictated or scanned');
+it('the alphabet excludes look-alike characters', () => {
+  for (const ch of ['O', '0', 'I', '1', 'L']) {
+    assert.ok(!CODE_ALPHABET.includes(ch), `${ch} is ambiguous and must not appear in a code`);
+  }
+});
+it('generated codes are four characters from that alphabet', () => {
+  for (let i = 0; i < 200; i++) {
+    const c = newCode();
+    assert.strictEqual(c.length, 4);
+    assert.ok([...c].every(ch => CODE_ALPHABET.includes(ch)), c);
+  }
+});
 
 console.log('\nwhat must NOT be treated as a signup');
 it('a sentence containing the word start', () => assert.strictEqual(parse('when does the season start'), null));
@@ -39,8 +65,10 @@ it('texting twice does not read as a second signup', () => {
   const t = reply({ created: false, leagueId: '123', league: { name: 'Halcyon Kings', total_rosters: 12 } });
   assert.ok(/already/i.test(t));
 });
-it('START with no id asks for one', () => {
-  assert.ok(/league ID/i.test(reply({ created: true, leagueId: null, league: null })));
+it('the keyword with no code asks for one', () => {
+  const t = reply({ created: true, leagueId: null, league: null });
+  assert.ok(/code/i.test(t));
+  assert.ok(t.includes(KEYWORD), 'tells them the exact word to send');
 });
 
 console.log(`\n${pass} passing`);

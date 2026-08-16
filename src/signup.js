@@ -16,16 +16,74 @@ const db = require('./db');
 const sleeper = require('./sleeper');
 
 /**
- * Sleeper league ids are long numeric strings. Accepting the word alone is
- * deliberate too: people will text START on its own, and replying "you're in
- * the queue, which league?" beats silence.
+ * The keyword shown on the site. One is displayed, several are accepted —
+ * people retype from memory and will send whichever word they remember. Being
+ * strict here costs a signup and teaches the sender nothing.
+ *
+ * STOP and HELP are carrier-reserved and deliberately absent.
  */
-const START = /^\s*start\b[\s:]*([0-9]{6,25})?\s*$/i;
+const KEYWORD = process.env.SIGNUP_KEYWORD || 'COMMISH';
+const KEYWORDS = ['commish', 'draft', 'join', 'signup', 'start'];
+
+/**
+ * Matches "COMMISH 4F2K", "commish: 4f2k", "DRAFT 1400000000000000001", or the
+ * keyword on its own.
+ *
+ * Both argument forms are accepted deliberately. A short code is what the site
+ * issues now; a raw Sleeper league id is what the first version of this flow
+ * told people to text, and anything already sent or screenshotted keeps working.
+ */
+const SIGNUP = new RegExp(
+  `^\\s*(?:${KEYWORDS.join('|')})\\b[\\s:,-]*([A-Za-z0-9]{4,25})?\\s*$`, 'i'
+);
+
+/** Unambiguous alphabet: no O/0, no I/1/L. It has to survive being read aloud. */
+const CODE_ALPHABET = '23456789ABCDEFGHJKMNPQRSTVWXYZ';
+const CODE_LEN = 4;
+const looksLikeLeagueId = v => /^[0-9]{6,25}$/.test(v);
 
 function parse(text) {
-  const m = START.exec(String(text || ''));
+  const m = SIGNUP.exec(String(text || ''));
   if (!m) return null;
-  return { leagueId: m[1] || null };
+  const arg = m[1] || null;
+  if (!arg) return { leagueId: null, code: null };
+  return looksLikeLeagueId(arg)
+    ? { leagueId: arg, code: null }
+    : { leagueId: null, code: arg.toUpperCase() };
+}
+
+function newCode() {
+  let out = '';
+  for (let i = 0; i < CODE_LEN; i++) {
+    out += CODE_ALPHABET[Math.floor(Math.random() * CODE_ALPHABET.length)];
+  }
+  return out;
+}
+
+/**
+ * Issue a code for a league the visitor just picked on the site. Retries on
+ * collision — 30^4 is a large space but not an infinite one.
+ */
+async function issueCode({ sleeperLeagueId, league }) {
+  for (let attempt = 0; attempt < 8; attempt++) {
+    const code = newCode();
+    const { rows } = await db.query(
+      `insert into signup_codes (code, sleeper_league_id, league_name, season, total_rosters)
+       values ($1,$2,$3,$4,$5)
+       on conflict (code) do nothing
+       returning *`,
+      [code, sleeperLeagueId, league?.name || null, league?.season || null, league?.total_rosters || null]
+    );
+    if (rows[0]) return rows[0];
+  }
+  throw new Error('could not allocate a signup code');
+}
+
+async function resolveCode(code) {
+  const { rows } = await db.query(
+    'select * from signup_codes where code = $1', [String(code).toUpperCase()]
+  );
+  return rows[0] || null;
 }
 
 /**
@@ -69,8 +127,8 @@ async function record({ phone, leagueId, rawText, source = 'sms' }) {
 /** What to text back. Honest about the queue — see the note at the top. */
 function reply({ created, league, leagueId }) {
   if (!leagueId) {
-    return "You're on the list. Reply with START and your Sleeper league ID and I'll "
-         + "attach it — or grab it from the site and I'll do the rest.";
+    return `You're on the list. To attach your league, grab your code from the site `
+         + `and text ${KEYWORD} plus that code.`;
   }
   if (!league) {
     return `I couldn't find a Sleeper league with that ID, so I've noted your number but not the `
@@ -94,12 +152,28 @@ async function handle(msg, provider, { dryRun = false } = {}) {
   const parsed = parse(msg.text);
   if (!parsed) return null;
 
+  // A short code carries the league the visitor already chose on the site.
+  let leagueId = parsed.leagueId;
+  if (parsed.code) {
+    const issued = await resolveCode(parsed.code);
+    if (!issued) {
+      const text = `I don't recognise the code ${parsed.code}. Grab a fresh one from the site and text it again.`;
+      if (!dryRun && provider) await provider.send(msg.senderId, text);
+      return { handled: true, created: false, unknownCode: parsed.code, reply: text };
+    }
+    leagueId = issued.sleeper_league_id;
+    await db.query(
+      'update signup_codes set used_at = coalesce(used_at, now()), used_by_phone = coalesce(used_by_phone, $2) where code = $1',
+      [issued.code, db.normalizePhone(msg.senderId)]
+    );
+  }
+
   const res = await record({
     phone: msg.senderId,
-    leagueId: parsed.leagueId,
+    leagueId,
     rawText: msg.text,
   });
-  const text = reply({ ...res, leagueId: parsed.leagueId });
+  const text = reply({ ...res, leagueId });
 
   if (!dryRun && provider) {
     await provider.send(msg.senderId, text);
@@ -108,4 +182,8 @@ async function handle(msg, provider, { dryRun = false } = {}) {
   return { handled: true, created: res.created, signup: res.signup, reply: text };
 }
 
-module.exports = { parse, record, reply, handle, START };
+module.exports = {
+  parse, record, reply, handle,
+  issueCode, resolveCode, newCode,
+  KEYWORD, KEYWORDS, SIGNUP, CODE_ALPHABET, CODE_LEN,
+};

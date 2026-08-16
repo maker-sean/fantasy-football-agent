@@ -50,19 +50,30 @@
     <div id="step-done" class="step" hidden>
       <div class="picked" id="picked"></div>
 
-      <h2 style="font-size:1.15rem; margin-top:28px">One text and you're in the queue.</h2>
-      <p>Send this from the phone you use in your league's group chat. That's how we know which
+      <h2 style="font-size:1.15rem; margin-top:28px">One text and you're in.</h2>
+      <p>Send it from the phone you use in your league's group chat — that's how we know which
       number belongs to which commissioner.</p>
 
       <div class="sms-card">
-        <div class="sms-to">
-          <span class="small muted">Text</span>
-          <strong class="todo">[SENDBLUE NUMBER]</strong>
+        <div class="sms-lead">
+          <div>
+            <span class="small muted">Text</span>
+            <div class="sms-body" id="sms-body">…</div>
+            <span class="small muted">to</span>
+            <div class="sms-number" id="sms-number">…</div>
+          </div>
+          <!-- Inline SVG, never an <img> pointing at a QR service: that would
+               leak every visitor's league to a third party on a site whose
+               privacy policy promises otherwise. -->
+          <figure class="qr" id="qr" hidden>
+            <div id="qr-svg"></div>
+            <figcaption class="small muted">Scan to open it</figcaption>
+          </figure>
         </div>
-        <div class="sms-body" id="sms-body"></div>
+
         <div class="row">
-          <button id="copy" class="btn ghost" type="button">Copy message</button>
           <a id="smslink" class="btn" href="#">Open in Messages</a>
+          <button id="copy" class="btn ghost" type="button">Copy message</button>
         </div>
         <p id="copy-msg" class="msg-line" role="status" aria-live="polite"></p>
       </div>
@@ -193,19 +204,36 @@ function renderLeagues(leagues, season) {
   }
 }
 
-function choose(lg) {
+async function choose(lg) {
   state.league = lg;
   $('picked').innerHTML = `<span class="lg-meta">Selected league</span><strong></strong>` +
-    `<span class="lg-meta">${lg.total_rosters} teams · ${lg.season} season · ID ${lg.league_id}</span>`;
+    `<span class="lg-meta">${lg.total_rosters} teams · ${lg.season} season</span>`;
   $('picked').querySelector('strong').textContent = lg.name;
-
-  const body = `START ${lg.league_id}`;
-  $('sms-body').textContent = body;
-  // Both separators in the wild: iOS wants &, Android wants ?. Using ?body=
-  // with an empty address works on both well enough to be worth it.
-  $('smslink').href = `sms:&body=${encodeURIComponent(body)}`;
-
   show('step-done');
+
+  // The server issues a short code and renders the QR. Asking people to text a
+  // 19-digit Sleeper league id worked only if they tapped the prefilled link —
+  // it was unreadable on a QR, impossible to dictate, and one wrong digit
+  // failed against a league that does not exist.
+  try {
+    const r = await fetch('/api/signup-intent', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ sleeperLeagueId: lg.league_id }),
+    });
+    if (!r.ok) throw new Error('intent failed');
+    const d = await r.json();
+
+    $('sms-body').textContent = d.body;
+    $('sms-number').textContent = d.number || 'the number below';
+    if (d.smsUri) $('smslink').href = d.smsUri;
+    if (d.qrSvg) {
+      $('qr-svg').innerHTML = d.qrSvg;
+      $('qr').hidden = false;
+    }
+  } catch {
+    say($('copy-msg'), "Couldn't set up your code just now — refresh and pick your league again.", 'err');
+  }
 }
 
 $('find').addEventListener('click', findLeagues);

@@ -263,3 +263,13 @@ footer ul { display: flex; gap: 20px; list-style: none; margin: 0; padding: 0; f
 @media (prefers-reduced-motion: reduce) { .waiting .pulse { animation: none; } }
 
 input[type="range"] { accent-color: var(--turf); }
+
+/* The signup card: message, number, and a QR side by side. */
+.sms-lead { display: flex; gap: 22px; align-items: center; justify-content: space-between; flex-wrap: wrap; }
+.sms-number { font-family: var(--mono); font-size: 1.35rem; font-weight: 700; letter-spacing: .04em; margin: 4px 0 12px; }
+.sms-card .sms-body { font-size: 1.25rem; font-weight: 700; letter-spacing: .06em; margin: 6px 0 14px; }
+.qr { margin: 0; text-align: center; flex-shrink: 0; }
+.qr svg { display: block; width: 150px; height: 150px; }
+.qr figcaption { margin-top: 6px; }
+/* On a phone the QR is useless — you cannot scan the screen you are holding. */
+@media (max-width: 560px) { .qr { display: none; } }

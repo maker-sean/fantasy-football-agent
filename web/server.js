@@ -206,6 +206,57 @@ app.post('/api/me/terms', requireAccount, wrap(async (req, res) => {
   res.json({ termsAcceptedAt: account.terms_accepted_at, termsVersion: account.terms_version });
 }));
 
+/**
+ * Issue a signup code for a league picked on the marketing site.
+ *
+ * Public — no account exists yet at this point in the funnel; this is the step
+ * before anyone signs in. It writes only a short code bound to a public Sleeper
+ * league id, so the worst an abuser achieves is filling a table with codes
+ * nobody texts.
+ *
+ * Returns the QR as inline SVG rather than a URL. The page must stay
+ * self-contained: an <img> pointing at a QR service would leak every visitor's
+ * league id to a third party, on a site whose privacy policy promises otherwise.
+ */
+app.post('/api/signup-intent', wrap(async (req, res) => {
+  const sleeperLeagueId = String(req.body?.sleeperLeagueId || '').trim();
+  if (!/^\d{6,25}$/.test(sleeperLeagueId)) return res.status(400).json({ error: 'bad_league_id' });
+
+  const lg = await sleeper.league(sleeperLeagueId).catch(() => null);
+  if (!lg?.league_id) return res.status(404).json({ error: 'league_not_found' });
+
+  const signup = require('../src/signup');
+  const issued = await signup.issueCode({ sleeperLeagueId, league: lg });
+
+  const number = process.env.SENDBLUE_FROM_NUMBER || null;
+  const body = `${signup.KEYWORD} ${issued.code}`;
+  // Both separators appear in the wild — iOS historically wanted &, Android ?.
+  const smsUri = number ? `sms:${number}?&body=${encodeURIComponent(body)}` : null;
+
+  let qrSvg = null;
+  if (smsUri) {
+    try {
+      const QR = require('qrcode');
+      qrSvg = await QR.toString(smsUri, { type: 'svg', margin: 1, width: 240,
+        color: { dark: '#f4f5f6', light: '#00000000' } });
+    } catch (err) {
+      // A missing QR is a degraded page, not a broken one — the number and the
+      // code are still right there to type.
+      console.error('[qr] render failed:', err.message);
+    }
+  }
+
+  res.json({
+    code: issued.code,
+    keyword: signup.KEYWORD,
+    body,
+    number,
+    smsUri,
+    qrSvg,
+    league: { name: lg.name, season: lg.season, totalRosters: lg.total_rosters },
+  });
+}));
+
 // --- onboarding step 4: pick a Sleeper league ------------------------------
 
 app.get('/api/sleeper/leagues', requireAccount, wrap(async (req, res) => {
