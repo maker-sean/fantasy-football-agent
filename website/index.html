@@ -20,27 +20,46 @@
   </div>
 </nav>
 
-<section>
-  <div class="wrap">
-    <p class="eyebrow">For Sleeper leagues</p>
-    <h1>Your league's group chat dies in October. This keeps it alive.</h1>
-    <p class="lede">
-      Commish is another member of the chat — the one who actually pays attention. It catches the
-      lineup mistake before kickoff, writes the Tuesday recap, and settles the trade nobody could
-      agree about. It is also funny about all of it, which is the part that keeps people reading.
-    </p>
-    <p style="margin-top:30px">
-      <a class="btn" href="start.html">Get started — find your league</a>
-      <a class="btn ghost" href="#how" style="margin-left:8px">What it does</a>
-    </p>
+<section class="hero">
+  <div class="wrap hero-grid">
 
-    <!-- Real output from the running agent. Team names swapped; every number,
-         player and turn of phrase is exactly what it produced.
+    <div class="hero-copy">
+      <p class="eyebrow">For Sleeper leagues</p>
+      <h1>Your league's group chat dies in October. This keeps it alive.</h1>
+      <p class="lede">
+        Commish is another member of the chat — the one who actually pays attention. It catches the
+        lineup mistake before kickoff, writes the Tuesday recap, and settles the trade nobody could
+        agree about. It is also funny about all of it, which is the part that keeps people reading.
+      </p>
+      <p style="margin-top:30px">
+        <a class="btn" href="start.html">Get started — find your league</a>
+        <a class="btn ghost" href="#how" style="margin-left:8px">What it does</a>
+      </p>
+      <p class="small muted" style="margin-top:26px">
+        Actual output, team names swapped — the real ones belong in the group chat, not on a website.
+        The 1.08, the 3.3, the 20.9, the 103.44: every one of them came out of that league's week.
+      </p>
+    </div>
 
-         Order matters: the save comes first, the roast second. The product is
-         both, and a page showing only the dunking sells half of it. -->
-    <div class="thread">
-      <div class="thread-bar"><span>League group chat</span><span class="live">● 12 managers</span></div>
+    <!-- The frame is decoration; the thread inside it is the real markup, and
+         the messages are real bot output. It is hidden below 620px, where
+         drawing a phone inside a phone wastes width and looks strange. -->
+    <div class="hero-phone">
+      <div class="phone" aria-hidden="false">
+        <div class="phone-bezel">
+          <div class="phone-screen">
+            <div class="phone-status">
+              <span>9:41</span>
+              <span class="phone-island"></span>
+              <span class="phone-meters">
+                <svg viewBox="0 0 24 12" width="24" height="12" aria-hidden="true">
+                  <rect x="0.5" y="1.5" width="19" height="9" rx="2.5" fill="none" stroke="currentColor" opacity=".5"/>
+                  <rect x="2" y="3" width="14" height="6" rx="1" fill="currentColor"/>
+                  <path d="M21 4.5v3a2 2 0 0 0 0-3z" fill="currentColor" opacity=".5"/>
+                </svg>
+              </span>
+            </div>
+            <div class="thread-bar"><span>League group chat</span><span class="live">● 12</span></div>
       <div class="msgs">
 
         <div class="msg bot">
@@ -77,12 +96,13 @@ Who's got the worse offseason coming?</div>
           <div class="bubble">"that's not a beat, that's a self-own" 💀</div>
         </div>
 
-      </div>
-    </div>
-    <p class="small muted" style="margin-top:14px">
-      Actual output, team names swapped — the real ones belong in the group chat, not on a website.
-      The 1.08, the 3.3, the 20.9, the 103.44: every one of them came out of that league's week.
-    </p>
+            </div><!-- /msgs -->
+          </div><!-- /phone-screen -->
+          <div class="phone-home"></div>
+        </div><!-- /phone-bezel -->
+      </div><!-- /phone -->
+    </div><!-- /hero-phone -->
+
   </div>
 </section>
 
@@ -201,6 +221,59 @@ Who's got the worse offseason coming?</div>
   </div>
 </footer>
 
-<script>document.getElementById('yr').textContent = new Date().getFullYear();</script>
+<script>
+document.getElementById('yr').textContent = new Date().getFullYear();
+
+/*
+ * Play the conversation once, when it scrolls into view.
+ *
+ * Once, not on a loop — a thread that resets while someone is mid-recap is
+ * worse than a static screenshot. The first message is left visible from the
+ * start so the hero is never empty on paint.
+ */
+(function () {
+  const msgs = document.querySelector('.phone-screen .msgs');
+  if (!msgs) return;
+
+  const items = [...msgs.querySelectorAll('.msg')];
+  const reduced = window.matchMedia('(prefers-reduced-motion: reduce)');
+  if (reduced.matches || items.length < 2) return;
+
+  // Everything after the first is hidden until its turn.
+  items.slice(1).forEach(m => m.classList.add('pending'));
+
+  const typing = document.createElement('div');
+  typing.className = 'msg';
+  typing.innerHTML = '<div class="bubble typing"><i></i><i></i><i></i></div>';
+
+  const wait = ms => new Promise(r => setTimeout(r, ms));
+
+  async function play() {
+    for (const m of items.slice(1)) {
+      const isBot = m.classList.contains('bot');
+      if (isBot) {
+        typing.className = 'msg bot';
+        msgs.insertBefore(typing, m);
+        msgs.scrollTo({ top: msgs.scrollHeight, behavior: 'smooth' });
+        await wait(900);
+        typing.remove();
+      } else {
+        await wait(450);
+      }
+      m.classList.remove('pending');
+      m.classList.add('arrive');
+      msgs.scrollTo({ top: msgs.scrollHeight, behavior: 'smooth' });
+      await wait(isBot ? 1100 : 700);
+    }
+  }
+
+  const io = new IntersectionObserver(entries => {
+    if (!entries.some(e => e.isIntersecting)) return;
+    io.disconnect();
+    play();
+  }, { threshold: 0.25 });
+  io.observe(msgs);
+})();
+</script>
 </body>
 </html>

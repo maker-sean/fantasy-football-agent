@@ -306,3 +306,102 @@ input[type="range"] { accent-color: var(--turf); }
   font-size: .78rem; font-weight: 900; line-height: 1;
   animation: none;
 }
+
+/* ============================================================== hero ==== */
+/*
+ * Copy left, phone right. The frame is drawn in CSS rather than pulled from a
+ * device-frame library: every such library ships forty device variants to use
+ * one, and this site makes zero external requests — a property the privacy
+ * policy on it depends on.
+ */
+.hero { padding-bottom: 64px; }
+.hero-grid { display: grid; gap: 54px; grid-template-columns: 1fr; align-items: start; }
+
+@media (min-width: 900px) {
+  .hero-grid { grid-template-columns: minmax(0, 1.05fr) 330px; gap: 60px; align-items: center; }
+  .hero-copy .lede { max-width: 46ch; }
+}
+
+.hero-phone { display: flex; justify-content: center; }
+
+.phone { width: 320px; max-width: 100%; }
+.phone-bezel {
+  background: #000;
+  border-radius: 42px;
+  padding: 11px 11px 8px;
+  border: 1px solid #2f2f2f;
+  /* A soft outer glow reads as a screen in a dark room rather than a sticker. */
+  box-shadow: 0 26px 60px rgba(0,0,0,.65), 0 0 0 1px rgba(255,255,255,.04) inset;
+}
+.phone-screen {
+  background: var(--carbon);
+  border-radius: 33px;
+  overflow: hidden;
+  display: flex; flex-direction: column;
+  /* Capped so a long recap cannot make the column absurdly tall. The thread
+     scrolls inside, which is what a real chat does anyway. */
+  height: 560px;
+}
+
+.phone-status {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 11px 22px 7px;
+  font-size: .74rem; font-weight: 700; color: var(--text);
+}
+.phone-island {
+  width: 78px; height: 20px; border-radius: 12px; background: #000;
+  margin: 0 auto;
+}
+.phone-meters { display: flex; align-items: center; color: var(--text); }
+
+.phone-screen .thread-bar { border-radius: 0; }
+.phone-screen .msgs {
+  flex: 1; overflow-y: auto; scrollbar-width: none;
+  padding: 18px 14px;
+}
+.phone-screen .msgs::-webkit-scrollbar { display: none; }
+.phone-screen .msg { max-width: 92%; }
+.phone-screen .bubble { font-size: .84rem; padding: 10px 13px; }
+.phone-screen .who { font-size: .62rem; }
+
+.phone-home {
+  width: 120px; height: 5px; border-radius: 3px;
+  background: #3a3a3a; margin: 9px auto 4px;
+}
+
+/* Below this a phone drawn inside a phone wastes width and looks strange, so
+   the frame is dropped and the bare thread stands on its own. */
+@media (max-width: 620px) {
+  .phone-bezel { background: none; border: 0; padding: 0; box-shadow: none; }
+  .phone-screen { height: auto; max-height: 520px; border-radius: 14px; border: 1px solid var(--line); }
+  .phone-status, .phone-home { display: none; }
+  .phone { width: 100%; }
+}
+
+/* ---- reveal ---- */
+/*
+ * Messages arrive one at a time when the thread scrolls into view, then stay.
+ * Deliberately not a loop: a conversation that restarts while someone is
+ * reading the recap is actively hostile, and the recap is the best thing on
+ * the page.
+ */
+.msgs .msg.pending { opacity: 0; transform: translateY(10px); }
+.msgs .msg.arrive { animation: arrive .34s cubic-bezier(.2,.7,.3,1) forwards; }
+@keyframes arrive { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+
+.typing { display: flex; gap: 4px; align-items: center; padding: 13px 15px; }
+.typing i {
+  width: 6px; height: 6px; border-radius: 50%; background: var(--muted);
+  animation: blink 1.25s infinite ease-in-out;
+}
+.typing i:nth-child(2) { animation-delay: .18s; }
+.typing i:nth-child(3) { animation-delay: .36s; }
+@keyframes blink { 0%, 60%, 100% { opacity: .25; } 30% { opacity: 1; } }
+
+/* Someone who asked their OS to stop moving things should still get the pitch.
+   Everything visible, immediately, no stagger and no dots. */
+@media (prefers-reduced-motion: reduce) {
+  .msgs .msg.pending { opacity: 1; transform: none; }
+  .msgs .msg.arrive { animation: none; }
+  .typing { display: none; }
+}
