@@ -24,11 +24,20 @@ const DEFAULTS = {
   // same — pick a distinctive name per league via leagues.config.botNames.
   botNames: ['bot'],
 
-  // Hard rate limits. These are survival, not politeness — a number that talks
-  // constantly gets carrier-flagged and league-muted.
-  minGapMs: 60 * 1000,        // never two bot messages inside a minute
-  maxPerHour: 6,
-  maxPerDay: 20,
+  // Volume limits. Two sets, because being asked something is not the same as
+  // deciding to speak.
+  //
+  // A group actively talking TO the bot is engagement, not runaway — and an
+  // hour where six people ask it things is precisely when it should not go
+  // silent. Observed live: the bot capped out mid-conversation and ignored four
+  // direct questions in a row, which reads as broken.
+  //
+  // The runaway guard is maxBotStreak below, not these.
+  minGapMs: 60 * 1000,          // pacing for unprompted replies only
+  maxPerHour: 6,                // unprompted
+  maxPerDay: 20,                // unprompted
+  maxPerHourAddressed: 15,      // when someone actually asked
+  maxPerDayAddressed: 40,
 
   // Consecutive bot messages with no human in between. Three is already a bot
   // talking to itself in front of an audience. THIS is the runaway guard —
@@ -103,12 +112,20 @@ function layerSuppress(ctx) {
     };
   }
 
-  if (state.sentInLastHour >= cfg.maxPerHour) {
-    return { layer: 'suppress', reply: false, reason: 'hourly_cap', detail: { sentInLastHour: state.sentInLastHour } };
+  const hourCap = addressed ? cfg.maxPerHourAddressed : cfg.maxPerHour;
+  if (state.sentInLastHour >= hourCap) {
+    return {
+      layer: 'suppress', reply: false, reason: 'hourly_cap',
+      detail: { sentInLastHour: state.sentInLastHour, cap: hourCap, addressed },
+    };
   }
 
-  if (state.sentToday >= cfg.maxPerDay) {
-    return { layer: 'suppress', reply: false, reason: 'daily_cap', detail: { sentToday: state.sentToday } };
+  const dayCap = addressed ? cfg.maxPerDayAddressed : cfg.maxPerDay;
+  if (state.sentToday >= dayCap) {
+    return {
+      layer: 'suppress', reply: false, reason: 'daily_cap',
+      detail: { sentToday: state.sentToday, cap: dayCap, addressed },
+    };
   }
 
   return null; // pass

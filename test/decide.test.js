@@ -74,7 +74,7 @@ it('never reacts to its own outbound message', () => {
   assert.strictEqual(v.reason, 'own_message');
 });
 it('suppression outranks a mention', () => {
-  const v = run([msg('@bot hi')], quiet({ sentInLastHour: 99 }));
+  const v = run([msg('@bot hi')], quiet({ sentInLastHour: 999 }));
   assert.strictEqual(v.reply, false);
   assert.strictEqual(v.layer, 'suppress');
 });
@@ -102,9 +102,20 @@ it('the pacing gap still applies when nobody addressed us', () => {
   const v = d({ burst: [msg('just chatting')], state: quiet({ msSinceLastBot: 5000, lastBotAt: now - 5000 }), league: {} });
   assert.strictEqual(v.reply, false);
 });
-it('hard caps still bind even on a direct mention', () => {
-  const v = run([msg('@bot hi')], quiet({ sentInLastHour: DEFAULTS.maxPerHour }));
+it('an unprompted reply is capped lower than an answer', () => {
+  // Observed live: the bot capped out mid-conversation and ignored four direct
+  // questions in a row. A group talking TO it is engagement, not runaway.
+  const atUnpromptedCap = quiet({ sentInLastHour: DEFAULTS.maxPerHour });
+  assert.strictEqual(run([msg('@bot hi')], atUnpromptedCap).reply, true,
+    'a direct question should still get through the unprompted cap');
+});
+it('the addressed cap still binds eventually', () => {
+  const v = run([msg('@bot hi')], quiet({ sentInLastHour: DEFAULTS.maxPerHourAddressed }));
   assert.strictEqual(v.reason, 'hourly_cap');
+});
+it('the addressed daily cap still binds', () => {
+  const v = run([msg('@bot hi')], quiet({ sentToday: DEFAULTS.maxPerDayAddressed }));
+  assert.strictEqual(v.reason, 'daily_cap');
 });
 it('the streak cap still binds on a direct mention', () => {
   const v = run([msg('@bot hi')], quiet({ botStreak: 2, humansSinceBot: 0, msSinceLastBot: 999999 }));
@@ -114,13 +125,10 @@ it('stops a bot talking to itself', () => {
   const v = run([msg('@bot hi')], quiet({ botStreak: 2, humansSinceBot: 0, msSinceLastBot: 999999 }));
   assert.strictEqual(v.reason, 'bot_streak');
 });
-it('enforces the hourly cap', () => {
-  const v = run([msg('@bot hi')], quiet({ sentInLastHour: DEFAULTS.maxPerHour }));
-  assert.strictEqual(v.reason, 'hourly_cap');
-});
-it('enforces the daily cap', () => {
+
+it('the unprompted daily cap does not silence a question', () => {
   const v = run([msg('@bot hi')], quiet({ sentToday: DEFAULTS.maxPerDay }));
-  assert.strictEqual(v.reason, 'daily_cap');
+  assert.strictEqual(v.reply, true);
 });
 it('an empty burst decides nothing', () => assert.strictEqual(run([]).reply, false));
 
