@@ -41,7 +41,8 @@
     "ask": "node scripts/ask.js",
     "drafts": "node scripts/drafts.js",
     "gameday": "node scripts/gameday.js",
-    "web": "node web/server.js"
+    "web": "node web/server.js",
+    "linq-preflight": "node scripts/linq-preflight.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.117.1",

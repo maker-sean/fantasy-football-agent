@@ -107,6 +107,29 @@ class SendblueProvider extends MessagingProvider {
   }
 
   /** Free tier caps at 10 verified contacts; these manage that list. */
+  /**
+   * How inbound arrives. Sendblue does not fire webhooks for GROUP messages
+   * (measured 2026-08-15), and this product lives in a group, so polling is the
+   * transport rather than a fallback. Linq is the opposite — see src/linq.js.
+   */
+  get inboundMode() { return 'poll'; }
+  get name() { return 'sendblue'; }
+
+  /**
+   * One page of recent messages, newest first.
+   *
+   * This lived in poller.js as a hardcoded '/api/v2/messages?limit=&offset='
+   * until a second provider made the leak obvious: the poller is supposed to be
+   * provider-agnostic, and it was reaching into Sendblue's URL space.
+   */
+  async fetchMessages({ limit = 50, offset = 0 } = {}) {
+    const res = await this.request('GET', `/api/v2/messages?limit=${limit}&offset=${offset}`);
+    return {
+      messages: res?.messages || res?.data || (Array.isArray(res) ? res : []),
+      total: res?.pagination?.total ?? null,
+    };
+  }
+
   listContacts() { return this.request('GET', '/api/v2/contacts'); }
   listLines() { return this.request('GET', '/api/lines'); }
 

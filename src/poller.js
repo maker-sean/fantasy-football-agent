@@ -135,9 +135,9 @@ async function pollOnce(provider, cursor, { bootstrap = false, pageSize = PAGE_S
   let total = null;
 
   while (pages < MAX_PAGES) {
-    const res = await provider.request('GET', `/api/v2/messages?limit=${pageSize}&offset=${offset}`);
-    const rows = res?.messages || res?.data || (Array.isArray(res) ? res : []);
-    total = res?.pagination?.total ?? total;
+    const res = await provider.fetchMessages({ limit: pageSize, offset });
+    const rows = res.messages;
+    total = res.total ?? total;
     pages += 1;
     if (!rows.length) break;
 
@@ -197,6 +197,16 @@ function commit(cursor, event) {
  * must not silently stop inbound for the rest of the day.
  */
 function startPolling(provider, onMessage, { intervalMs = 10_000, bootstrap = true } = {}) {
+  // A webhook-delivery provider has no message list to poll. Starting a poll
+  // loop against one would spin forever finding nothing, and the symptom —
+  // total silence — looks identical to a broken bot.
+  if (provider.inboundMode === 'webhook') {
+    throw new Error(
+      `${provider.name || 'provider'} delivers inbound by webhook, not polling. ` +
+      'Register a webhook subscription instead of calling startPolling().'
+    );
+  }
+
   let cursor = null;
   let stopped = false;
   let consecutiveErrors = 0;

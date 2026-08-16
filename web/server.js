@@ -26,7 +26,13 @@ const app = express();
 const PORT = Number(process.env.PORT || 3000);
 const TERMS_VERSION = process.env.TERMS_VERSION || '2026-08-16';
 
-app.use(express.json({ limit: '256kb' }));
+// Webhook signatures are computed over the EXACT bytes that were sent, so the
+// raw body has to survive JSON parsing. Capturing it here rather than mounting
+// a separate raw parser keeps one body-parsing path for the whole app.
+app.use(express.json({
+  limit: '256kb',
+  verify: (req, _res, buf) => { req.rawBody = buf.toString('utf8'); },
+}));
 app.disable('x-powered-by');
 
 // The marketing site ships from the same service. One origin means no CORS to
@@ -357,6 +363,48 @@ app.patch('/api/leagues/:leagueId/config', requireAccount, loadLeague, wrap(asyn
     [req.league.id, JSON.stringify(patch), req.account.id]
   );
   res.json({ config: rows[0].config, applied: Object.keys(patch) });
+}));
+
+// -------------------------------------------------------------- webhooks ----
+
+/**
+ * Linq inbound.
+ *
+ * Not active — Sendblue remains the primary transport and delivers inbound by
+ * polling. This endpoint exists so that switching providers is a configuration
+ * change rather than a build, and so the path is exercised by tests before it
+ * is ever needed in anger.
+ *
+ * Unsigned requests are refused. Without that this URL is an open door: anyone
+ * who learns it could post a message claiming to come from any number, and the
+ * bot would answer it with another league's data.
+ */
+app.post('/webhooks/linq', wrap(async (req, res) => {
+  const secret = process.env.LINQ_WEBHOOK_SECRET;
+  if (!secret) return res.status(503).json({ error: 'webhook_not_configured' });
+
+  const { LinqProvider } = require('../src/linq');
+  const sig = req.get('linq-signature') || req.get('x-linq-signature') || req.get('webhook-signature');
+
+  if (!LinqProvider.verifySignature(req.rawBody || '', sig, secret)) {
+    console.warn('[webhook] rejected an unsigned or badly signed Linq payload');
+    return res.status(401).json({ error: 'bad_signature' });
+  }
+
+  // Acknowledge fast. Providers retry on timeout, and a slow handler turns one
+  // message into several.
+  res.json({ ok: true });
+
+  try {
+    const provider = new LinqProvider(process.env.LINQ_API_KEY, { fromNumber: process.env.LINQ_FROM_NUMBER });
+    const msg = provider.parseInbound(req.body);
+    if (msg.direction === 'outbound') return;    // never react to ourselves
+    const inbound = require('../src/inbound');
+    await inbound.handleInbound(msg, provider, { providerName: 'linq', echo: false, source: 'webhook' });
+    console.log('[webhook] linq ' + inbound.describe(msg, { stored: true }));
+  } catch (err) {
+    console.error('[webhook] linq handling failed:', err.message);
+  }
 }));
 
 // ---------------------------------------------------------------- errors ----
