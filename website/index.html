@@ -239,31 +239,55 @@ document.getElementById('yr').textContent = new Date().getFullYear();
   const reduced = window.matchMedia('(prefers-reduced-motion: reduce)');
   if (reduced.matches || items.length < 2) return;
 
-  // Everything after the first is hidden until its turn.
+  /*
+   * Pacing is proportional to message length rather than fixed.
+   *
+   * A flat delay makes the long recap flash past at the same speed as "every
+   * single week with this thing", so the best content on the page gets the
+   * least time. Longer messages take longer to "type" and sit longer before
+   * the next one, which is also how a real conversation reads.
+   */
+  const PACE = {
+    typingBase: 700,     // dots shown before a bot message
+    typingPerChar: 7,
+    typingMax: 2400,
+    dwellBase: 900,      // pause after a message lands
+    dwellPerChar: 9,
+    dwellMax: 3400,
+    humanLead: 800,      // people take a beat before replying
+  };
+
+  const clamp = (v, max) => Math.min(v, max);
+  const len = el => (el.querySelector('.bubble')?.textContent || '').length;
+  const typingFor = el => clamp(PACE.typingBase + len(el) * PACE.typingPerChar, PACE.typingMax);
+  const dwellFor = el => clamp(PACE.dwellBase + len(el) * PACE.dwellPerChar, PACE.dwellMax);
+
   items.slice(1).forEach(m => m.classList.add('pending'));
 
   const typing = document.createElement('div');
-  typing.className = 'msg';
   typing.innerHTML = '<div class="bubble typing"><i></i><i></i><i></i></div>';
 
   const wait = ms => new Promise(r => setTimeout(r, ms));
+  const toBottom = () => msgs.scrollTo({ top: msgs.scrollHeight, behavior: 'smooth' });
 
   async function play() {
     for (const m of items.slice(1)) {
       const isBot = m.classList.contains('bot');
+
       if (isBot) {
         typing.className = 'msg bot';
         msgs.insertBefore(typing, m);
-        msgs.scrollTo({ top: msgs.scrollHeight, behavior: 'smooth' });
-        await wait(900);
+        toBottom();
+        await wait(typingFor(m));
         typing.remove();
       } else {
-        await wait(450);
+        await wait(PACE.humanLead);
       }
+
       m.classList.remove('pending');
       m.classList.add('arrive');
-      msgs.scrollTo({ top: msgs.scrollHeight, behavior: 'smooth' });
-      await wait(isBot ? 1100 : 700);
+      toBottom();
+      await wait(dwellFor(m));
     }
   }
 
