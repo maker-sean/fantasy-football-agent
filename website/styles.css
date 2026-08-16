@@ -157,7 +157,9 @@ kbd { font-family: var(--mono); background: var(--raised); border: 1px solid var
 .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
 .row > .btn { flex-shrink: 0; }
 
-input[type="text"], input[type="email"] {
+/* Include tel: a phone field left out of this list falls back to the
+   browser default, which is a white box in the middle of a dark form. */
+input[type="text"], input[type="email"], input[type="tel"] {
   flex: 1 1 240px; min-width: 0;
   background: var(--carbon); color: var(--text);
   border: 1px solid var(--line); border-radius: var(--radius);
@@ -221,3 +223,43 @@ footer ul { display: flex; gap: 20px; list-style: none; margin: 0; padding: 0; f
   body > nav ul li:first-child { display: none; }
   .brand { font-size: .98rem; }
 }
+
+/* --------------------------------------------------- commissioner app ---- */
+.view { margin-top: 8px; }
+
+/* The roster table. Grid rather than <table> so it can restack on a phone —
+   a commissioner will do this sitting on the couch, not at a desk. */
+.roster-table { display: grid; gap: 10px; margin: 22px 0; }
+.roster-row {
+  display: grid; gap: 10px; align-items: center;
+  grid-template-columns: minmax(140px, 1.2fr) 1fr 1fr;
+  background: var(--surface); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 12px 14px;
+}
+.roster-row input { flex: none; width: 100%; padding: 10px 12px; font-size: .95rem; }
+.rr-team { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.rr-team strong { font-size: .98rem; overflow-wrap: anywhere; }
+
+@media (max-width: 640px) {
+  .roster-row { grid-template-columns: 1fr; }
+  .rr-team { margin-bottom: 2px; }
+}
+
+/* The waiting state for "add me to your group chat". It has to look alive —
+   a static message reads as broken while someone waits on it. */
+.waiting {
+  display: flex; gap: 15px; align-items: flex-start;
+  background: var(--surface); border: 1px solid var(--line);
+  border-left: 3px solid var(--turf);
+  border-radius: 0 var(--radius) var(--radius) 0; padding: 18px 20px; margin: 20px 0;
+}
+.waiting .pulse {
+  width: 11px; height: 11px; border-radius: 50%; background: var(--turf);
+  margin-top: 6px; flex-shrink: 0; animation: pulse 1.6s ease-in-out infinite;
+}
+.waiting.done .pulse { animation: none; }
+@keyframes pulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: .35; transform: scale(.8); } }
+/* Respect people who have asked the OS to stop moving things. */
+@media (prefers-reduced-motion: reduce) { .waiting .pulse { animation: none; } }
+
+input[type="range"] { accent-color: var(--turf); }

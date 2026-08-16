@@ -154,6 +154,14 @@ const server = app.listen(0, async () => {
       assert.strictEqual((await call('GET', `/api/leagues/${leagueId}/chat-status`)).body.live, false);
     });
 
+    await it('await-chat cannot drag a live league back to waiting', async () => {
+      await chatlink.tryLink({ chatId: 'grp_regress_test', senderId: '+15550101111', isGroup: true });
+      assert.strictEqual((await call('GET', `/api/leagues/${leagueId}/chat-status`)).body.live, true);
+      // A stale tab re-rendering the waiting screen must not un-confirm it.
+      await call('POST', `/api/leagues/${leagueId}/await-chat`);
+      assert.strictEqual((await call('GET', `/api/leagues/${leagueId}/chat-status`)).body.live, true);
+    });
+
     console.log('\ndashboard config is an allowlist');
 
     await it('known keys apply', async () => {

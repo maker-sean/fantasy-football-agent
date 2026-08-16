@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Commissioner — Commish</title>
+<meta name="robots" content="noindex">
+<link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+
+<nav>
+  <div class="wrap">
+    <a class="brand" href="/"><span class="mark">C</span> Commish</a>
+    <ul>
+      <li id="nav-who" class="small muted"></li>
+      <li><a href="#" id="signout" hidden>Sign out</a></li>
+    </ul>
+  </div>
+</nav>
+
+<section>
+  <div class="wrap narrow">
+
+    <div id="boot" class="view"><p class="muted">Loading…</p></div>
+
+    <!-- Sign in ----------------------------------------------------------->
+    <div id="v-signin" class="view" hidden>
+      <p class="eyebrow">Commissioner</p>
+      <h1 style="font-size:clamp(1.8rem,4.5vw,2.6rem)">Sign in.</h1>
+      <p class="lede">We'll email you a link. No password to forget.</p>
+      <div class="step">
+        <label class="field-label" for="email">Email</label>
+        <div class="row">
+          <input id="email" type="email" autocomplete="email" placeholder="you@example.com">
+          <button id="send-link" class="btn" type="button">Email me a link</button>
+        </div>
+        <p id="signin-msg" class="msg-line" role="status" aria-live="polite"></p>
+      </div>
+    </div>
+
+    <!-- Terms -------------------------------------------------------------->
+    <div id="v-terms" class="view" hidden>
+      <p class="eyebrow">Before we start</p>
+      <h1 style="font-size:clamp(1.6rem,4vw,2.2rem)">The agreement.</h1>
+      <div class="callout">
+        <p class="small">You're adding an automated agent to a group chat with other people in it.
+        By continuing you confirm you have permission to add a number to that chat, and that you'll
+        tell your league it's there.</p>
+        <p class="small" style="margin-bottom:0">Full <a href="/terms.html" target="_blank">terms</a>
+        and <a href="/privacy.html" target="_blank">privacy policy</a>.</p>
+      </div>
+      <p><button id="accept-terms" class="btn" type="button">I agree — continue</button></p>
+      <p id="terms-msg" class="msg-line" role="status" aria-live="polite"></p>
+    </div>
+
+    <!-- Step 4: pick a league ---------------------------------------------->
+    <div id="v-league" class="view" hidden>
+      <p class="eyebrow">Step 1 of 3</p>
+      <h1 style="font-size:clamp(1.6rem,4vw,2.2rem)">Which league?</h1>
+      <p class="lede">Your Sleeper username — we'll pull up your leagues.</p>
+      <div class="step">
+        <label class="field-label" for="sleeper-user">Sleeper username</label>
+        <div class="row">
+          <input id="sleeper-user" type="text" autocapitalize="none" spellcheck="false" placeholder="e.g. smeadows">
+          <button id="find-leagues" class="btn" type="button">Find my leagues</button>
+        </div>
+        <p id="league-msg" class="msg-line" role="status" aria-live="polite"></p>
+        <div id="league-list" class="league-list"></div>
+      </div>
+      <p id="have-leagues" hidden><button class="btn ghost" id="to-dashboard-1" type="button">← Back to my leagues</button></p>
+    </div>
+
+    <!-- Step 5: roster binding --------------------------------------------->
+    <div id="v-roster" class="view" hidden>
+      <p class="eyebrow">Step 2 of 3</p>
+      <h1 style="font-size:clamp(1.6rem,4vw,2.2rem)">Who's who.</h1>
+      <p class="lede">Put a name and mobile number against each team. This is how the agent knows
+      who it's talking to — and who to blame.</p>
+
+      <div class="callout">
+        <p class="small" style="margin-bottom:0">These numbers are only used to recognise people
+        inside your group chat. Nobody is messaged individually, and they are never shared or sold.
+        Leave any you don't have — the agent fills them in as people speak.</p>
+      </div>
+
+      <div class="roster-table" id="roster-rows"></div>
+      <p class="row">
+        <button id="save-roster" class="btn" type="button">Save and continue</button>
+        <button id="skip-roster" class="btn ghost" type="button">Skip for now</button>
+      </p>
+      <p id="roster-msg" class="msg-line" role="status" aria-live="polite"></p>
+    </div>
+
+    <!-- Step 6: prove the chat ---------------------------------------------->
+    <div id="v-chat" class="view" hidden>
+      <p class="eyebrow">Step 3 of 3</p>
+      <h1 style="font-size:clamp(1.6rem,4vw,2.2rem)">Add it to your group chat.</h1>
+      <p class="lede">Last step. Add this number to your league's group text, then send any message
+      in that chat — a "hey" will do.</p>
+
+      <div class="sms-card">
+        <div class="sms-to"><span class="small muted">Add</span><strong id="bot-number">—</strong></div>
+        <button id="copy-number" class="btn ghost" type="button">Copy number</button>
+        <p id="copy-msg" class="msg-line" role="status" aria-live="polite"></p>
+      </div>
+
+      <div class="waiting" id="waiting">
+        <span class="pulse" aria-hidden="true"></span>
+        <div>
+          <strong id="wait-title">Waiting for your first message…</strong>
+          <p class="small muted" style="margin:4px 0 0" id="wait-note">
+            This page will move on by itself the moment the agent hears from your chat.
+            We won't mark it done until it actually does.
+          </p>
+        </div>
+      </div>
+      <p><button class="btn ghost" id="to-dashboard-2" type="button">Finish later</button></p>
+    </div>
+
+    <!-- Dashboard ----------------------------------------------------------->
+    <div id="v-dashboard" class="view" hidden>
+      <p class="eyebrow">Commissioner</p>
+      <h1 style="font-size:clamp(1.6rem,4vw,2.2rem)">Your leagues.</h1>
+      <div id="dash-leagues" class="league-list"></div>
+      <p><button id="add-league" class="btn" type="button">Add another league</button></p>
+
+      <div id="league-config" hidden>
+        <h2 style="font-size:1.15rem; margin-top:36px" id="cfg-title">Settings</h2>
+
+        <div class="step">
+          <label class="field-label" for="cfg-names">What the league calls it</label>
+          <div class="row"><input id="cfg-names" type="text" placeholder="bot, jarvis"></div>
+          <p class="small muted">Comma separated. Saying one of these in the chat is what makes it
+          answer. Pick something nobody says by accident.</p>
+        </div>
+
+        <div class="step">
+          <label class="field-label" for="cfg-spice">How harsh the recap is</label>
+          <input id="cfg-spice" type="range" min="0" max="2" step="1" style="width:100%">
+          <div class="row" style="justify-content:space-between">
+            <span class="small muted">Reports the facts</span>
+            <span class="small muted">Has opinions</span>
+            <span class="small muted">Merciless</span>
+          </div>
+        </div>
+
+        <div class="step">
+          <label class="field-label" for="cfg-tz">Timezone</label>
+          <div class="row"><input id="cfg-tz" type="text" placeholder="America/New_York"></div>
+          <p class="small muted">Used for kickoff timing and when trades are checked.</p>
+        </div>
+
+        <p class="row">
+          <button id="save-config" class="btn" type="button">Save settings</button>
+          <span id="config-msg" class="msg-line" style="margin:0"></span>
+        </p>
+      </div>
+    </div>
+
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <span>© <span id="yr">2026</span> <span class="todo">[LEGAL BUSINESS NAME]</span></span>
+    <nav><ul>
+      <li><a href="/">Home</a></li>
+      <li><a href="/privacy.html">Privacy</a></li>
+      <li><a href="/terms.html">Terms</a></li>
+    </ul></nav>
+  </div>
+</footer>
+
+<script src="app.js"></script>
+</body>
+</html>

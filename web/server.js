@@ -11,9 +11,13 @@
  * Run:  npm run web
  */
 
-require('dotenv').config();
-
 const path = require('path');
+
+// Load .env relative to this file, not the working directory. The server can be
+// launched from anywhere (a process manager, an IDE, a different repo root) and
+// silently starting with no DATABASE_URL because cwd was wrong is a confusing
+// way to fail.
+require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
 const express = require('express');
 const db = require('../src/db');
 const sleeper = require('../src/sleeper');
@@ -28,6 +32,24 @@ app.disable('x-powered-by');
 // The marketing site ships from the same service. One origin means no CORS to
 // configure and no preflight on every authenticated request.
 app.use(express.static(path.join(__dirname, '..', 'website'), { extensions: ['html'] }));
+app.use('/app', express.static(path.join(__dirname, 'app'), { extensions: ['html'] }));
+
+/**
+ * Public browser configuration.
+ *
+ * The anon key is public by design — it identifies the project, it does not
+ * authorize anything on its own, and Supabase expects it in client code. Served
+ * from here rather than baked into the HTML so the same build works across
+ * environments without a build step to substitute it.
+ */
+app.get('/api/config', (_req, res) => {
+  res.json({
+    supabaseUrl: SUPABASE_URL || null,
+    supabaseAnonKey: SUPABASE_ANON_KEY || null,
+    devAuth: Boolean(DEV_AUTH),
+    termsVersion: TERMS_VERSION,
+  });
+});
 
 // ---------------------------------------------------------------- auth ----
 
@@ -258,7 +280,13 @@ app.post('/api/leagues/:leagueId/members', requireAccount, loadLeague, wrap(asyn
 // --- onboarding step 6: prove the bot is in the group chat ------------------
 
 app.post('/api/leagues/:leagueId/await-chat', requireAccount, loadLeague, wrap(async (req, res) => {
-  const league = await db.setOnboardingState(req.league.id, 'awaiting_chat');
+  // Never move a live league backwards. The app calls this when it renders the
+  // waiting screen, so a stale tab or a back button could otherwise un-confirm
+  // a chat that has already proved itself — and the league would go quiet with
+  // nothing to explain why.
+  const league = req.league.onboarding_state === 'live'
+    ? req.league
+    : await db.setOnboardingState(req.league.id, 'awaiting_chat');
   res.json({
     state: league.onboarding_state,
     number: process.env.SENDBLUE_FROM_NUMBER || null,
