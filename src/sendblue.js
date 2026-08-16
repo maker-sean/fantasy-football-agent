@@ -83,7 +83,35 @@ class SendblueProvider extends MessagingProvider {
   }
 
   /** chatId is either a phone number (1:1) or a Sendblue group_id. */
+  /**
+   * Send, refusing anything addressed to a number that opted out.
+   *
+   * The provider already blocks these at its own layer, so this is belt and
+   * braces — but a suppression list held only by a vendor is lost the day you
+   * change vendors, and "our provider handles it" is a weak answer to a carrier
+   * reviewer. Group sends are not checked: a group id is not a person, and the
+   * opt-out remedy there is leaving the chat.
+   */
   async send(chatId, text, opts = {}) {
+    if (!this.looksLikeGroupId(chatId) && !opts.force) {
+      try {
+        const db = require('./db');
+        if (await db.isSuppressed(chatId)) {
+          const err = new Error(`refusing to send: ${chatId} has opted out`);
+          err.suppressed = true;
+          throw err;
+        }
+      } catch (err) {
+        if (err.suppressed) throw err;
+        // A database blip must not stop the bot messaging its leagues; the
+        // provider is still enforcing suppression underneath.
+        console.error('[sendblue] suppression check failed:', err.message);
+      }
+    }
+    return this.sendUnchecked(chatId, text, opts);
+  }
+
+  async sendUnchecked(chatId, text, opts = {}) {
     this.requireFromNumber();
     const isGroup = this.looksLikeGroupId(chatId);
     const path = isGroup ? '/api/send-group-message' : '/api/send-message';

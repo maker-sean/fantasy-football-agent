@@ -145,7 +145,7 @@ function reply({ created, league, leagueId }) {
   }
   return `Got it — ${league.name}, ${league.total_rosters} teams. You're in the queue.\n\n`
        + `Onboarding isn't automatic yet, so I'll text you to set it up rather than leave you `
-       + `guessing. Nothing's charged. Reply STOP to drop off.`;
+       + `guessing. Nothing's charged.\n\nReply STOP to drop off, START to come back.`;
 }
 
 // ------------------------------------------------------- conversation ----
@@ -289,12 +289,31 @@ async function handle(msg, provider, { dryRun = false } = {}) {
   // treated as a Sleeper username — and because a user actually named "stop"
   // exists, the bot cheerfully replied about their leagues instead of opting
   // them out. Swallowing an opt-out is how a number gets shut down.
-  if (RESERVED.test(String(msg.text || ''))) {
+  const reserved = RESERVED.exec(String(msg.text || ''));
+  if (reserved) {
     await endConversation(msg.senderId);
+    const word = reserved[1].toLowerCase();
+    // HELP and INFO are informational, not opt-outs.
+    if (!/^(help|info)$/.test(word)) {
+      await db.suppress(msg.senderId, { reason: word, rawText: msg.text, provider: 'sendblue' });
+      console.log(`[signup] opt-out recorded (${word})`);
+    }
+    // Never reply. The provider suppresses outbound to this number the moment
+    // it sees the keyword, so anything sent here would not arrive — and trying
+    // to talk someone out of an opt-out is the behaviour the rule exists to
+    // prevent. The way back is START, which the provider treats as opt-in and
+    // which this module already recognises as a signup keyword.
     return null;
   }
 
   const parsed = parse(msg.text);
+
+  // START is the carrier's opt-in keyword as well as one of ours, so someone
+  // who stopped by mistake gets back in with the same word the provider
+  // already understands. Clear our own record to match.
+  if (parsed && /^\s*start\b/i.test(String(msg.text || ''))) {
+    await db.unsuppress(msg.senderId).catch(() => null);
+  }
 
   // Mid-conversation, an ordinary message is an answer. A fresh keyword
   // restarts, so someone who lost the thread can always begin again.

@@ -65,6 +65,42 @@ async function leagueById(id) {
   return rows[0] || null;
 }
 
+// -------------------------------------------------------- suppressions ----
+
+/**
+ * Record that a number asked us to stop. Idempotent — a second STOP is the
+ * same person, not a new fact.
+ */
+async function suppress(phone, { reason = 'stop', rawText = null, provider = null } = {}) {
+  const { rows } = await query(
+    `insert into suppressions (phone, reason, raw_text, provider)
+     values ($1,$2,$3,$4)
+     on conflict (phone) do update
+       set opted_out_at = now(), opted_in_at = null,
+           reason = excluded.reason, raw_text = excluded.raw_text
+     returning *`,
+    [normalizePhone(phone), reason, rawText, provider]
+  );
+  return rows[0];
+}
+
+/** Opt back in. The row stays, so the history of a no is never erased. */
+async function unsuppress(phone) {
+  const { rows } = await query(
+    'update suppressions set opted_in_at = now() where phone = $1 returning *',
+    [normalizePhone(phone)]
+  );
+  return rows[0] || null;
+}
+
+async function isSuppressed(phone) {
+  const { rows } = await query(
+    'select 1 from suppressions where phone = $1 and opted_in_at is null limit 1',
+    [normalizePhone(phone)]
+  );
+  return rows.length > 0;
+}
+
 // ------------------------------------------------------------ accounts ----
 
 async function upsertAccount({ email, authUserId = null, displayName = null }) {
@@ -472,6 +508,7 @@ module.exports = {
   pool, query, normalizePhone,
   leagueByChat, leagueById, activeLeagues, upsertLeague,
   upsertMember, bindMember, renameMember, recordClaim, boundPhones,
+  suppress, unsuppress, isSuppressed,
   upsertAccount, accountByEmail, accountByAuthId, acceptTerms,
   leaguesForAccount, leagueForAccount, setOnboardingState, leaguesAwaitingChat,
   upsertSubscription,

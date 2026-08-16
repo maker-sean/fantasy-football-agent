@@ -49,6 +49,20 @@ it('empty', () => assert.strictEqual(parse(''), null));
 it('null', () => assert.strictEqual(parse(null), null));
 it('STOP is not START', () => assert.strictEqual(parse('STOP'), null));
 
+console.log('\nthe way back from an accidental STOP');
+// The line cannot go in a message sent AFTER the opt-out: the provider blocks
+// outbound to that number the moment it sees the keyword, so it would never
+// arrive. It goes in the confirmation they get on the way in, and the way back
+// is START — which the provider already treats as opt-in and which this module
+// recognises as a signup keyword.
+it('the confirmation tells them how to leave AND how to return', () => {
+  const t = reply({ created: true, leagueId: '1', league: { name: 'X', total_rosters: 12 } });
+  assert.ok(/STOP/.test(t), 'says how to stop');
+  assert.ok(/START/.test(t), 'says how to come back');
+});
+it('START is a recognised keyword, so the way back actually works', () =>
+  assert.notStrictEqual(parse('START'), null));
+
 console.log('\nthe reply is honest about the queue');
 it('a real league is confirmed by name and size', () => {
   const t = reply({ created: true, leagueId: '123', league: { name: 'Halcyon Kings', total_rosters: 12 } });
