@@ -10,6 +10,7 @@
 const db = require('./db');
 const drafts = require('./drafts');
 const sleeper = require('./sleeper');
+const fanout = require('./fanout');
 const { weekFacts } = require('./stats');
 const { generateRecap, factsBlock } = require('./recap');
 const { verifyRecap } = require('./verify');
@@ -59,11 +60,16 @@ async function runWeeklyRecaps(provider, opts = {}) {
     const players = await playerMap();
     const leagues = await db.activeLeagues();
 
-    for (const league of leagues) {
+    // Staggered, unlike snapshot captures. A recap has slack — nobody can tell
+    // whether it lands at 9:03 or 9:21 — and spreading them keeps a hundred
+    // leagues from all sending at the same cron minute, which is exactly the
+    // burst shape that trips carrier spam filtering. The offset is stable per
+    // league, so "our recap shows up around 9:20" stays true week to week.
+    const results = await fanout.forEachLeague(leagues, async league => {
       const entry = { league: league.name };
       try {
         const snap = await targetWeek(league.id, currentWeek);
-        if (!snap) { entry.result = 'nothing new to recap'; detail.leagues.push(entry); continue; }
+        if (!snap) { entry.result = 'nothing new to recap'; return entry; }
 
         entry.season = snap.season;
         entry.week = snap.week;
@@ -74,13 +80,11 @@ async function runWeeklyRecaps(provider, opts = {}) {
         if (facts.rulesWarning) {
           entry.result = 'skipped — rules warning';
           entry.warning = facts.rulesWarning;
-          detail.leagues.push(entry);
-          continue;
+          return entry;
         }
         if (!facts.games?.length) {
           entry.result = 'skipped — no completed games';
-          detail.leagues.push(entry);
-          continue;
+          return entry;
         }
 
         const out = await generateRecap(facts, { spice: league.config?.spice ?? spice });
@@ -90,8 +94,7 @@ async function runWeeklyRecaps(provider, opts = {}) {
           entry.result = 'blocked by verification';
           entry.issues = verification.issues;
           console.error(`[weekly] ${league.name} week ${snap.week} failed verification — not queued`);
-          detail.leagues.push(entry);
-          continue;
+          return entry;
         }
 
         const draft = await drafts.createDraft({
@@ -108,7 +111,7 @@ async function runWeeklyRecaps(provider, opts = {}) {
           model: out.meta.model,
         });
 
-        if (!draft) { entry.result = 'draft already existed'; detail.leagues.push(entry); continue; }
+        if (!draft) { entry.result = 'draft already existed'; return entry; }
         entry.draftId = draft.id;
 
         if (drafts.autoPostEnabled(league) && league.chat_id && !dryRun) {
@@ -122,16 +125,14 @@ async function runWeeklyRecaps(provider, opts = {}) {
             raw: { source: 'recap_auto', draft_id: draft.id }, occurredAt: Date.now(),
           });
           entry.result = 'auto-posted';
-          detail.leagues.push(entry);
-          continue;
+          return entry;
         }
 
         const owners = drafts.ownersOf(league);
         if (!owners.length) {
           entry.result = 'queued, but no ownerPhone configured — nobody was notified';
           console.warn(`[weekly] ${league.name}: set config.ownerPhone so approvals can be requested`);
-          detail.leagues.push(entry);
-          continue;
+          return entry;
         }
 
         const note = [
@@ -155,13 +156,20 @@ async function runWeeklyRecaps(provider, opts = {}) {
           }
           entry.result = `queued, ${owners.length} owner(s) notified`;
         }
-        detail.leagues.push(entry);
+        return entry;
       } catch (err) {
         entry.result = 'ERROR';
         entry.error = err.message;
         console.error(`[weekly] ${league.name} failed:`, err.message);
-        detail.leagues.push(entry);
+        return entry;
       }
+    });
+
+    for (const r of results) {
+      // forEachLeague never rejects; the handler above already converts its own
+      // failures into an entry, so an !ok here is a bug in this function rather
+      // than in a league's data.
+      detail.leagues.push(r.ok ? r.value : { result: 'ERROR', error: r.error.message });
     }
 
     const expired = await drafts.expireStale();

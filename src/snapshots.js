@@ -11,6 +11,7 @@
 
 const db = require('./db');
 const sleeper = require('./sleeper');
+const fanout = require('./fanout');
 
 /** Only capture during the real season — preseason snapshots are noise. */
 function isRegularSeason(state) {
@@ -48,27 +49,32 @@ async function captureAll(kind, { force = false } = {}) {
 
     const week = state.week;
 
-    for (const lg of leagues) {
+    // Concurrent, but NOT staggered. Captures are deadline work: the whole
+    // value of a lock snapshot is that it happens before kickoff, and a league
+    // delayed ten minutes for politeness records a lineup that has already
+    // locked. Spreading belongs on sends, which have slack; this does not.
+    const results = await fanout.mapLimit(leagues, async lg => {
+      const payload = await sleeper.weekSnapshot(lg.sleeper_league_id, week);
+      const row = await db.recordSnapshot({
+        leagueId: lg.id, season: state.season, week, kind, payload,
+      });
+      return { row };
+    });
+
+    results.forEach((r, i) => {
+      const lg = leagues[i];
       const entry = { league: lg.name, league_id: lg.id, week };
-      try {
-        const payload = await sleeper.weekSnapshot(lg.sleeper_league_id, week);
-        const row = await db.recordSnapshot({
-          leagueId: lg.id,
-          season: state.season,
-          week,
-          kind,
-          payload,
-        });
-        entry.result = row ? 'captured' : 'already existed (preserved)';
-        entry.snapshot_id = row?.id ?? null;
+      if (r.ok) {
+        entry.result = r.value.row ? 'captured' : 'already existed (preserved)';
+        entry.snapshot_id = r.value.row?.id ?? null;
         console.log(`[snapshot:${kind}] ${lg.name} week ${week}: ${entry.result}`);
-      } catch (err) {
+      } else {
         entry.result = 'ERROR';
-        entry.error = err.message;
-        console.error(`[snapshot:${kind}] ${lg.name} FAILED:`, err.message);
+        entry.error = r.error.message;
+        console.error(`[snapshot:${kind}] ${lg.name} FAILED:`, r.error.message);
       }
       detail.leagues.push(entry);
-    }
+    });
 
     const failed = detail.leagues.filter(l => l.result === 'ERROR');
     await db.finishJob(jobId, failed.length ? 'error' : 'ok', detail);
@@ -102,8 +108,14 @@ async function syncMembers() {
   const jobId = await db.startJob('members:sync');
   const detail = { leagues: [] };
   try {
-    for (const lg of await db.activeLeagues()) {
-      const payload = await sleeper.weekSnapshot(lg.sleeper_league_id, (await sleeper.state()).week);
+    // Hoisted out of the loop. This was fetching the identical NFL state once
+    // per league — a value that cannot change during a single run — which at a
+    // hundred leagues is ninety-nine wasted calls to Sleeper for nothing.
+    const { week } = await sleeper.state();
+    const leagues = await db.activeLeagues();
+
+    const results = await fanout.mapLimit(leagues, async lg => {
+      const payload = await sleeper.weekSnapshot(lg.sleeper_league_id, week);
       const owners = sleeper.rosterOwners(payload);
       for (const o of owners) {
         // Phone stays null until a human is matched to a roster — the roster
@@ -111,9 +123,15 @@ async function syncMembers() {
         // person can bridge them.
         await db.upsertMember(lg.id, o);
       }
-      detail.leagues.push({ league: lg.name, owners: owners.length });
-    }
-    await db.finishJob(jobId, 'ok', detail);
+      return owners.length;
+    });
+
+    results.forEach((r, i) => detail.leagues.push(r.ok
+      ? { league: leagues[i].name, owners: r.value }
+      : { league: leagues[i].name, result: 'ERROR', error: r.error.message }));
+
+    const failed = detail.leagues.filter(l => l.result === 'ERROR');
+    await db.finishJob(jobId, failed.length ? 'error' : 'ok', detail);
     return detail;
   } catch (err) {
     detail.error = err.message;

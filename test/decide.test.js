@@ -149,9 +149,86 @@ it('a league can set its own bot name', () => {
   assert.strictEqual(v.reply, true);
 });
 it('a league can tighten its own rate limit', () => {
-  const v = run([msg('@bot hi')], quiet({ sentToday: 2 }), { config: { maxPerDay: 2 } });
+  const v = run([msg('@bot hi')], quiet({ sentToday: 2 }), { config: { maxPerDayAddressed: 2 } });
   assert.strictEqual(v.reason, 'daily_cap');
 });
+// This asserts the fix for a live incident: the bot went silent on four direct
+// questions because the unprompted cap of 6/hour had been spent. A league
+// lowering the unprompted budget is asking for less interjection, not to be
+// ignored when spoken to — the two caps are separate on purpose.
+it('tightening the unprompted cap does NOT silence direct questions', () => {
+  const v = run([msg('@bot hi')], quiet({ sentToday: 9 }), { config: { maxPerDay: 2 } });
+  assert.strictEqual(v.reply, true);
+  assert.strictEqual(v.reason, 'direct_mention');
+});
+
+// ---------------------------------------------------------------------------
+// The bound-sender gate.
+//
+// The phone number is the thing that leaks — forwarded, screenshotted, pasted
+// into another chat. Without this gate, holding it is an unmetered Claude
+// endpoint that answers in the product's voice.
+// ---------------------------------------------------------------------------
+console.log('\nbound-sender gate');
+
+const addressed = (over = {}) => msg('bot who won last year?', over);
+
+it('a bound member gets an answer', () => {
+  const v = run([addressed({ bound: true })]);
+  assert.strictEqual(v.reply, true);
+  assert.strictEqual(v.reason, 'direct_mention');
+});
+
+it('an unbound number is refused', () => {
+  const v = run([addressed({ bound: false })]);
+  assert.strictEqual(v.reply, false);
+  assert.strictEqual(v.reason, 'unbound_sender');
+});
+
+it('the refusal logs who, so a real member can be found and fixed', () => {
+  const v = run([addressed({ bound: false, senderId: '+15551110009' })]);
+  assert.strictEqual(v.detail.sender, '+15551110009');
+});
+
+it('an unbound number cannot get in by replying to the bot either', () => {
+  const v = run([msg('yeah right', { replyToBot: true, bound: false })]);
+  assert.strictEqual(v.reply, false);
+  assert.strictEqual(v.reason, 'unbound_sender');
+});
+
+it('a bound member later in the same burst is still answered', () => {
+  const v = run([
+    addressed({ messageId: 'a', bound: false }),
+    addressed({ messageId: 'b', senderId: '+15551110002', bound: true }),
+  ]);
+  assert.strictEqual(v.reply, true);
+  assert.strictEqual(v.detail.messageId, 'b');
+});
+
+it('an unbound number NOT addressing the bot is ordinary silence', () => {
+  const v = run([msg('anyone watching the game', { bound: false })]);
+  assert.strictEqual(v.reply, false);
+  assert.notStrictEqual(v.reason, 'unbound_sender');
+});
+
+it('unresolved membership does not gate — no database, nothing to protect', () => {
+  assert.strictEqual(run([addressed()]).reply, true);
+});
+
+it('the gate can be turned off per league', () => {
+  const v = decide({
+    burst: [addressed({ bound: false })], state: quiet(),
+    overrides: { requireBoundSender: false },
+  });
+  assert.strictEqual(v.reply, true);
+});
+
+it('being bound does not outrank the runaway streak guard', () => {
+  const v = run([addressed({ bound: true })], quiet({ botStreak: 5, humansSinceBot: 0 }));
+  assert.strictEqual(v.reply, false);
+  assert.strictEqual(v.reason, 'bot_streak');
+});
+
 
 (async () => {
   console.log('\nburst collection');

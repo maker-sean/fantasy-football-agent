@@ -15,6 +15,7 @@ const espn = require('./espn');
 const sleeper = require('./sleeper');
 const snapshots = require('./snapshots');
 const injuries = require('./injuries');
+const fanout = require('./fanout');
 
 const MIN = 60 * 1000;
 
@@ -72,9 +73,12 @@ async function tick(provider, opts = {}) {
     detail.nextKickoff = { game: soon[0].short_name, minutes: minutesOut };
 
     const leagues = await db.activeLeagues();
-    const players = null;   // loaded lazily below, only if a league needs it
 
-    for (const league of leagues) {
+    // Concurrent, NOT staggered — the same reason as snapshot captures. An
+    // injury alert exists to arrive before kickoff; a league delayed ten
+    // minutes for politeness gets warned about a player already inactive in a
+    // game already underway, which is worse than saying nothing.
+    const results = await fanout.mapLimit(leagues, async league => {
       const entry = { league: league.name };
       try {
         // Capture the lineup just before the first kickoff of this window. One
@@ -95,14 +99,14 @@ async function tick(provider, opts = {}) {
            order by captured_at desc limit 1`,
           [league.id, String(state.season), Number(state.week)]
         );
-        if (!snapRows.length) { entry.result = 'no snapshot yet'; detail.alerts.push(entry); continue; }
+        if (!snapRows.length) { entry.result = 'no snapshot yet'; return entry; }
 
         const risks = await injuries.findRisks(league, snapRows[0].payload, { leadMs, now });
         const fresh = await injuries.filterAlreadySent(league.id, state.season, state.week, risks);
         entry.risks = risks.length;
         entry.new = fresh.length;
 
-        if (!fresh.length) { entry.result = risks.length ? 'all already alerted' : 'clean'; detail.alerts.push(entry); continue; }
+        if (!fresh.length) { entry.result = risks.length ? 'all already alerted' : 'clean'; return entry; }
 
         const text = injuries.composeAlert(fresh);
         entry.message = text;
@@ -131,7 +135,10 @@ async function tick(provider, opts = {}) {
         entry.error = err.message;
         console.error(`[gameday] ${league.name} failed:`, err.message);
       }
-      detail.alerts.push(entry);
+      return entry;
+    });
+    for (const r of results) {
+      detail.alerts.push(r.ok ? r.value : { result: 'ERROR', error: r.error.message });
     }
 
     const failed = detail.alerts.filter(a => a.result === 'ERROR');

@@ -24,6 +24,22 @@ const DEFAULTS = {
   // same — pick a distinctive name per league via leagues.config.botNames.
   botNames: ['bot'],
 
+  // Only answer people bound to a roster in this league.
+  //
+  // The phone number is the thing that leaks — it gets forwarded, screenshotted,
+  // pasted into another chat. Without this, anyone holding it has an
+  // unmetered Claude endpoint that answers in the product's voice. Caps alone
+  // do not fix that: they bound the bill, not who is talking.
+  //
+  // Membership is the natural gate because it is already earned elsewhere — a
+  // binding requires a roster in a real league, so the population of possible
+  // abusers is exactly "people the commissioner let in".
+  //
+  // Cost of a false positive is real, though: a member whose number changed
+  // gets silence with no explanation. The verdict log below is how you find
+  // them — reason 'unbound_sender' with the number attached.
+  requireBoundSender: true,
+
   // Volume limits. Two sets, because being asked something is not the same as
   // deciding to speak.
   //
@@ -141,24 +157,47 @@ function layerSuppress(ctx) {
 function layerMention(ctx) {
   const { burst, cfg } = ctx;
 
+  // `bound` is stamped on each message by the caller, which is where the
+  // database lives. Only an explicit false blocks: undefined means nobody
+  // resolved membership (no database — tests, dry runs), and in that mode
+  // there is no answer generation to protect anyway.
+  const blocked = m => cfg.requireBoundSender && m.bound === false;
+
+  // Remembered rather than returned immediately: a bound member later in the
+  // same burst still deserves an answer, so an unbound mention only settles the
+  // verdict once nobody else has addressed us.
+  let unbound = null;
+
   for (const m of burst) {
     const hit = mentionsBot(m.text, cfg.botNames);
-    if (hit) {
-      return {
-        layer: 'mention', reply: true, reason: 'direct_mention',
-        detail: { matched: hit, messageId: m.messageId, sender: m.senderId },
-      };
+    if (!hit) continue;
+    if (blocked(m)) {
+      unbound = unbound || { matched: hit, messageId: m.messageId, sender: m.senderId };
+      continue;
     }
+    return {
+      layer: 'mention', reply: true, reason: 'direct_mention',
+      detail: { matched: hit, messageId: m.messageId, sender: m.senderId },
+    };
   }
 
   // Someone replying directly to a bot message counts as addressing it. Not all
   // providers expose a reply-to reference; when absent this simply never fires.
   const replyToBot = burst.find(m => m.raw?.reply_to_bot || m.replyToBot);
-  if (replyToBot) {
+  if (replyToBot && !blocked(replyToBot)) {
     return {
       layer: 'mention', reply: true, reason: 'reply_to_bot',
       detail: { messageId: replyToBot.messageId },
     };
+  }
+  if (replyToBot && blocked(replyToBot)) {
+    unbound = unbound || { messageId: replyToBot.messageId, sender: replyToBot.senderId };
+  }
+
+  // Addressed by someone we cannot place. Logged as its own reason so that
+  // "why did the bot ignore me" is one query, not a guess.
+  if (unbound) {
+    return { layer: 'mention', reply: false, reason: 'unbound_sender', detail: unbound };
   }
 
   return null;

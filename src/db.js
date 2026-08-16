@@ -172,6 +172,21 @@ async function recordClaim({ leagueId, phone, claimedText, matchedUser, matchedT
 }
 
 /** Cosmetic only — never touches which team a phone belongs to. */
+/**
+ * Phones bound to a roster in this league, normalized.
+ *
+ * This is the allowlist the reply gate reads. A number that is not in here is
+ * not a league member as far as the bot is concerned, whatever it says.
+ */
+async function boundPhones(leagueId) {
+  const { rows } = await query(
+    `select phone from members
+     where league_id = $1 and phone is not null and sleeper_user_id is not null`,
+    [leagueId]
+  );
+  return new Set(rows.map(r => r.phone));
+}
+
 async function renameMember(leagueId, phone, displayName) {
   const { rows } = await query(
     'update members set display_name = $3 where league_id = $1 and phone = $2 returning *',
@@ -345,7 +360,7 @@ async function recentJobs(limit = 20) {
 module.exports = {
   pool, query, normalizePhone,
   leagueByChat, leagueById, activeLeagues, upsertLeague,
-  upsertMember, bindMember, renameMember, recordClaim,
+  upsertMember, bindMember, renameMember, recordClaim, boundPhones,
   recordMessage,
   recordSnapshot, listSnapshots,
   upsertPlayers, upsertGames, upcomingGames,

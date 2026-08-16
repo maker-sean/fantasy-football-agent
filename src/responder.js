@@ -65,6 +65,23 @@ class Responder {
       ? await conversationState(chatId, this.providerName).catch(() => emptyState(chatId, this.providerName))
       : emptyState(chatId, this.providerName);
 
+    // Resolve membership before deciding. decide() stays pure — it reads a
+    // boolean per message and never touches the database, which is what keeps
+    // it testable without one.
+    if (db && league) {
+      const bound = await db.boundPhones(league.id).catch(err => {
+        console.error('[responder] bound lookup failed:', err.message);
+        return null;
+      });
+      // A failed lookup leaves membership unresolved, which the gate treats as
+      // "not blocked". That is deliberate and safe here rather than a hole: an
+      // attacker cannot induce it, and answering needs the same database, so a
+      // real outage produces no answer regardless of this gate.
+      if (bound) {
+        for (const m of burst) m.bound = bound.has(db.normalizePhone(m.senderId));
+      }
+    }
+
     const verdict = decide({ burst, state, league: league || {} });
     verdict.trigger = meta.trigger;
     verdict.waitedMs = meta.waitedMs;
