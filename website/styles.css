@@ -385,7 +385,11 @@ input[type="range"] { accent-color: var(--turf); }
  * reading the recap is actively hostile, and the recap is the best thing on
  * the page.
  */
-.msgs .msg.pending { opacity: 0; transform: translateY(10px); }
+/* display:none, not opacity:0. An invisible message still occupies layout, so
+   the thread was always full height — which meant it could never sit at the
+   bottom of the screen and margin-top:auto never applied. Out of flow, the
+   conversation grows the way a real one does. */
+.msgs .msg.pending { display: none; }
 .msgs .msg.arrive { animation: arrive .34s cubic-bezier(.2,.7,.3,1) forwards; }
 @keyframes arrive { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
 
@@ -401,7 +405,14 @@ input[type="range"] { accent-color: var(--turf); }
 /* Someone who asked their OS to stop moving things should still get the pitch.
    Everything visible, immediately, no stagger and no dots. */
 @media (prefers-reduced-motion: reduce) {
-  .msgs .msg.pending { opacity: 1; transform: none; }
+  .msgs .msg.pending { display: block; }
   .msgs .msg.arrive { animation: none; }
   .typing { display: none; }
 }
+
+/* Bottom-anchor the thread.
+   A chat starts at the bottom of the screen and grows upward — a short
+   conversation pinned to the top of an empty panel reads as a document, not a
+   conversation. margin-top:auto on the first message rather than
+   justify-content:flex-end, which clips the top of overflowing content. */
+.phone-screen .msgs > .msg:first-child { margin-top: auto; }

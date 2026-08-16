@@ -63,7 +63,7 @@
       <div class="msgs">
 
         <div class="msg bot">
-          <div class="who">Commish · Sunday 8:30 AM</div>
+          <div class="who">Commish AI · Sunday 8:30 AM</div>
           <div class="bubble">Heads up. Ridgeline FC: Alec Pierce is PUP (ankle) — ATL vs IND in 1h. That's a zero unless you swap him.</div>
         </div>
 
@@ -73,12 +73,12 @@
         </div>
 
         <div class="msg bot">
-          <div class="who">Commish · Sunday 8:31 AM</div>
+          <div class="who">Commish AI · Sunday 8:31 AM</div>
           <div class="bubble">Berlin. Kicks off four hours before the rest of the slate. Your lineup locks with it.</div>
         </div>
 
         <div class="msg bot">
-          <div class="who">Commish · Tuesday 9:02 AM</div>
+          <div class="who">Commish AI · Tuesday 9:02 AM</div>
           <div class="bubble">Third &amp; Long lost by 1.08 to Ridgeline FC, which is brutal enough on its own, but then you find out they started Romeo Doubs (3.3) in the FLEX with DJ Moore (20.9) rotting on the bench. Their optimal lineup was 103.44 — they don't just win that game, they stomp it. That's not a beat, that's a self-own.
 
 Tank Commanders rostered Achane, Waddle and Dicker and got zero out of all three. Explain yourselves.
@@ -267,8 +267,29 @@ document.getElementById('yr').textContent = new Date().getFullYear();
   const typing = document.createElement('div');
   typing.innerHTML = '<div class="bubble typing"><i></i><i></i><i></i></div>';
 
+
   const wait = ms => new Promise(r => setTimeout(r, ms));
-  const toBottom = () => msgs.scrollTo({ top: msgs.scrollHeight, behavior: 'smooth' });
+  const frame = () => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+
+  /*
+   * Scroll so the TOP of the new message is visible.
+   *
+   * Scrolling to the bottom is wrong for anything taller than the screen — the
+   * recap is, so it landed mid-sentence with its opening already scrolled off.
+   * Aligning the top and clamping to the real maximum means short messages
+   * behave exactly like scroll-to-bottom and long ones start where you read.
+   */
+  /*
+   * Keep the newest message pinned to the bottom.
+   *
+   * The thread is bottom-anchored in CSS, so a short conversation sits at the
+   * bottom of the screen the way a real one does, and each arrival pushes the
+   * older messages up rather than growing downward from the top.
+   */
+  const reveal = async () => {
+    await frame();                      // let layout settle before measuring
+    msgs.scrollTo({ top: msgs.scrollHeight - msgs.clientHeight, behavior: 'smooth' });
+  };
 
   async function play() {
     for (const m of items.slice(1)) {
@@ -277,7 +298,7 @@ document.getElementById('yr').textContent = new Date().getFullYear();
       if (isBot) {
         typing.className = 'msg bot';
         msgs.insertBefore(typing, m);
-        toBottom();
+        await reveal();
         await wait(typingFor(m));
         typing.remove();
       } else {
@@ -286,7 +307,7 @@ document.getElementById('yr').textContent = new Date().getFullYear();
 
       m.classList.remove('pending');
       m.classList.add('arrive');
-      toBottom();
+      await reveal();
       await wait(dwellFor(m));
     }
   }
