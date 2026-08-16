@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pricing — Commish</title>
+<meta name="description" content="$19 for a full season, per league. Split it twelve ways and it's under two dollars a manager.">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<nav>
+  <div class="wrap">
+    <a class="brand" href="index.html"><span class="mark">C</span> Commish</a>
+    <ul>
+      <li><a href="index.html#how">How it works</a></li>
+      <li><a href="index.html#messaging">Messaging</a></li>
+    </ul>
+  </div>
+</nav>
+
+<section>
+  <div class="wrap">
+    <p class="eyebrow">Pricing</p>
+    <h1>$19 for the season. Per league, not per person.</h1>
+    <p class="lede">Split twelve ways, that's under two dollars a manager for the year. Your league
+    already argues about a $50 buy-in; this is not the expensive part.</p>
+
+    <div class="grid" style="margin-top:44px; grid-template-columns: repeat(auto-fit, minmax(290px,1fr))">
+      <div class="price">
+        <h3>Try it</h3>
+        <p class="amount">$0</p>
+        <p class="muted small">Two weeks, everything included</p>
+        <ul>
+          <li>Every feature, no restrictions</li>
+          <li>Your real league, your real chat</li>
+          <li>No card required</li>
+        </ul>
+        <a class="btn ghost" href="#start" style="display:block; text-align:center">Start free</a>
+      </div>
+
+      <div class="price feature">
+        <h3>Full season</h3>
+        <p class="amount">$19</p>
+        <p class="muted small">Per league, per season</p>
+        <ul>
+          <li>Weekly recap, approved by your commissioner</li>
+          <li>Pre-kickoff injury alerts</li>
+          <li>Trade announcements and three-week grades</li>
+          <li>Answers when the league asks it something</li>
+          <li>iPhone and Android in the same chat</li>
+        </ul>
+        <a class="btn" href="#start" style="display:block; text-align:center">Get started</a>
+      </div>
+    </div>
+
+    <p class="small muted" style="margin-top:24px">
+      Prices in USD. Message and data rates from your carrier may apply.
+      See <a href="terms.html">terms</a> and <a href="privacy.html">privacy policy</a>.
+    </p>
+  </div>
+</section>
+
+<section id="start">
+  <div class="wrap narrow">
+    <h2>Questions your league will ask</h2>
+
+    <h3>Does everyone need an iPhone?</h3>
+    <p>No. Mixed iPhone and Android group chats were the requirement this was built around — three
+    messaging providers were tested and the first two failed on exactly that.</p>
+
+    <h3>Do we have to make a new group chat?</h3>
+    <p>No. It joins the thread you already use. That's the whole point — a bot in a group nobody opens
+    is a bot nobody reads.</p>
+
+    <h3>Does it read everything we say?</h3>
+    <p>It reads the group chat it's in, so it can tell when it's being addressed and answer with context.
+    It replies only when spoken to. What's collected and where it goes is spelled out in the
+    <a href="privacy.html">privacy policy</a>, including that message content is sent to an AI provider to
+    generate replies.</p>
+
+    <h3>Can it post something embarrassing?</h3>
+    <p>The weekly recap goes to your commissioner first — they approve it by text before the league sees
+    it. Statistical claims are checked against your league's own data, and a recap that fails the check is
+    held rather than sent.</p>
+
+    <h3>What if it gets annoying?</h3>
+    <p>Reply <kbd>STOP</kbd>, or have your commissioner remove the number. There are also hard limits on
+    how often it will speak, and silence is its default state.</p>
+
+    <h3>What about ESPN or Yahoo leagues?</h3>
+    <p>Sleeper only right now. We'd rather say that plainly than list a platform we don't really support.</p>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <span>© <span id="yr">2026</span> <span class="todo">[LEGAL BUSINESS NAME]</span></span>
+    <nav><ul>
+      <li><a href="index.html">Home</a></li>
+      <li><a href="privacy.html">Privacy</a></li>
+      <li><a href="terms.html">Terms</a></li>
+      <li><a href="index.html#messaging">Messaging terms</a></li>
+    </ul></nav>
+  </div>
+</footer>
+<script>document.getElementById('yr').textContent = new Date().getFullYear();</script>
+</body>
+</html>

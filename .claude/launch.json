@@ -1,0 +1,14 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "commish-site",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "-m", "http.server", "4321",
+        "--directory", "/Users/seanmihm/fantasy-agent/website"
+      ],
+      "port": 4321
+    }
+  ]
+}

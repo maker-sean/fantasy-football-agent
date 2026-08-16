@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Privacy Policy — Commish</title>
+<meta name="description" content="What Commish collects, why, who it goes to, and how to have it deleted.">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<nav>
+  <div class="wrap">
+    <a class="brand" href="index.html"><span class="mark">C</span> Commish</a>
+    <ul>
+      <li><a href="pricing.html">Pricing</a></li>
+      <li><a href="terms.html">Terms</a></li>
+    </ul>
+  </div>
+</nav>
+
+<div class="legal">
+  <div class="wrap narrow">
+    <h1>Privacy Policy</h1>
+    <p class="muted">Last updated <span class="todo">[DATE]</span></p>
+
+    <div class="callout">
+      <p><strong>The short version.</strong> Commish reads your league's group chat so it can respond
+      when addressed, and reads your Sleeper league so it can write about it. It stores phone numbers to
+      tell managers apart. <strong>It does not sell your phone number, and it does not share your phone
+      number or messages with third parties for their own marketing.</strong> Message content is sent to
+      an AI provider to generate replies — details below.</p>
+    </div>
+
+    <h2>Who we are</h2>
+    <p><span class="todo">[LEGAL BUSINESS NAME]</span> operates Commish. Contact us at
+    <span class="todo">[SUPPORT EMAIL]</span> or <span class="todo">[MAILING ADDRESS]</span>.</p>
+
+    <h2>What we collect</h2>
+    <table>
+      <tr><th>Data</th><th>Why</th></tr>
+      <tr>
+        <td>Your mobile phone number</td>
+        <td>To send messages to your league's group chat, and to tell which manager is which so the
+        agent can address you correctly.</td>
+      </tr>
+      <tr>
+        <td>Messages in the group chat the agent is part of</td>
+        <td>To decide whether it has been addressed, and to answer questions with context. Messages are
+        stored so the agent can follow a conversation rather than reacting to each text in isolation.</td>
+      </tr>
+      <tr>
+        <td>Your Sleeper league data</td>
+        <td>Rosters, lineups, scores, transactions. This is what recaps, injury alerts, and trade grades
+        are built from. Retrieved from Sleeper's public API.</td>
+      </tr>
+      <tr>
+        <td>Your display name and team name</td>
+        <td>So messages refer to you the way your league already does.</td>
+      </tr>
+    </table>
+
+    <p>We do not collect payment card details ourselves — payment is handled by
+    <span class="todo">[PAYMENT PROCESSOR]</span>. We do not ask for your Sleeper password; Commish only
+    reads data Sleeper already makes public.</p>
+
+    <h2>Who your data goes to</h2>
+    <p>We use these providers to run the service. They process data on our behalf and are not permitted
+    to use it for their own purposes:</p>
+    <ul>
+      <li><strong>Sendblue</strong> — delivers and receives the text messages.</li>
+      <li><strong>Supabase</strong> — hosts the database where league data, messages, and phone numbers are stored.</li>
+      <li><strong>Render</strong> — runs the server software.</li>
+      <li><strong>Anthropic</strong> — generates the recap text and the agent's replies. <strong>Recent
+      group chat messages and your league's statistics are sent to Anthropic's API for this.</strong>
+      Your phone number is not included in what is sent for text generation.</li>
+    </ul>
+
+    <h2>What we never do</h2>
+    <ul>
+      <li>We do not sell your personal information.</li>
+      <li>We do not share your mobile phone number or the contents of your messages with third parties
+      for their marketing or promotional purposes.</li>
+      <li>We do not use your league's data to advertise to you.</li>
+      <li>We do not message you individually unless you have messaged us first or your commissioner has
+      set you up to receive approval requests.</li>
+    </ul>
+
+    <h2>How long we keep it</h2>
+    <p>League data and messages are kept while your league is active, because the agent's value depends
+    on remembering past seasons. If you cancel or ask for deletion, we remove your league's data within
+    <span class="todo">[30]</span> days, except where we must keep records for legal or accounting
+    reasons.</p>
+
+    <h2>Your choices</h2>
+    <ul>
+      <li><strong>Stop the messages.</strong> Reply <kbd>STOP</kbd> in the chat, leave the group, or ask
+      your commissioner to remove the number.</li>
+      <li><strong>Get a copy of your data, or have it deleted.</strong> Email
+      <span class="todo">[SUPPORT EMAIL]</span>. We will verify you control the phone number before acting
+      on the request.</li>
+      <li><strong>Depending on where you live</strong>, you may have additional rights to access, correct,
+      delete, or restrict processing of your data. We honor these regardless of where you live.</li>
+    </ul>
+
+    <h2>A group chat is a shared space</h2>
+    <p>Anything you write in a group chat is visible to everyone else in it, including the agent. The
+    agent may quote or summarize league <em>statistics</em> in messages it sends to that same group. It
+    does not repeat your messages to anyone outside the group.</p>
+
+    <h2>Security</h2>
+    <p>Data is encrypted in transit and at rest by our hosting providers. Access to production data is
+    limited to people who need it to operate the service. No system is perfectly secure, and we cannot
+    guarantee absolute security.</p>
+
+    <h2>Children</h2>
+    <p>Commish is not directed at children under 13, and we do not knowingly collect their information.
+    If you believe a child under 13 has been added to a league, contact
+    <span class="todo">[SUPPORT EMAIL]</span> and we will remove the data.</p>
+
+    <h2>Changes</h2>
+    <p>If we change this policy materially, we will update the date above and notify active leagues in
+    their group chat before the change takes effect.</p>
+
+    <h2>Contact</h2>
+    <p><span class="todo">[SUPPORT EMAIL]</span></p>
+  </div>
+</div>
+
+<footer>
+  <div class="wrap">
+    <span>© <span id="yr">2026</span> <span class="todo">[LEGAL BUSINESS NAME]</span></span>
+    <nav><ul>
+      <li><a href="index.html">Home</a></li>
+      <li><a href="pricing.html">Pricing</a></li>
+      <li><a href="terms.html">Terms</a></li>
+      <li><a href="index.html#messaging">Messaging terms</a></li>
+    </ul></nav>
+  </div>
+</footer>
+<script>document.getElementById('yr').textContent = new Date().getFullYear();</script>
+</body>
+</html>

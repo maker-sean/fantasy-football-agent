@@ -1,0 +1,181 @@
+/*
+ * No CDN, no build step, no webfonts.
+ *
+ * The reference mockup pulled Tailwind from cdn.tailwindcss.com, which ships a
+ * compiler to every visitor and is explicitly not for production, plus three
+ * Google font families of which one was never used. A marketing page for a
+ * texting product should load instantly on a phone on stadium wifi.
+ *
+ * The system font stack also removes a third-party request — which matters
+ * here, because the privacy policy on this same site promises we do not hand
+ * visitor data to anyone.
+ */
+
+:root {
+  --carbon: #121212;
+  --surface: #1c1c1c;
+  --raised: #242424;
+  --line: #2d2d2d;
+  --turf: #21a366;
+  --turf-dim: #17724a;
+  --text: #f4f5f6;
+  --muted: #9b9b9b;
+  --radius: 10px;
+  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--carbon);
+  color: var(--text);
+  font-family: var(--sans);
+  font-size: 17px;
+  line-height: 1.65;
+  -webkit-font-smoothing: antialiased;
+}
+
+a { color: var(--turf); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+/* Visible focus everywhere. The reference used <a href="#"> with onclick
+   handlers, which is unreachable by keyboard and invisible to screen readers. */
+:focus-visible { outline: 2px solid var(--turf); outline-offset: 3px; border-radius: 3px; }
+
+.wrap { max-width: 940px; margin: 0 auto; padding: 0 24px; }
+.narrow { max-width: 680px; }
+
+/* ---------------------------------------------------------------- nav ---- */
+nav {
+  border-bottom: 1px solid var(--line);
+  position: sticky; top: 0; z-index: 20;
+  background: rgba(18,18,18,.92);
+  backdrop-filter: saturate(140%) blur(8px);
+}
+nav .wrap { display: flex; align-items: center; justify-content: space-between; height: 66px; gap: 16px; }
+.brand { display: flex; align-items: center; gap: 11px; font-weight: 800; letter-spacing: -.02em; color: var(--text); font-size: 1.05rem; }
+.brand:hover { text-decoration: none; }
+.mark {
+  background: var(--turf); color: #06130c; font-weight: 900;
+  width: 28px; height: 28px; border-radius: 7px;
+  display: grid; place-items: center; font-size: .95rem;
+}
+nav ul { display: flex; align-items: center; gap: 22px; list-style: none; margin: 0; padding: 0; font-size: .93rem; }
+nav ul a { color: var(--muted); font-weight: 600; }
+nav ul a:hover { color: var(--text); text-decoration: none; }
+
+/* -------------------------------------------------------------- type ---- */
+h1 { font-size: clamp(2.1rem, 5.5vw, 3.4rem); line-height: 1.08; letter-spacing: -.032em; font-weight: 800; margin: 0 0 20px; }
+h2 { font-size: clamp(1.4rem, 3vw, 1.85rem); letter-spacing: -.02em; font-weight: 750; margin: 0 0 14px; }
+h3 { font-size: 1.06rem; font-weight: 700; margin: 0 0 8px; }
+p { margin: 0 0 18px; }
+.lede { font-size: clamp(1.05rem, 2.2vw, 1.22rem); color: var(--muted); max-width: 62ch; }
+.eyebrow { font-size: .74rem; text-transform: uppercase; letter-spacing: .14em; font-weight: 700; color: var(--turf); margin-bottom: 14px; }
+.muted { color: var(--muted); }
+.small { font-size: .88rem; }
+
+section { padding: 76px 0; }
+section + section { border-top: 1px solid var(--line); }
+
+/* ------------------------------------------------------------ buttons ---- */
+.btn {
+  display: inline-block; padding: 13px 24px; border-radius: var(--radius);
+  background: var(--turf); color: #06130c; font-weight: 700; font-size: .97rem;
+  border: 1px solid var(--turf);
+}
+.btn:hover { background: #26bd76; text-decoration: none; }
+.btn.ghost { background: transparent; color: var(--text); border-color: var(--line); }
+.btn.ghost:hover { background: var(--raised); border-color: var(--muted); }
+
+/* --------------------------------------------------------- chat mockup ---- */
+/*
+ * Every message below is the bot's real output format, produced by the code in
+ * src/. Team names are substituted — the actual league's names belong in the
+ * group chat, not on a public page.
+ */
+.thread {
+  background: var(--surface); border: 1px solid var(--line);
+  border-radius: 14px; overflow: hidden; margin-top: 44px;
+}
+.thread-bar {
+  display: flex; justify-content: space-between; align-items: center; gap: 12px;
+  padding: 12px 18px; border-bottom: 1px solid var(--line);
+  font-size: .76rem; font-weight: 700; color: var(--muted);
+  text-transform: uppercase; letter-spacing: .09em; background: var(--carbon);
+}
+.thread-bar .live { color: var(--turf); }
+.msgs { padding: 24px 20px; display: flex; flex-direction: column; gap: 20px; }
+.msg { max-width: 84%; }
+.msg .who { font-size: .72rem; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .07em; margin-bottom: 6px; }
+.bubble { padding: 13px 17px; border-radius: 17px; background: var(--raised); border-radius: 17px 17px 17px 5px; white-space: pre-line; }
+.msg.bot { align-self: flex-end; }
+.msg.bot .who { color: var(--turf); text-align: right; }
+.msg.bot .bubble { background: var(--turf-dim); border: 1px solid var(--turf); border-radius: 17px 17px 5px 17px; }
+.bubble.mono { font-family: var(--mono); font-size: .87rem; line-height: 1.55; }
+
+/* ------------------------------------------------------------- cards ---- */
+.grid { display: grid; gap: 18px; grid-template-columns: repeat(auto-fit, minmax(268px, 1fr)); }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 24px; }
+.card h3 { color: var(--text); }
+.card p { margin: 0; color: var(--muted); font-size: .95rem; }
+
+.price { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 30px; }
+.price.feature { border-color: var(--turf); }
+.price .amount { font-size: 2.6rem; font-weight: 800; letter-spacing: -.03em; }
+.price ul { list-style: none; padding: 0; margin: 20px 0 26px; }
+.price li { padding-left: 26px; position: relative; margin-bottom: 11px; font-size: .95rem; }
+.price li::before { content: "✓"; position: absolute; left: 0; color: var(--turf); font-weight: 700; }
+
+/* --------------------------------------------------------- legal pages ---- */
+.legal { padding: 56px 0 88px; }
+.legal h2 { margin-top: 40px; font-size: 1.25rem; }
+.legal h3 { margin-top: 26px; }
+.legal ul { padding-left: 22px; }
+.legal li { margin-bottom: 9px; }
+.legal table { width: 100%; border-collapse: collapse; margin: 18px 0; font-size: .93rem; }
+.legal th, .legal td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+.legal th { color: var(--muted); font-size: .78rem; text-transform: uppercase; letter-spacing: .08em; }
+
+/* Anything the operator must replace before this site goes live. Deliberately
+   loud: a placeholder that ships unnoticed is worse than a missing page. */
+.todo {
+  background: #3a2a00; border: 1px solid #8a6a00; color: #ffd98a;
+  padding: 2px 7px; border-radius: 4px; font-family: var(--mono);
+  font-size: .84rem; font-weight: 700;
+}
+
+.callout { background: var(--surface); border: 1px solid var(--line); border-left: 3px solid var(--turf); border-radius: 0 var(--radius) var(--radius) 0; padding: 18px 22px; margin: 22px 0; }
+.callout p:last-child { margin-bottom: 0; }
+
+kbd { font-family: var(--mono); background: var(--raised); border: 1px solid var(--line); border-radius: 4px; padding: 1px 7px; font-size: .87em; }
+
+/* ------------------------------------------------------------ footer ---- */
+footer { border-top: 1px solid var(--line); padding: 40px 0 56px; color: var(--muted); font-size: .89rem; }
+footer .wrap { display: flex; flex-wrap: wrap; gap: 14px 26px; justify-content: space-between; align-items: center; }
+footer nav { border: 0; position: static; background: none; backdrop-filter: none; }
+footer ul { display: flex; gap: 20px; list-style: none; margin: 0; padding: 0; flex-wrap: wrap; }
+
+@media (max-width: 620px) {
+  section { padding: 54px 0; }
+  /* Links must not wrap: a two-line "How it works" shoves the logo off-centre
+     and makes the bar look broken on a phone, which is where this is read. */
+  nav ul { gap: 15px; font-size: .87rem; }
+  nav ul a { white-space: nowrap; }
+  .msg { max-width: 95%; }
+  .legal table, .legal td, .legal th { display: block; }
+  .legal th { border: 0; padding-bottom: 2px; }
+  .legal td { padding-top: 0; }
+  .legal td:first-of-type { font-weight: 700; color: var(--text); padding-bottom: 2px; border: 0; }
+}
+
+/* Below this the three nav links cannot coexist with the wordmark. Drop the
+   longest one rather than letting the bar wrap. */
+@media (max-width: 440px) {
+  /* Header nav only. `nav ul li:first-child` also matches the footer, which
+     silently dropped a footer link — including, at one point, the legal pages
+     that have to stay reachable for carrier registration. */
+  body > nav ul li:first-child { display: none; }
+  .brand { font-size: .98rem; }
+}
