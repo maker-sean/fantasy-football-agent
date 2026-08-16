@@ -65,6 +65,117 @@ async function leagueById(id) {
   return rows[0] || null;
 }
 
+// ------------------------------------------------------------ accounts ----
+
+async function upsertAccount({ email, authUserId = null, displayName = null }) {
+  const { rows } = await query(
+    `insert into accounts (email, auth_user_id, display_name)
+     values ($1,$2,$3)
+     on conflict (lower(email)) do update
+       set auth_user_id = coalesce(excluded.auth_user_id, accounts.auth_user_id),
+           display_name = coalesce(excluded.display_name, accounts.display_name),
+           updated_at = now()
+     returning *`,
+    [String(email).trim(), authUserId, displayName]
+  );
+  return rows[0];
+}
+
+async function accountByEmail(email) {
+  const { rows } = await query('select * from accounts where lower(email) = lower($1)', [email]);
+  return rows[0] || null;
+}
+
+async function accountByAuthId(authUserId) {
+  const { rows } = await query('select * from accounts where auth_user_id = $1', [authUserId]);
+  return rows[0] || null;
+}
+
+async function acceptTerms(accountId, version) {
+  const { rows } = await query(
+    `update accounts set terms_accepted_at = now(), terms_version = $2, updated_at = now()
+     where id = $1 returning *`,
+    [accountId, version]
+  );
+  return rows[0] || null;
+}
+
+/**
+ * Every league belonging to one account. THIS is what web requests use.
+ *
+ * The distinction from activeLeagues() below is the whole point of the tenancy
+ * migration: one is scoped to a signed-in commissioner, the other deliberately
+ * is not. Getting them confused in a request handler leaks another league's
+ * data, and nothing about the return type would reveal the mistake.
+ */
+async function leaguesForAccount(accountId) {
+  const { rows } = await query(
+    `select l.*, s.status as subscription_status, s.current_period_end
+       from leagues l
+       left join subscriptions s on s.league_id = l.id
+      where l.account_id = $1
+      order by l.created_at`,
+    [accountId]
+  );
+  return rows;
+}
+
+/**
+ * One league, but only if this account owns it.
+ *
+ * Takes the account id as a REQUIRED argument rather than an optional filter,
+ * so a handler cannot forget it and silently get someone else's row.
+ */
+async function leagueForAccount(accountId, leagueId) {
+  const { rows } = await query(
+    'select * from leagues where id = $1 and account_id = $2',
+    [leagueId, accountId]
+  );
+  return rows[0] || null;
+}
+
+async function setOnboardingState(leagueId, state, extra = {}) {
+  const { rows } = await query(
+    `update leagues
+        set onboarding_state = $2,
+            chat_id = coalesce($3, chat_id),
+            chat_linked_at = case when $2 = 'live' then coalesce(chat_linked_at, now()) else chat_linked_at end
+      where id = $1
+      returning *`,
+    [leagueId, state, extra.chatId || null]
+  );
+  return rows[0] || null;
+}
+
+/** Leagues parked on the "add the number to your chat" screen, awaiting proof. */
+async function leaguesAwaitingChat() {
+  const { rows } = await query(
+    `select * from leagues where onboarding_state = 'awaiting_chat' and active`
+  );
+  return rows;
+}
+
+async function upsertSubscription({ leagueId, accountId, stripeSubscriptionId = null, status = 'none', currentPeriodEnd = null, season = null }) {
+  const { rows } = await query(
+    `insert into subscriptions (league_id, account_id, stripe_subscription_id, status, current_period_end, season)
+     values ($1,$2,$3,$4,$5,$6)
+     on conflict (league_id) do update
+       set stripe_subscription_id = coalesce(excluded.stripe_subscription_id, subscriptions.stripe_subscription_id),
+           status = excluded.status,
+           current_period_end = excluded.current_period_end,
+           updated_at = now()
+     returning *`,
+    [leagueId, accountId, stripeSubscriptionId, status, currentPeriodEnd, season]
+  );
+  return rows[0];
+}
+
+/**
+ * Cross-tenant BY DESIGN. The worker legitimately processes every league:
+ * snapshots, injury alerts, trade polling and recaps all run for everyone.
+ *
+ * Never call this from a request handler. Use leaguesForAccount().
+ */
 async function activeLeagues() {
   const { rows } = await query(
     'select * from leagues where active and sleeper_league_id is not null order by created_at'
@@ -361,6 +472,9 @@ module.exports = {
   pool, query, normalizePhone,
   leagueByChat, leagueById, activeLeagues, upsertLeague,
   upsertMember, bindMember, renameMember, recordClaim, boundPhones,
+  upsertAccount, accountByEmail, accountByAuthId, acceptTerms,
+  leaguesForAccount, leagueForAccount, setOnboardingState, leaguesAwaitingChat,
+  upsertSubscription,
   recordMessage,
   recordSnapshot, listSnapshots,
   upsertPlayers, upsertGames, upcomingGames,
