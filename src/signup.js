@@ -37,6 +37,12 @@ const SIGNUP = new RegExp(
   `^\\s*(?:${KEYWORDS.join('|')})\\b[\\s:,-]*([A-Za-z0-9]{4,25})?\\s*$`, 'i'
 );
 
+/**
+ * Words carriers reserve. They are handled at the network level and must never
+ * be interpreted as anything else — not as a username, not as a league choice.
+ */
+const RESERVED = /^\s*(stop|stopall|unsubscribe|cancel|end|quit|help|info)\s*$/i;
+
 /** Unambiguous alphabet: no O/0, no I/1/L. It has to survive being read aloud. */
 const CODE_ALPHABET = '23456789ABCDEFGHJKMNPQRSTVWXYZ';
 const CODE_LEN = 4;
@@ -142,6 +148,133 @@ function reply({ created, league, leagueId }) {
        + `guessing. Nothing's charged. Reply STOP to drop off.`;
 }
 
+// ------------------------------------------------------- conversation ----
+
+/**
+ * The texted signup, for people who never touched the website.
+ *
+ * "Text COMMISH to 555-555-0100" fits in a Reddit comment, on a flyer, or in
+ * one commissioner telling another at a draft. A per-session code does not —
+ * which matters when distribution is word of mouth. So the bare keyword starts
+ * a conversation and the code stays a fast path for site visitors.
+ *
+ * It also demonstrates the product. The thing being sold is a bot you talk to;
+ * making the first interaction a conversation rather than a form is the point.
+ */
+async function getConversation(phone) {
+  const { rows } = await db.query(
+    'select * from signup_conversations where phone = $1 and expires_at > now()',
+    [db.normalizePhone(phone)]
+  );
+  return rows[0] || null;
+}
+
+async function setConversation(phone, state, data = {}) {
+  const { rows } = await db.query(
+    `insert into signup_conversations (phone, state, data, expires_at, updated_at)
+     values ($1,$2,$3, now() + interval '24 hours', now())
+     on conflict (phone) do update
+       set state = excluded.state, data = excluded.data,
+           expires_at = excluded.expires_at, updated_at = now()
+     returning *`,
+    [db.normalizePhone(phone), state, JSON.stringify(data)]
+  );
+  return rows[0];
+}
+
+async function endConversation(phone) {
+  await db.query('delete from signup_conversations where phone = $1', [db.normalizePhone(phone)]);
+}
+
+/** Look up a Sleeper user's leagues for the current or previous season. */
+async function leaguesForUsername(username) {
+  const clean = String(username).trim().replace(/^@/, '');
+  let user;
+  try {
+    user = await sleeper.get(`/user/${encodeURIComponent(clean)}`);
+  } catch { return { user: null, leagues: [] }; }
+  if (!user?.user_id) return { user: null, leagues: [] };
+
+  const now = new Date();
+  const years = now.getMonth() < 2
+    ? [now.getFullYear() - 1, now.getFullYear()]
+    : [now.getFullYear(), now.getFullYear() - 1];
+
+  for (const season of years) {
+    const leagues = await sleeper.get(`/user/${user.user_id}/leagues/nfl/${season}`).catch(() => []);
+    if (leagues?.length) return { user, leagues, season };
+  }
+  return { user, leagues: [] };
+}
+
+function listLeagues(leagues) {
+  return leagues.map((l, i) => `${i + 1}) ${l.name} — ${l.total_rosters} teams`).join('\n');
+}
+
+/**
+ * Advance a conversation. Returns reply text, or null if this message is not
+ * part of one.
+ */
+async function advance(msg) {
+  const convo = await getConversation(msg.senderId);
+  if (!convo) return null;
+
+  const text = String(msg.text || '').trim();
+
+  if (convo.state === 'awaiting_username') {
+    const { user, leagues, season } = await leaguesForUsername(text);
+    if (!user) {
+      return `I couldn't find a Sleeper user called "${text}". It's your username, not your team name — check it and send it again.`;
+    }
+    if (!leagues.length) {
+      await endConversation(msg.senderId);
+      return `Found ${user.display_name}, but there are no NFL leagues on that account. Wrong username, maybe?`;
+    }
+    if (leagues.length === 1) {
+      // Nothing to choose between — don't make them pick from a list of one.
+      await endConversation(msg.senderId);
+      const res = await record({ phone: msg.senderId, leagueId: leagues[0].league_id, rawText: msg.text });
+      return reply({ ...res, leagueId: leagues[0].league_id });
+    }
+    // Candidates are stored, not re-fetched, so the number they reply with
+    // resolves against the exact list they were shown.
+    await setConversation(msg.senderId, 'awaiting_league_choice', {
+      username: user.display_name,
+      season,
+      leagues: leagues.map(l => ({ id: l.league_id, name: l.name, teams: l.total_rosters })),
+    });
+    return `Found ${leagues.length} leagues for ${user.display_name}:\n\n${listLeagues(leagues)}\n\nReply with a number.`;
+  }
+
+  if (convo.state === 'awaiting_league_choice') {
+    const options = convo.data.leagues || [];
+    let chosen = null;
+
+    const n = Number(text.replace(/[^\d]/g, ''));
+    if (Number.isInteger(n) && n >= 1 && n <= options.length) chosen = options[n - 1];
+
+    // Accept the league name too. People answer "the Halcyon one" as readily
+    // as "3", and refusing that is pedantry over a solved problem.
+    if (!chosen && text.length > 2) {
+      const needle = text.toLowerCase();
+      chosen = options.find(o => o.name.toLowerCase().includes(needle))
+        || options.find(o => needle.includes(o.name.toLowerCase()));
+    }
+
+    if (!chosen) {
+      return `I didn't catch that. Reply with a number from 1 to ${options.length}:\n\n`
+           + options.map((o, i) => `${i + 1}) ${o.name}`).join('\n');
+    }
+
+    await endConversation(msg.senderId);
+    const res = await record({ phone: msg.senderId, leagueId: chosen.id, rawText: msg.text });
+    return reply({ ...res, leagueId: chosen.id });
+  }
+
+  await endConversation(msg.senderId);
+  return null;
+}
+
 /**
  * Handle an inbound message if it is a signup. Returns null when it is not,
  * so callers can fall through to the normal reply path.
@@ -149,8 +282,38 @@ function reply({ created, league, leagueId }) {
 async function handle(msg, provider, { dryRun = false } = {}) {
   // Group messages are a league talking, not a person signing up.
   if (msg.isGroup) return null;
+
+  // Carrier-reserved words always win, and must never be consumed as an answer.
+  //
+  // This was a real bug: someone who texted STOP mid-conversation had it
+  // treated as a Sleeper username — and because a user actually named "stop"
+  // exists, the bot cheerfully replied about their leagues instead of opting
+  // them out. Swallowing an opt-out is how a number gets shut down.
+  if (RESERVED.test(String(msg.text || ''))) {
+    await endConversation(msg.senderId);
+    return null;
+  }
+
   const parsed = parse(msg.text);
-  if (!parsed) return null;
+
+  // Mid-conversation, an ordinary message is an answer. A fresh keyword
+  // restarts, so someone who lost the thread can always begin again.
+  if (!parsed) {
+    const answer = await advance(msg);
+    if (answer === null) return null;
+    if (!dryRun && provider) await provider.send(msg.senderId, answer);
+    return { handled: true, conversational: true, reply: answer };
+  }
+
+  // Keyword with no argument: start the conversation rather than dead-ending
+  // them at "go and get a code from the website".
+  if (!parsed.leagueId && !parsed.code) {
+    await setConversation(msg.senderId, 'awaiting_username', {});
+    const text = "Let's get your league in. What's your Sleeper username?\n\n"
+               + "(That's the name you log in with, not your team name.)";
+    if (!dryRun && provider) await provider.send(msg.senderId, text);
+    return { handled: true, conversational: true, started: true, reply: text };
+  }
 
   // A short code carries the league the visitor already chose on the site.
   let leagueId = parsed.leagueId;
@@ -184,6 +347,7 @@ async function handle(msg, provider, { dryRun = false } = {}) {
 
 module.exports = {
   parse, record, reply, handle,
+  advance, getConversation, setConversation, endConversation, leaguesForUsername,
   issueCode, resolveCode, newCode,
-  KEYWORD, KEYWORDS, SIGNUP, CODE_ALPHABET, CODE_LEN,
+  KEYWORD, KEYWORDS, SIGNUP, RESERVED, CODE_ALPHABET, CODE_LEN,
 };

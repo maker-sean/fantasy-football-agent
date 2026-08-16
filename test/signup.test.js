@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /** START parsing: the website's only call to action lands here. */
 const assert = require('assert');
-const { parse, reply, KEYWORD, CODE_ALPHABET, newCode } = require('../src/signup');
+const { parse, reply, KEYWORD, CODE_ALPHABET, newCode, RESERVED } = require('../src/signup');
 
 let pass = 0;
 const it = (n, f) => { try { f(); console.log('  ok   ' + n); pass++; }
@@ -69,6 +69,21 @@ it('the keyword with no code asks for one', () => {
   const t = reply({ created: true, leagueId: null, league: null });
   assert.ok(/code/i.test(t));
   assert.ok(t.includes(KEYWORD), 'tells them the exact word to send');
+});
+
+console.log('\ncarrier-reserved words must never be swallowed');
+// A real bug this guards: someone mid-conversation texted STOP, it was treated
+// as a Sleeper username, and because a user literally named "stop" exists the
+// bot replied about their leagues instead of opting them out.
+for (const w of ['STOP', 'stop', ' Stop ', 'STOPALL', 'unsubscribe', 'CANCEL', 'end', 'quit', 'HELP', 'info'])
+  it(`"${w.trim()}" is reserved`, () => assert.strictEqual(RESERVED.test(w), true));
+
+it('a username that merely contains "stop" is not reserved', () =>
+  assert.strictEqual(RESERVED.test('stopwatch_steve'), false));
+it('a sentence containing stop is not reserved', () =>
+  assert.strictEqual(RESERVED.test('when does the bot stop'), false));
+it('reserved words are also not signup keywords', () => {
+  for (const w of ['STOP', 'HELP']) assert.strictEqual(parse(w), null);
 });
 
 console.log(`\n${pass} passing`);
