@@ -1,11 +1,10 @@
 # commish-agent
 
-> **PRIVATE REPO — do not make public without scrubbing history.**
-> Real phone numbers of league members appear in commit messages and docs from
-> Milestone 0 testing (~139 occurrences across history). Making this public
-> exposes other people's personal data permanently, and a later rewrite does not
-> help anyone who already cloned it. If it ever needs to be public, rewrite
-> history with `git filter-repo` FIRST.
+> **Keep this repo private.** Phone numbers were scrubbed from history on
+> 2026-08-15 and replaced with reserved `555-01xx` placeholders, but the docs
+> and commit messages still quote real group-chat messages and name real league
+> members. Runtime phone numbers live only in Postgres and the gitignored
+> `logs/` — never in code.
 
 
 An AI agent that sustains fantasy football league engagement year-round — the
