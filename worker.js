@@ -25,6 +25,7 @@ const inbound = require('./src/inbound');
 const { SendblueProvider } = require('./src/sendblue');
 const { Responder } = require('./src/responder');
 const { runWeeklyRecaps } = require('./src/weekly');
+const gameday = require('./src/gameday');
 
 const TZ = process.env.CRON_TZ || 'America/New_York';
 const POLL_MS = Number(process.env.POLL_INTERVAL_SECONDS || 10) * 1000;
@@ -44,8 +45,16 @@ const sendblue = (process.env.SENDBLUE_API_KEY_ID && process.env.SENDBLUE_API_SE
     )
   : null;
 
-// NFL slates in ET. Each fires a few minutes ahead of the real kickoff.
+// The game-day tick replaces guessing at slate times: every capture and alert
+// is driven by a real kickoff from the schedule. Week 10 of 2025 started at
+// 09:30 ET in Berlin — a fixed Sunday-noon job missed it by three and a half
+// hours, silently.
+//
+// The fixed slate captures below are kept as a safety net in case ESPN is
+// unreachable; they are insert-only, so a duplicate costs nothing.
 const JOBS = [
+  ['gameday',        '*/15 * * * *', () => gameday.tick(sendblue, { dryRun: DRY_RUN })],
+  ['schedule',       '0 5 * * *',    () => gameday.refreshSchedule()],
   ['lock_thu',       '15 20 * * 4', () => snapshots.captureAll('lock_thu')],
   ['lock_sun_early', '55 12 * * 0', () => snapshots.captureAll('lock_sun_early')],
   ['lock_sun_late',  '55 15 * * 0', () => snapshots.captureAll('lock_sun_late')],

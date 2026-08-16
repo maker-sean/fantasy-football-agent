@@ -45,6 +45,12 @@ async function allPlayers() {
       full_name: name,
       position: p.position || null,
       team: p.team || null,
+      // Injury fields drive the pre-kickoff alert. They were trimmed out of the
+      // original slim, which is why nothing could warn about an inactive
+      // starter until now.
+      injury_status: p.injury_status || null,
+      injury_body_part: p.injury_body_part || null,
+      player_status: p.status || null,
     });
   }
   return out;

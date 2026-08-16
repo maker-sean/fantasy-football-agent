@@ -256,20 +256,64 @@ async function upsertPlayers(players) {
   const names = players.map(p => p.full_name);
   const positions = players.map(p => p.position);
   const teams = players.map(p => p.team);
+  const injuries = players.map(p => p.injury_status ?? null);
+  const parts = players.map(p => p.injury_body_part ?? null);
+  const statuses = players.map(p => p.player_status ?? null);
 
   await query(
-    `insert into players (player_id, full_name, position, team, updated_at)
-     select p.player_id, p.full_name, p.position, p.team, now()
-     from unnest($1::text[], $2::text[], $3::text[], $4::text[])
-       as p(player_id, full_name, position, team)
+    `insert into players (player_id, full_name, position, team,
+                          injury_status, injury_body_part, player_status, updated_at)
+     select p.player_id, p.full_name, p.position, p.team,
+            p.injury_status, p.injury_body_part, p.player_status, now()
+     from unnest($1::text[], $2::text[], $3::text[], $4::text[],
+                 $5::text[], $6::text[], $7::text[])
+       as p(player_id, full_name, position, team,
+            injury_status, injury_body_part, player_status)
      on conflict (player_id) do update
-       set full_name = excluded.full_name,
-           position  = excluded.position,
-           team      = excluded.team,
+       set full_name        = excluded.full_name,
+           position         = excluded.position,
+           team             = excluded.team,
+           injury_status    = excluded.injury_status,
+           injury_body_part = excluded.injury_body_part,
+           player_status    = excluded.player_status,
            updated_at = now()`,
-    [ids, names, positions, teams]
+    [ids, names, positions, teams, injuries, parts, statuses]
   );
   return players.length;
+}
+
+// --------------------------------------------------------------- games ----
+
+async function upsertGames(games) {
+  if (!games.length) return 0;
+  for (const g of games) {
+    await query(
+      `insert into games (espn_id, season, week, kickoff_at, home_team, away_team,
+                          short_name, state, neutral_site, venue, updated_at)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10, now())
+       on conflict (espn_id) do update
+         set kickoff_at = excluded.kickoff_at,
+             state      = excluded.state,
+             short_name = excluded.short_name,
+             venue      = excluded.venue,
+             updated_at = now()`,
+      [g.espnId, g.season, g.week, g.kickoffAt, g.homeTeam, g.awayTeam,
+       g.shortName, g.state, g.neutralSite, g.venue]
+    );
+  }
+  return games.length;
+}
+
+/** Games that have not kicked off yet, soonest first. */
+async function upcomingGames(season, week, withinMs = null) {
+  const { rows } = await query(
+    `select * from games
+     where season = $1 and week = $2 and kickoff_at > now()
+       and ($3::bigint is null or kickoff_at <= now() + ($3 || ' milliseconds')::interval)
+     order by kickoff_at`,
+    [String(season), Number(week), withinMs == null ? null : String(withinMs)]
+  );
+  return rows;
 }
 
 // ------------------------------------------------------------ job_runs ----
@@ -304,6 +348,6 @@ module.exports = {
   upsertMember, bindMember, renameMember, recordClaim,
   recordMessage,
   recordSnapshot, listSnapshots,
-  upsertPlayers,
+  upsertPlayers, upsertGames, upcomingGames,
   startJob, finishJob, recentJobs,
 };

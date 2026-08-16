@@ -34,12 +34,13 @@
     "backfill": "node scripts/backfill.js",
     "recap": "node scripts/recap.js",
     "league-rules": "node scripts/league-rules.js",
-    "test": "node test/lineup.test.js && node test/decide.test.js && node test/control.test.js && node test/identity.test.js",
+    "test": "node test/lineup.test.js && node test/decide.test.js && node test/control.test.js && node test/identity.test.js && node test/injuries.test.js",
     "decide-replay": "node scripts/decide-replay.js",
     "messages-backfill": "node scripts/messages-backfill.js",
     "link-member": "node scripts/link-member.js",
     "ask": "node scripts/ask.js",
-    "drafts": "node scripts/drafts.js"
+    "drafts": "node scripts/drafts.js",
+    "gameday": "node scripts/gameday.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.117.1",
