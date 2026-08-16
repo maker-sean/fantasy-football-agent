@@ -88,19 +88,102 @@ async function upsertLeague({ name, sleeperLeagueId, provider = 'sendblue', chat
 
 // ------------------------------------------------------------- members ----
 
-async function upsertMember(leagueId, { phone, sleeperUserId, sleeperRosterId, displayName, isBot = false }) {
+/**
+ * Bind a phone to a Sleeper user — WRITE ONCE.
+ *
+ * The phone is verified (it comes from the transport). Which team it belongs to
+ * is a claim, and in a group chat anyone can make one. Observed in this very
+ * league: the same number said "This is Marcus" and, four days later, "this is
+ * Sean." If the last claim wins, a member can take over someone else's identity
+ * and the bot will confidently misattribute their team and record.
+ *
+ * So a binding is refused rather than overwritten. Display names stay editable —
+ * "Marcus" to "Marc" is cosmetic and carries no authority.
+ *
+ * @returns { member, outcome, existing }
+ *   outcome: 'bound' | 'unchanged' | 'rejected_phone_taken' | 'rejected_team_taken'
+ */
+async function bindMember(leagueId, { phone, sleeperUserId, sleeperRosterId, displayName, boundBy = 'cli', boundVia = 'manual', force = false }) {
   const normalized = normalizePhone(phone);
+
+  const { rows: existingRows } = await query(
+    `select * from members where league_id = $1 and (phone = $2 or sleeper_user_id = $3)`,
+    [leagueId, normalized, sleeperUserId || null]
+  );
+
+  const byPhone = existingRows.find(r => r.phone === normalized);
+  const byUser = existingRows.find(r => r.sleeper_user_id && r.sleeper_user_id === sleeperUserId);
+
+  // Already exactly this pairing — a name update is fine.
+  if (byPhone && byPhone.sleeper_user_id === sleeperUserId) {
+    if (displayName && displayName !== byPhone.display_name) {
+      const { rows } = await query(
+        'update members set display_name = $2 where id = $1 returning *',
+        [byPhone.id, displayName]
+      );
+      return { member: rows[0], outcome: 'unchanged', existing: byPhone };
+    }
+    return { member: byPhone, outcome: 'unchanged', existing: byPhone };
+  }
+
+  if (!force) {
+    // This phone is already someone. Refuse to move it.
+    if (byPhone && byPhone.sleeper_user_id && byPhone.locked) {
+      return { member: null, outcome: 'rejected_phone_taken', existing: byPhone };
+    }
+    // This team already belongs to a different phone.
+    if (byUser && byUser.phone && byUser.phone !== normalized && byUser.locked) {
+      return { member: null, outcome: 'rejected_team_taken', existing: byUser };
+    }
+  }
+
+  // Clear any conflicting rows only when explicitly forced (commissioner).
+  if (force) {
+    if (byUser && byUser.phone !== normalized) {
+      await query('update members set sleeper_user_id = null, sleeper_roster_id = null where id = $1', [byUser.id]);
+    }
+  }
+
   const { rows } = await query(
-    `insert into members (league_id, phone, sleeper_user_id, sleeper_roster_id, display_name, is_bot)
-     values ($1, $2, $3, $4, $5, $6)
+    `insert into members (league_id, phone, sleeper_user_id, sleeper_roster_id, display_name,
+                          bound_at, bound_by, bound_via)
+     values ($1,$2,$3,$4,$5, now(), $6, $7)
      on conflict (league_id, phone) where phone is not null
-     do update set display_name = coalesce(excluded.display_name, members.display_name),
-                   sleeper_user_id = coalesce(excluded.sleeper_user_id, members.sleeper_user_id),
-                   sleeper_roster_id = coalesce(excluded.sleeper_roster_id, members.sleeper_roster_id)
+     do update set sleeper_user_id   = excluded.sleeper_user_id,
+                   sleeper_roster_id = excluded.sleeper_roster_id,
+                   display_name      = coalesce(excluded.display_name, members.display_name),
+                   bound_at = now(), bound_by = excluded.bound_by, bound_via = excluded.bound_via
      returning *`,
-    [leagueId, normalized, sleeperUserId || null, sleeperRosterId ?? null, displayName || null, isBot]
+    [leagueId, normalized, sleeperUserId || null, sleeperRosterId ?? null,
+     displayName || null, boundBy, boundVia]
+  );
+  return { member: rows[0], outcome: force && byPhone ? 'rebound' : 'bound', existing: byPhone || byUser || null };
+}
+
+/** Record every identity claim, accepted or not. Rejections are the useful ones. */
+async function recordClaim({ leagueId, phone, claimedText, matchedUser, matchedTeam, outcome, detail = {} }) {
+  const { rows } = await query(
+    `insert into identity_claims (league_id, phone, claimed_text, matched_user, matched_team, outcome, detail)
+     values ($1,$2,$3,$4,$5,$6,$7) returning *`,
+    [leagueId, normalizePhone(phone), claimedText || null, matchedUser || null,
+     matchedTeam || null, outcome, detail]
   );
   return rows[0];
+}
+
+/** Cosmetic only — never touches which team a phone belongs to. */
+async function renameMember(leagueId, phone, displayName) {
+  const { rows } = await query(
+    'update members set display_name = $3 where league_id = $1 and phone = $2 returning *',
+    [leagueId, normalizePhone(phone), displayName]
+  );
+  return rows[0] || null;
+}
+
+/** Back-compat shim; new code should call bindMember. */
+async function upsertMember(leagueId, opts) {
+  const { member } = await bindMember(leagueId, { ...opts, boundVia: opts.boundVia || 'legacy' });
+  return member;
 }
 
 // ------------------------------------------------------------ messages ----
@@ -218,7 +301,7 @@ async function recentJobs(limit = 20) {
 module.exports = {
   pool, query, normalizePhone,
   leagueByChat, leagueById, activeLeagues, upsertLeague,
-  upsertMember,
+  upsertMember, bindMember, renameMember, recordClaim,
   recordMessage,
   recordSnapshot, listSnapshots,
   upsertPlayers,

@@ -34,7 +34,7 @@
     "backfill": "node scripts/backfill.js",
     "recap": "node scripts/recap.js",
     "league-rules": "node scripts/league-rules.js",
-    "test": "node test/lineup.test.js && node test/decide.test.js && node test/control.test.js",
+    "test": "node test/lineup.test.js && node test/decide.test.js && node test/control.test.js && node test/identity.test.js",
     "decide-replay": "node scripts/decide-replay.js",
     "messages-backfill": "node scripts/messages-backfill.js",
     "link-member": "node scripts/link-member.js",

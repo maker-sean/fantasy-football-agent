@@ -13,6 +13,7 @@
  *
  * Usage:
  *   node scripts/link-member.js --list
+ *   node scripts/link-member.js --phone 5555550102 --sleeper mrenshaw7 --force
  *   node scripts/link-member.js --phone 5555550102 --sleeper mrenshaw7
  *   node scripts/link-member.js --phone 5555550102 --sleeper mrenshaw7 --name Marcus
  */
@@ -116,16 +117,46 @@ async function sleeperUsers(leagueId) {
     return;
   }
 
-  const row = await db.upsertMember(live.id, {
+  const force = has('force');
+  const { member, outcome, existing } = await db.bindMember(live.id, {
     phone,
     sleeperUserId: match.userId,
     sleeperRosterId: match.rosterId,
     displayName: name || match.display,
+    boundBy: force ? 'commissioner' : 'cli',
+    boundVia: force ? 'cli-force' : 'cli',
+    force,
   });
 
-  console.log('Linked:');
+  await db.recordClaim({
+    leagueId: live.id, phone, claimedText: sleeperArg,
+    matchedUser: match.username, matchedTeam: match.team,
+    outcome: outcome === 'rebound' ? 'rebound_by_commissioner'
+           : outcome === 'bound' || outcome === 'unchanged' ? 'bound' : outcome,
+    detail: { force, displayName: name || match.display },
+  });
+
+  if (!member) {
+    console.error('REFUSED — bindings are write-once.\n');
+    if (outcome === 'rejected_phone_taken') {
+      console.error(`  ${phone} is already bound to "${existing.display_name}" (${existing.sleeper_user_id}).`);
+      console.error('  A phone number is verified; which team it belongs to is only a claim.');
+      console.error('  Anyone in a group chat can say "this is Sean", so the first binding stands.');
+    } else {
+      console.error(`  ${match.username} is already claimed by ${existing.phone} ("${existing.display_name}").`);
+    }
+    console.error('\n  If this is genuinely wrong, override it deliberately:');
+    console.error(`    node scripts/link-member.js --phone ${phone} --sleeper ${sleeperArg} --force`);
+    process.exitCode = 1;
+    return;
+  }
+
+  console.log(outcome === 'rebound' ? 'REBOUND (commissioner override):' : 'Linked:');
   console.log(`  ${phone}  ->  ${match.username}  "${match.team || match.display}"  (roster ${match.rosterId})`);
-  console.log(`  known as: ${row.display_name}`);
+  console.log(`  known as: ${member.display_name}`);
+  if (outcome === 'rebound' && existing) {
+    console.log(`  was: "${existing.display_name}" — recorded in identity_claims`);
+  }
   console.log('\nThe bot can now answer questions about this person by name.');
 })()
   .catch(err => { console.error('ERROR:', err.message); process.exitCode = 1; })
