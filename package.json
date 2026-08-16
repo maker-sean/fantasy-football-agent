@@ -40,7 +40,8 @@
     "link-member": "node scripts/link-member.js",
     "ask": "node scripts/ask.js",
     "drafts": "node scripts/drafts.js",
-    "gameday": "node scripts/gameday.js"
+    "gameday": "node scripts/gameday.js",
+    "web": "node web/server.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.117.1",

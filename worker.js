@@ -27,6 +27,7 @@ const { Responder } = require('./src/responder');
 const { runWeeklyRecaps } = require('./src/weekly');
 const gameday = require('./src/gameday');
 const trades = require('./src/trades');
+const chatlink = require('./src/chatlink');
 
 const TZ = process.env.CRON_TZ || 'America/New_York';
 const POLL_MS = Number(process.env.POLL_INTERVAL_SECONDS || 10) * 1000;
@@ -181,6 +182,15 @@ async function generateReply({ burst, league }) {
     });
 
     stopPolling = poller.startPolling(sendblue, async msg => {
+      // Onboarding step 6 completes here, not in the browser. A league parked
+      // on `awaiting_chat` goes live only when a message actually arrives from
+      // its group — the commissioner cannot assert it into being.
+      try {
+        await chatlink.tryLink(msg, { provider: 'sendblue' });
+      } catch (err) {
+        console.error('[chatlink] failed:', err.message);
+      }
+
       const result = await inbound.handleInbound(msg, sendblue, {
         providerName: 'sendblue',
         echo: false,          // the Responder owns replying now

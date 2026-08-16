@@ -10,6 +10,36 @@
 # once and stores it; it never lands in git.
 
 services:
+  # The commissioner app and the marketing site, one origin. Unlike the worker
+  # this one binds a port and answers a health check, so a free plan's sleeping
+  # would only add a cold start to a signup — not stop a kickoff capture.
+  - type: web
+    name: commish-web
+    runtime: node
+    plan: starter
+    region: ohio
+    branch: main
+    autoDeploy: true
+    buildCommand: npm ci --omit=dev
+    startCommand: npm run web
+    healthCheckPath: /health
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      # Supabase Auth. The browser gets a token; the server asks Supabase who it
+      # belongs to. No signing secret here and no hand-rolled crypto.
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_ANON_KEY
+        sync: false
+      # Shown on the "add me to your group chat" screen.
+      - key: SENDBLUE_FROM_NUMBER
+        sync: false
+      - key: TERMS_VERSION
+        value: "2026-08-16"
+      - key: NODE_ENV
+        value: production
+
   - type: worker
     name: commish-agent-worker
     runtime: node
