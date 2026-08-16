@@ -243,6 +243,42 @@ Cron (ET, in `worker.js`): `lock_thu` Thu 20:15 · `lock_sun_early` Sun 12:55 ·
 `lock_sun_late` Sun 15:55 · `lock_sun_night` Sun 20:10 · `lock_mon` Mon 20:10 ·
 `postscore` Tue 06:00 · `players` daily 04:00 · `members` daily 04:30.
 
+## Commissioner console — required capabilities
+
+Not built. Recorded here as it becomes clear what it has to do, so the first
+version is designed rather than guessed.
+
+**Identity — the reason it exists.** Bindings are write-once by design, because
+a phone number is verified and a team claim is not (see `identity_claims`).
+That makes a commissioner override necessary rather than optional:
+
+- [ ] View every member: phone, team, display name, who bound it and when
+- [ ] **Rebind a phone to a different team** — the `--force` path, with the
+      previous binding recorded. This is the only way to fix a wrong claim.
+- [ ] Rename a member (cosmetic; must never move the team binding)
+- [ ] Unbind a phone entirely, e.g. someone leaves the league
+- [ ] Review rejected claims — a second person claiming a taken team is either
+      a mistake to fix or someone probing what the bot will believe
+- [ ] See which league members have no phone yet, and which phones are unmapped
+
+**League settings**, all of which live in `leagues.config` today and are edited
+by hand with SQL:
+
+- [ ] Bot trigger names (`botNames`) — the league picked "Jarvis" unprompted
+- [ ] Owner phone(s) for recap approval
+- [ ] Spice level, recap length
+- [ ] Auto-post toggle — skip approval once a league has earned trust
+- [ ] Pause the bot without deploying
+
+**Recaps:**
+
+- [ ] Read a pending draft and approve or kill it (the phone flow, on a screen)
+- [ ] See past recaps and whether they were sent
+
+**Access:** every one of these is a privileged action on other people's
+identities and messages, so the console needs real auth before it holds
+anything beyond one league the author runs.
+
 ## Assumed, not measured — revisit with real data
 
 - **Recap length: 100 words** (`RECAP_WORDS`, or `--words`). Short keeps it
