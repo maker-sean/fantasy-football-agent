@@ -257,6 +257,24 @@ app.post('/api/signup-intent', wrap(async (req, res) => {
   });
 }));
 
+/**
+ * Has this code been texted in yet?
+ *
+ * Returns only a boolean, and answers identically for an unknown code and an
+ * unused one. That is deliberate: the code space is 30^4, and distinguishing
+ * "no such code" from "not used yet" would turn this into an enumeration
+ * oracle. The person polling already knows which league they picked, so there
+ * is nothing else worth returning.
+ */
+app.get('/api/signup-intent/:code/status', wrap(async (req, res) => {
+  const code = String(req.params.code || '').toUpperCase();
+  if (!/^[A-Z0-9]{4}$/.test(code)) return res.json({ used: false });
+  const { rows } = await db.query(
+    'select used_at from signup_codes where code = $1 and used_at is not null', [code]
+  );
+  res.json({ used: rows.length > 0, usedAt: rows[0]?.used_at || null });
+}));
+
 // --- onboarding step 4: pick a Sleeper league ------------------------------
 
 app.get('/api/sleeper/leagues', requireAccount, wrap(async (req, res) => {

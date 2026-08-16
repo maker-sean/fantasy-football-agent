@@ -78,7 +78,20 @@
         <p id="copy-msg" class="msg-line" role="status" aria-live="polite"></p>
       </div>
 
-      <div class="callout">
+      <!-- Pending until the text actually lands. Nothing here is a button the
+           visitor can press to declare themselves done — the only thing that
+           moves it is a real message arriving. -->
+      <div class="waiting" id="waiting">
+        <span class="pulse" id="pulse" aria-hidden="true"></span>
+        <div>
+          <strong id="wait-title">Waiting for your text…</strong>
+          <p class="small muted" style="margin:4px 0 0" id="wait-note">
+            This updates by itself the moment it arrives. You can close this once it does.
+          </p>
+        </div>
+      </div>
+
+      <div class="callout" id="next-callout">
         <h3>What happens next — honestly</h3>
         <p class="small" style="margin-bottom:10px">
           Commish is in early access and onboarding is not automatic yet. Your text puts your league
@@ -231,6 +244,7 @@ async function choose(lg) {
       $('qr-svg').innerHTML = d.qrSvg;
       $('qr').hidden = false;
     }
+    watchForText(d.code);
   } catch {
     say($('copy-msg'), "Couldn't set up your code just now — refresh and pick your league again.", 'err');
   }
@@ -239,7 +253,44 @@ async function choose(lg) {
 $('find').addEventListener('click', findLeagues);
 $('username').addEventListener('keydown', e => { if (e.key === 'Enter') findLeagues(); });
 $('back').addEventListener('click', () => show('step-user'));
-$('restart').addEventListener('click', () => { $('username').value = ''; say($('user-msg'), ''); show('step-user'); });
+$('restart').addEventListener('click', () => {
+  if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+  $('username').value = '';
+  say($('user-msg'), '');
+  show('step-user');
+});
+
+/**
+ * Poll until the text lands.
+ *
+ * Gives up after ten minutes rather than polling a forgotten tab forever — by
+ * then the person has either sent it or walked away, and the reply they get by
+ * text is the real confirmation regardless.
+ */
+let pollTimer = null;
+function watchForText(code) {
+  if (pollTimer) clearInterval(pollTimer);
+  const started = Date.now();
+
+  const check = async () => {
+    if (Date.now() - started > 10 * 60 * 1000) { clearInterval(pollTimer); pollTimer = null; return; }
+    try {
+      const r = await fetch(`/api/signup-intent/${encodeURIComponent(code)}/status`);
+      const d = await r.json();
+      if (!d.used) return;
+      clearInterval(pollTimer); pollTimer = null;
+      const w = $('waiting');
+      w.classList.add('done');
+      $('pulse').textContent = '✓';
+      $('pulse').classList.add('check');
+      $('wait-title').textContent = "Got it — you're in the queue.";
+      $('wait-note').textContent = "We'll text you when it's your league's turn. Nothing else to do.";
+    } catch { /* transient; the next tick retries */ }
+  };
+
+  pollTimer = setInterval(check, 4000);
+  check();
+}
 
 $('copy').addEventListener('click', async () => {
   try {

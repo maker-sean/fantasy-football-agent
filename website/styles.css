@@ -273,3 +273,13 @@ input[type="range"] { accent-color: var(--turf); }
 .qr figcaption { margin-top: 6px; }
 /* On a phone the QR is useless — you cannot scan the screen you are holding. */
 @media (max-width: 560px) { .qr { display: none; } }
+
+/* The pending -> confirmed state on the signup screen. */
+.waiting.done { border-left-color: var(--turf); }
+.pulse.check {
+  background: var(--turf); color: #06130c;
+  width: 22px; height: 22px; margin-top: 1px;
+  display: grid; place-items: center;
+  font-size: .78rem; font-weight: 900; line-height: 1;
+  animation: none;
+}
