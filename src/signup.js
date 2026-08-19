@@ -99,8 +99,10 @@ async function resolveCode(code) {
  * Returns { signup, created, league } — `league` is null when Sleeper does not
  * recognise the id, which is surfaced rather than stored as though it were fine.
  */
-async function record({ phone, leagueId, rawText, source = 'sms' }) {
-  const normalized = db.normalizePhone(phone);
+async function record({ phone, email = null, leagueId, rawText, source = 'sms' }) {
+  const normalized = phone ? db.normalizePhone(phone) : null;
+  const mail = email ? String(email).trim().toLowerCase() : null;
+  if (!normalized && !mail) throw new Error('a signup needs a phone or an email');
 
   // Resolve the league so a typo is visible in the queue immediately, instead
   // of looking like a valid lead until someone tries to onboard it.
@@ -112,21 +114,30 @@ async function record({ phone, leagueId, rawText, source = 'sms' }) {
     } catch { /* unknown id; recorded below with league_name null */ }
   }
 
+  // Two partial unique indexes rather than one, since either contact may be
+  // absent; the conflict target has to match whichever was supplied.
+  const conflict = normalized
+    ? `(phone, coalesce(sleeper_league_id, '')) where phone is not null`
+    : `(lower(email), coalesce(sleeper_league_id, '')) where email is not null`;
+
   const { rows } = await db.query(
-    `insert into signups (phone, sleeper_league_id, league_name, season, total_rosters, raw_text, source)
-     values ($1,$2,$3,$4,$5,$6,$7)
-     on conflict (phone, coalesce(sleeper_league_id, '')) do nothing
+    `insert into signups (phone, email, sleeper_league_id, league_name, season, total_rosters, raw_text, source)
+     values ($1,$2,$3,$4,$5,$6,$7,$8)
+     on conflict ${conflict} do nothing
      returning *`,
-    [normalized, leagueId || null, league?.name || null, league?.season || null,
+    [normalized, mail, leagueId || null, league?.name || null, league?.season || null,
      league?.total_rosters || null, rawText || null, source]
   );
 
   if (rows[0]) return { signup: rows[0], created: true, league };
 
-  const { rows: existing } = await db.query(
-    `select * from signups where phone = $1 and coalesce(sleeper_league_id,'') = $2`,
-    [normalized, leagueId || '']
-  );
+  const { rows: existing } = normalized
+    ? await db.query(
+        `select * from signups where phone = $1 and coalesce(sleeper_league_id,'') = $2`,
+        [normalized, leagueId || ''])
+    : await db.query(
+        `select * from signups where lower(email) = $1 and coalesce(sleeper_league_id,'') = $2`,
+        [mail, leagueId || '']);
   return { signup: existing[0] || null, created: false, league };
 }
 

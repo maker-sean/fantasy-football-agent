@@ -105,6 +105,21 @@
         </p>
       </div>
 
+      <!-- The email path. Not everyone will text an unfamiliar number from a
+           site they just met, and an SMS-only funnel also stops working the
+           moment the messaging plan's contact cap is reached. -->
+      <details class="alt-signup" id="alt">
+        <summary>Rather not text? Leave an email instead.</summary>
+        <p class="small muted" style="margin:12px 0 0">
+          Same queue, we just email you when it's your league's turn.
+        </p>
+        <div class="row" style="margin-top:12px">
+          <input id="email" type="email" autocomplete="email" placeholder="you@example.com">
+          <button id="email-go" class="btn ghost" type="button">Add me</button>
+        </div>
+        <p id="email-msg" class="msg-line" role="status" aria-live="polite"></p>
+      </details>
+
       <p><button id="restart" class="btn ghost" type="button">← Start over</button></p>
     </div>
   </div>
@@ -293,6 +308,30 @@ function watchForText(code) {
   pollTimer = setInterval(check, 4000);
   check();
 }
+
+$('email-go').addEventListener('click', async () => {
+  const email = $('email').value.trim();
+  if (!email.includes('@')) return say($('email-msg'), 'That does not look like an email address.', 'err');
+  $('email-go').disabled = true;
+  say($('email-msg'), 'Adding…');
+  try {
+    const r = await fetch('/api/signup-email', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ email, sleeperLeagueId: state.league?.league_id || null }),
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || 'failed');
+    say($('email-msg'), d.created
+      ? `You're in the queue${d.league ? ' for ' + d.league.name : ''}. We'll email you.`
+      : "You're already on the list — nothing else to do.", 'ok');
+    $('email').disabled = true;
+  } catch {
+    say($('email-msg'), "Couldn't add you just now. Try again in a moment.", 'err');
+  } finally {
+    $('email-go').disabled = false;
+  }
+});
 
 $('copy').addEventListener('click', async () => {
   try {

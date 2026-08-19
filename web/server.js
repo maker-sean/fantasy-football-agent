@@ -275,6 +275,35 @@ app.get('/api/signup-intent/:code/status', wrap(async (req, res) => {
   res.json({ used: rows.length > 0, usedAt: rows[0]?.used_at || null });
 }));
 
+/**
+ * Email signup — the path for people who will not text a number they just met,
+ * and the one that does not stop working when the messaging plan's contact cap
+ * is reached.
+ *
+ * Public, like the code endpoint: no account exists this early in the funnel.
+ */
+app.post('/api/signup-email', wrap(async (req, res) => {
+  const email = String(req.body?.email || '').trim();
+  const sleeperLeagueId = String(req.body?.sleeperLeagueId || '').trim() || null;
+
+  // Deliberately permissive. Bouncing a valid address because it fails a clever
+  // regex costs a real signup; a bad one costs one useless row.
+  if (!/^[^@\s]+@[^@\s.]+\.[^@\s]{2,}$/.test(email)) {
+    return res.status(400).json({ error: 'bad_email' });
+  }
+  if (sleeperLeagueId && !/^\d{6,25}$/.test(sleeperLeagueId)) {
+    return res.status(400).json({ error: 'bad_league_id' });
+  }
+
+  const signup = require('../src/signup');
+  const out = await signup.record({ email, leagueId: sleeperLeagueId, source: 'web' });
+  res.json({
+    ok: true,
+    created: out.created,
+    league: out.league ? { name: out.league.name, totalRosters: out.league.total_rosters } : null,
+  });
+}));
+
 // --- onboarding step 4: pick a Sleeper league ------------------------------
 
 app.get('/api/sleeper/leagues', requireAccount, wrap(async (req, res) => {

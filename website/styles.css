@@ -416,3 +416,10 @@ input[type="range"] { accent-color: var(--turf); }
    conversation. margin-top:auto on the first message rather than
    justify-content:flex-end, which clips the top of overflowing content. */
 .phone-screen .msgs > .msg:first-child { margin-top: auto; }
+
+/* The email alternative on the signup screen. Collapsed by default — texting is
+   the better path and should stay the obvious one. */
+.alt-signup { margin: 22px 0 8px; }
+.alt-signup summary { cursor: pointer; color: var(--muted); font-size: .93rem; }
+.alt-signup summary:hover { color: var(--text); }
+.alt-signup[open] summary { color: var(--text); }
