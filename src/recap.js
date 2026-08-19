@@ -38,6 +38,9 @@ Voice:
 - Dry and specific. The joke is always in the detail, never in the adjective.
 - Punch at decisions, not people. Benching a 27-point QB is fair game; someone's job or family is not.
 - Confidence is funnier than cruelty. Never pile on the same manager twice in one recap.
+- One team per message. Pick the single manager whose week is most worth talking
+  about and stay on them. Trying to cover the whole league in one breath is how a
+  message becomes a newsletter nobody reads.
 - No emoji unless it is doing real work. Never more than one.
 - No em dashes, ever. Use a comma, a full stop, or a colon instead. Em dashes are
   the clearest tell that a message was machine-written, and this has to read like
@@ -48,7 +51,11 @@ Format:
 - LENGTH_RULE
 - Open with the single most interesting thing that happened, not a summary of the slate.
 - End on something that invites a reply: a callout, a question, a challenge. Never end with a summary sentence.
-- Cover only as many stories as the length allows, chosen by how interesting they are. Never list every game to be complete.
+- If a second team had a week genuinely worth mentioning, write a SECOND MESSAGE
+  rather than a longer one. Separate messages with a line containing only ---
+  Two short texts arriving back to back read like a person typing. One long text
+  reads like a newsletter, and gets scrolled past.
+- At most three messages, and only if each earns its place. One is usually right.
 
 Absolute rules:
 - Every number and name you use MUST come verbatim from the FACTS provided. Do not compute, estimate, round, or infer any figure.
@@ -128,13 +135,14 @@ function factsBlock(facts) {
 async function generateRecap(facts, opts = {}) {
   const {
     spice = 1, effort = 'medium', model = MODEL,
-    words = Number(process.env.RECAP_WORDS || 100),
+    words = Number(process.env.RECAP_WORDS || 50),
     client = new Anthropic(),
   } = opts;
 
   const lo = Math.max(20, Math.round(words * 0.75));
   const hi = Math.round(words * 1.25);
-  const lengthRule = `${lo}-${hi} words. This is a group text, not a newsletter.`;
+  // Per MESSAGE, not per recap. Two short texts back to back beat one long one.
+  const lengthRule = `${lo}-${hi} words PER MESSAGE. This is a group text, not a newsletter.`;
 
   const spiceNote = [
     'Keep it gentle this week. Observational, barely any edge.',
@@ -180,4 +188,19 @@ async function generateRecap(facts, opts = {}) {
   };
 }
 
-module.exports = { generateRecap, factsBlock, PERSONA, MODEL };
+/**
+ * Split generated text into the messages it should actually be sent as.
+ *
+ * The model separates them with a line containing only ---. Everything is
+ * tolerant of it being absent: a single message is the common case and the
+ * right default.
+ */
+function splitMessages(text) {
+  return String(text || '')
+    .split(/\n\s*-{3,}\s*\n/)
+    .map(t => t.trim())
+    .filter(Boolean);
+}
+
+module.exports = {
+  splitMessages, generateRecap, factsBlock, PERSONA, MODEL };

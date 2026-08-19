@@ -94,7 +94,10 @@ async function handleControl({ burst, provider, providerName = 'sendblue', dryRu
   }
 
   try {
-    const res = await provider.send(draft.chat_id, draft.body);
+    // Same split as the auto-post path: an approved recap posts exactly as it
+    // would have unattended.
+    const { sent } = await drafts.sendRecap(provider, draft.chat_id, draft.body);
+    const res = sent[0];
     await drafts.markSent(draft.id, { by: sender, messageId: res?.message_handle || null });
 
     // Record our own message — the engagement metric counts human replies per

@@ -96,7 +96,28 @@ async function recent(leagueId, limit = 10) {
   return rows;
 }
 
+/**
+ * Post a recap, honouring the message split.
+ *
+ * A recap may be one message or several. Sending them separately, with a beat
+ * between, is the entire point: two short texts arriving back to back read like
+ * a person typing, where one long block reads like a newsletter. The pause is
+ * deliberate rather than incidental, so the second message does not land in the
+ * same instant as the first and defeat the effect.
+ */
+async function sendRecap(provider, chatId, body, { gapMs = 1500 } = {}) {
+  const { splitMessages } = require('./recap');
+  const parts = splitMessages(body);
+  const sent = [];
+  for (const [i, part] of parts.entries()) {
+    if (i) await new Promise(r => setTimeout(r, gapMs));
+    sent.push(await provider.send(chatId, part));
+  }
+  return { parts, sent };
+}
+
 module.exports = {
+  sendRecap,
   createDraft, pendingFor, pendingForOwner, markSent, markRejected,
   expireStale, recent, ownersOf, autoPostEnabled, DEFAULT_TTL_HOURS,
 };

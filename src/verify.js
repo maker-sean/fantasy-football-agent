@@ -37,7 +37,14 @@ const SUPERLATIVES = /\b(only|biggest|largest|smallest|closest|widest|narrowest|
  * @param factsText  the exact FACTS block handed to the model
  */
 function verifyRecap(text, facts, factsText, opts = {}) {
-  const targetWords = opts.targetWords || 100;
+  const targetWords = opts.targetWords || 50;
+
+  // A recap may be several messages. Verify against the text a reader actually
+  // sees, with the separators removed, and judge length PER MESSAGE — the
+  // target is per message, so summing them flagged every multi-part recap as
+  // too long and read as a real problem.
+  const parts = String(text || '').split(/\n\s*-{3,}\s*\n/).map(t => t.trim()).filter(Boolean);
+  text = parts.join('\n\n');
   const known = numbersIn(factsText);
   const used = numbersIn(text);
 
@@ -45,6 +52,17 @@ function verifyRecap(text, facts, factsText, opts = {}) {
   const unverified = [...used].filter(n => !known.has(n) && Number(n) > 20);
 
   const superlatives = [...new Set((String(text).match(SUPERLATIVES) || []).map(s => s.toLowerCase()))];
+
+  // Numbers spelled out in words slip past a digit-based check entirely.
+  //
+  // Caught in the wild: "torching their 86.92 by 16 and a half" — a margin the
+  // model computed from two real figures. Every digit in that sentence checked
+  // out, because the invented part was written in English. Fractional and
+  // written quantities next to a comparison are where this shows up.
+  const WRITTEN_NUMBER = /\b(?:(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred)(?:[\s-](?:and\s)?(?:a\s)?(?:half|quarter|third))?|\d+\s+and\s+a\s+(?:half|quarter|third))\b/gi;
+  const written = [...new Set((String(text).match(WRITTEN_NUMBER) || [])
+    .map(w => w.toLowerCase().trim())
+    .filter(w => /half|quarter|third/.test(w)))];
 
   const teamNames = (facts.standingsThisWeek || []).map(t => t.team);
   const mentioned = teamNames.filter(t => text.includes(t));
@@ -60,6 +78,13 @@ function verifyRecap(text, facts, factsText, opts = {}) {
   if (facts.rulesWarning) {
     issues.push({ severity: 'error', kind: 'rules', detail: facts.rulesWarning });
   }
+  if (written.length) {
+    issues.push({
+      severity: 'review',
+      kind: 'written_number',
+      detail: `Quantities written in words, which the number check cannot verify: ${written.join(', ')}`,
+    });
+  }
   if (superlatives.length) {
     issues.push({
       severity: 'review',
@@ -70,11 +95,19 @@ function verifyRecap(text, facts, factsText, opts = {}) {
 
   const words = String(text).trim().split(/\s+/).length;
   // Keyed to the configured target rather than a fixed number — length is a
-  // dial, so the check has to move with it.
-  if (words > Math.round(targetWords * 1.6)) {
-    issues.push({ severity: 'review', kind: 'length', detail: `${words} words vs a ${targetWords}-word target` });
+  // dial, so the check has to move with it. Measured per message: two 45-word
+  // texts are correct, one 90-word text is not, and the distinction is the
+  // whole reason the split exists.
+  const longest = Math.max(...parts.map(p => p.trim().split(/\s+/).length));
+  if (longest > Math.round(targetWords * 1.6)) {
+    issues.push({
+      severity: 'review', kind: 'length',
+      detail: `longest message is ${longest} words vs a ${targetWords}-word target`
+        + (parts.length > 1 ? ` (${parts.length} messages, ${words} total)` : ''),
+    });
   }
-  if (/[*_#`]|^\s*[-•]/m.test(text)) {
+  // The message separator is stripped above, so a bare --- no longer trips this.
+  if (/[*_#`]|^\s*[-•]\s/m.test(text)) {
     issues.push({ severity: 'review', kind: 'formatting', detail: 'Markdown or bullets — renders badly on a phone' });
   }
 

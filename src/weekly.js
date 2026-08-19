@@ -137,7 +137,8 @@ async function runWeeklyRecaps(provider, opts = {}) {
         entry.draftId = draft.id;
 
         if (drafts.autoPostEnabled(league) && league.chat_id && !dryRun) {
-          const res = await provider.send(league.chat_id, body);
+          const { sent } = await drafts.sendRecap(provider, league.chat_id, body);
+          const res = sent[0];
           await drafts.markSent(draft.id, { by: 'autoPost', messageId: res?.message_handle || null });
           await db.recordMessage({
             leagueId: league.id, provider: league.provider,
