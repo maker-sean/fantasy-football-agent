@@ -135,7 +135,7 @@ function factsBlock(facts) {
 async function generateRecap(facts, opts = {}) {
   const {
     spice = 1, effort = 'medium', model = MODEL,
-    words = Number(process.env.RECAP_WORDS || 50),
+    words = Number(process.env.RECAP_WORDS || 60),
     client = new Anthropic(),
   } = opts;
 

@@ -92,7 +92,10 @@ services:
 
       - key: POLL_INTERVAL_SECONDS
         value: "10"
+      # Words per MESSAGE, not per recap. A recap may be two short texts.
+      # Pinned here rather than left to the code default so the deployed value
+      # is visible in the blueprint; change it in both places or not at all.
       - key: RECAP_WORDS
-        value: "100"
+        value: "60"
       - key: NODE_ENV
         value: production

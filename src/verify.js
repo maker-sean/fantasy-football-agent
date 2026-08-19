@@ -37,7 +37,7 @@ const SUPERLATIVES = /\b(only|biggest|largest|smallest|closest|widest|narrowest|
  * @param factsText  the exact FACTS block handed to the model
  */
 function verifyRecap(text, facts, factsText, opts = {}) {
-  const targetWords = opts.targetWords || 50;
+  const targetWords = opts.targetWords || 60;
 
   // A recap may be several messages. Verify against the text a reader actually
   // sees, with the separators removed, and judge length PER MESSAGE — the
