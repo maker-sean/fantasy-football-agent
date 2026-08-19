@@ -164,7 +164,7 @@ function reply({ created, league, leagueId }) {
 /**
  * The texted signup, for people who never touched the website.
  *
- * "Text COMMISH to 555-555-0100" fits in a Reddit comment, on a flyer, or in
+ * "Text COMMISH to <the number>" fits in a Reddit comment, on a flyer, or in
  * one commissioner telling another at a draft. A per-session code does not —
  * which matters when distribution is word of mouth. So the bare keyword starts
  * a conversation and the code stays a fast path for site visitors.
