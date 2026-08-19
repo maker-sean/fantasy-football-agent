@@ -152,9 +152,9 @@ function reply({ created, league, leagueId }) {
          + `league. Double-check the ID and text it again.`;
   }
   if (!created) {
-    return `Already got you down for ${league.name}. You're in the queue — I'll text when it's ready.`;
+    return `Already got you down for ${league.name}. You're in the queue, I'll text when it's ready.`;
   }
-  return `Got it — ${league.name}, ${league.total_rosters} teams. You're in the queue.\n\n`
+  return `Got it. ${league.name}, ${league.total_rosters} teams. You're in the queue.\n\n`
        + `Onboarding isn't automatic yet, so I'll text you to set it up rather than leave you `
        + `guessing. Nothing's charged.\n\nReply STOP to drop off, START to come back.`;
 }
@@ -219,7 +219,7 @@ async function leaguesForUsername(username) {
 }
 
 function listLeagues(leagues) {
-  return leagues.map((l, i) => `${i + 1}) ${l.name} — ${l.total_rosters} teams`).join('\n');
+  return leagues.map((l, i) => `${i + 1}) ${l.name}, ${l.total_rosters} teams`).join('\n');
 }
 
 /**
@@ -235,7 +235,7 @@ async function advance(msg) {
   if (convo.state === 'awaiting_username') {
     const { user, leagues, season } = await leaguesForUsername(text);
     if (!user) {
-      return `I couldn't find a Sleeper user called "${text}". It's your username, not your team name — check it and send it again.`;
+      return `I couldn't find a Sleeper user called "${text}". It's your username, not your team name. Check it and send it again.`;
     }
     if (!leagues.length) {
       await endConversation(msg.senderId);

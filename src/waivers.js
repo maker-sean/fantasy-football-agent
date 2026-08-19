@@ -100,7 +100,7 @@ function describe(drama, { names = new Map(), teams = new Map() } = {}) {
 
   for (const c of drama.squeakers) {
     const by = c.margin === 0 ? 'tied and won on priority' : `by $${c.margin}`;
-    lines.push(`${team(c.winner.rosterId)} got ${player(c.playerId)} for $${c.winner.bid} — ${by} over ${team(c.runnerUp.rosterId)} at $${c.runnerUp.bid}.`);
+    lines.push(`${team(c.winner.rosterId)} got ${player(c.playerId)} for $${c.winner.bid}, ${by} over ${team(c.runnerUp.rosterId)} at $${c.runnerUp.bid}.`);
   }
 
   for (const c of drama.blowouts) {

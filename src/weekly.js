@@ -158,7 +158,7 @@ async function runWeeklyRecaps(provider, opts = {}) {
         }
 
         const note = [
-          `${league.name} — week ${snap.week} recap, ready for you.`,
+          `${league.name}, week ${snap.week} recap, ready for you.`,
           '',
           body,
           '',

@@ -146,7 +146,7 @@ function composeAlert(risks) {
     const when = r.minutesToKickoff < 60
       ? `${r.minutesToKickoff}m`
       : `${Math.round(r.minutesToKickoff / 60)}h`;
-    return `${r.team}: ${r.player.full_name} is ${r.player.injury_status}${part} — ${r.game.short_name} in ${when}`;
+    return `${r.team}: ${r.player.full_name} is ${r.player.injury_status}${part}. ${r.game.short_name} in ${when}`;
   };
 
   if (risks.length === 1) {

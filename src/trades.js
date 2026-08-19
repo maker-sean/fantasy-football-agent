@@ -206,7 +206,7 @@ function composeAnnouncement({ trade, from, to }, { names, players }) {
     return `Trade vetoed.\n\n${sides}\n\nDead on arrival.`;
   }
   if (isPending(to)) {
-    return `Trade proposed — in review.\n\n${sides}\n\nI'll grade it in ${REVISIT_WEEKS} weeks, once it means something.`;
+    return `Trade proposed, in review.\n\n${sides}\n\nI'll grade it in ${REVISIT_WEEKS} weeks, once it means something.`;
   }
   if (isSettled(to)) {
     // A follow-up when the league already heard the proposal: short, and it
@@ -215,7 +215,7 @@ function composeAnnouncement({ trade, from, to }, { names, players }) {
     if (from && isPending(from)) {
       return `That trade went through.\n\n${sides}\n\nGrade in ${REVISIT_WEEKS} weeks.`;
     }
-    return `Trade.\n\n${sides}\n\nNo grade yet — ask me in ${REVISIT_WEEKS} weeks.`;
+    return `Trade.\n\n${sides}\n\nNo grade yet. Ask me in ${REVISIT_WEEKS} weeks.`;
   }
   return null;   // an unknown status is recorded, not narrated
 }
@@ -318,8 +318,8 @@ function composeVerdict(trade, verdict, names) {
 
   return [
     head,
-    `${nm(win)} — ${gw}: ${detail(win)}`,
-    `${nm(lose)} — ${gl}: ${detail(lose)}`,
+    `${nm(win)} ${gw}: ${detail(win)}`,
+    `${nm(lose)} ${gl}: ${detail(lose)}`,
     `Started points only, weeks ${verdict.weeks.from}-${verdict.weeks.to}.`
       + (verdict.hasPicks ? ' Draft picks not counted.' : ''),
   ].join('\n');

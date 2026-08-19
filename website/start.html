@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Get started — Commish</title>
+<title>Get started | Commish AI</title>
 <meta name="description" content="Find your Sleeper league and add Commish to your group chat.">
 <link rel="stylesheet" href="styles.css">
 </head>
@@ -24,7 +24,7 @@
   <div class="wrap narrow">
     <p class="eyebrow">Get started</p>
     <h1 style="font-size:clamp(1.8rem,4.5vw,2.6rem)">Let's find your league.</h1>
-    <p class="lede">Type your Sleeper username. Not your email, not a league ID — the name your
+    <p class="lede">Type your Sleeper username. Not your email, not a league ID. The name your
     league knows you by.</p>
 
     <!-- Step 1 --------------------------------------------------------------->
@@ -51,7 +51,7 @@
       <div class="picked" id="picked"></div>
 
       <h2 style="font-size:1.15rem; margin-top:28px">One text and you're in.</h2>
-      <p>Send it from the phone you use in your league's group chat — that's how we know which
+      <p>Send it from the phone you use in your league's group chat. That's how we know which
       number belongs to which commissioner.</p>
 
       <div class="sms-card pending" id="sms-card">
@@ -93,7 +93,7 @@
       </div>
 
       <div class="callout" id="next-callout">
-        <h3>What happens next — honestly</h3>
+        <h3>What happens next, honestly</h3>
         <p class="small" style="margin-bottom:10px">
           Commish is in early access and onboarding is not automatic yet. Your text puts your league
           in the queue and we reply to set it up. We would rather tell you that than take your money
@@ -204,7 +204,7 @@ async function findLeagues() {
   } catch (err) {
     say($('user-msg'),
       err.message === 'no-user'
-        ? `No Sleeper user called "${name}". Check the spelling — it's your username, not your team name.`
+        ? `No Sleeper user called "${name}". Check the spelling. It's your username, not your team name.`
         : 'Could not reach Sleeper just now. Try again in a moment.',
       'err');
   } finally {
@@ -262,7 +262,7 @@ async function choose(lg) {
     }
     watchForText(d.code);
   } catch {
-    say($('copy-msg'), "Couldn't set up your code just now — refresh and pick your league again.", 'err');
+    say($('copy-msg'), "Couldn't set up your code just now. Refresh and pick your league again.", 'err');
   }
 }
 
@@ -300,7 +300,7 @@ function watchForText(code) {
       $('waiting').classList.add('done');
       $('pulse').textContent = '✓';
       $('pulse').classList.add('check');
-      $('wait-title').textContent = "Got it — you're in the queue.";
+      $('wait-title').textContent = "Got it. You're in the queue.";
       $('wait-note').textContent = "We'll text you when it's your league's turn. Nothing else to do.";
     } catch { /* transient; the next tick retries */ }
   };
@@ -324,7 +324,7 @@ $('email-go').addEventListener('click', async () => {
     if (!r.ok) throw new Error(d.error || 'failed');
     say($('email-msg'), d.created
       ? `You're in the queue${d.league ? ' for ' + d.league.name : ''}. We'll email you.`
-      : "You're already on the list — nothing else to do.", 'ok');
+      : "You're already on the list, nothing else to do.", 'ok');
     $('email').disabled = true;
   } catch {
     say($('email-msg'), "Couldn't add you just now. Try again in a moment.", 'err');
@@ -338,7 +338,7 @@ $('copy').addEventListener('click', async () => {
     await navigator.clipboard.writeText($('sms-body').textContent);
     say($('copy-msg'), 'Copied. Paste it into a text to the number above.', 'ok');
   } catch {
-    say($('copy-msg'), 'Copy failed — select the message above and copy it manually.', 'err');
+    say($('copy-msg'), 'Copy failed. Select the message above and copy it manually.', 'err');
   }
 });
 </script>
