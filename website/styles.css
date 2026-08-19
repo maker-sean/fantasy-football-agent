@@ -423,3 +423,7 @@ input[type="range"] { accent-color: var(--turf); }
 .alt-signup summary { cursor: pointer; color: var(--muted); font-size: .93rem; }
 .alt-signup summary:hover { color: var(--text); }
 .alt-signup[open] summary { color: var(--text); }
+
+/* The product name in the headline. Colour is emphasis only — the sentence
+   reads identically without it, so nothing is carried by colour alone. */
+.brand-accent { color: var(--turf); }
