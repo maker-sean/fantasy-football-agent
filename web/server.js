@@ -35,9 +35,60 @@ app.use(express.json({
 }));
 app.disable('x-powered-by');
 
+/**
+ * Operator details, substituted into the pages at serve time.
+ *
+ * These change when an entity is actually formed — a real business name, a
+ * registered address, possibly a different state. Editing five HTML files and
+ * redeploying for that is silly, and worse, easy to do incompletely. Server-side
+ * substitution rather than client-side so the values are in the HTML a crawler
+ * or a carrier reviewer sees, and so the page still works with JavaScript off.
+ *
+ * An unset value renders the same loud placeholder as before. A legal page that
+ * quietly ships with a blank contact is worse than one that shouts about it.
+ */
+const SITE = {
+  BUSINESS_NAME: process.env.SITE_BUSINESS_NAME || 'Commish AI',
+  SUPPORT_EMAIL: process.env.SITE_SUPPORT_EMAIL || null,
+  JURISDICTION: process.env.SITE_JURISDICTION || 'the Commonwealth of Virginia',
+  JURISDICTION_SHORT: process.env.SITE_JURISDICTION_SHORT || 'Virginia',
+};
+
+const loud = name => `<span class="todo">[${name.replace(/_/g, ' ')}]</span>`;
+const mailto = e => `<a href="mailto:${e}">${e}</a>`;
+
+function fillTokens(html) {
+  return html.replace(/\{\{([A-Z_]+)\}\}/g, (_, key) => {
+    const v = SITE[key];
+    if (!v) return loud(key);
+    return key === 'SUPPORT_EMAIL' ? mailto(v) : v;
+  });
+}
+
 // The marketing site ships from the same service. One origin means no CORS to
 // configure and no preflight on every authenticated request.
-app.use(express.static(path.join(__dirname, '..', 'website'), { extensions: ['html'] }));
+const WEBSITE_DIR = path.join(__dirname, '..', 'website');
+const pageCache = new Map();
+
+app.get(/\.html$|^\/$/, (req, res, next) => {
+  const rel = req.path === '/' ? 'index.html' : req.path.replace(/^\//, '');
+  if (rel.includes('..')) return next();
+  const file = path.join(WEBSITE_DIR, rel);
+  if (!file.startsWith(WEBSITE_DIR)) return next();
+
+  try {
+    let html = pageCache.get(file);
+    if (html === undefined) {
+      html = fillTokens(require('fs').readFileSync(file, 'utf8'));
+      if (process.env.NODE_ENV === 'production') pageCache.set(file, html);
+    }
+    res.type('html').send(html);
+  } catch {
+    next();      // not a page we serve; fall through to static
+  }
+});
+
+app.use(express.static(WEBSITE_DIR, { extensions: ['html'] }));
 app.use('/app', express.static(path.join(__dirname, 'app'), { extensions: ['html'] }));
 
 /**
