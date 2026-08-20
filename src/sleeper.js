@@ -57,6 +57,34 @@ async function allPlayers() {
 }
 
 /**
+ * The season's draft, trimmed to what a recap can use.
+ *
+ * Sleeper returns each pick with metadata and reactions attached, which is a
+ * lot of bytes to store in every weekly snapshot to answer one question: who
+ * took this player, and how early. Only those three fields are kept.
+ *
+ * Two calls because the draft id is not the league id. Static for the season,
+ * so re-fetching weekly is waste, but it is small waste and it keeps the
+ * snapshot self-contained, which is what makes src/stats.js testable without a
+ * network.
+ */
+async function draft(leagueId) {
+  const ds = await get(`/league/${leagueId}/drafts`);
+  if (!ds?.length) return null;
+  const d = ds[0];
+  const picks = await get(`/draft/${d.draft_id}/picks`);
+  return {
+    draft_id: d.draft_id,
+    rounds: d.settings?.rounds ?? null,
+    picks: (picks || []).map(pk => ({
+      player_id: pk.player_id,
+      roster_id: Number(pk.roster_id),
+      round: pk.round,
+    })),
+  };
+}
+
+/**
  * Everything needed to reconstruct "who started whom, and what happened" for
  * one week. This object IS the snapshot payload — if it isn't captured at
  * kickoff, the starting lineup is unrecoverable afterward.
@@ -76,6 +104,16 @@ async function weekSnapshot(leagueId, week) {
     tx = await transactions(leagueId, week);
   } catch (err) {
     tx = [];
+  }
+
+  // Same deal: a league with no draft on file, or an endpoint having a bad day,
+  // must not sink the capture. src/churn.js degrades to counting drops without
+  // it, which is exactly how every snapshot taken before today behaves.
+  let dr = null;
+  try {
+    dr = await draft(leagueId);
+  } catch (err) {
+    dr = null;
   }
 
   return {
@@ -100,6 +138,7 @@ async function weekSnapshot(leagueId, week) {
     users: us,
     matchups: mu,
     transactions: tx,
+    draft: dr,
   };
 }
 
@@ -118,5 +157,5 @@ function rosterOwners(snapshotPayload) {
 
 module.exports = {
   BASE, get, state, league, rosters, users, matchups, transactions,
-  allPlayers, weekSnapshot, rosterOwners,
+  allPlayers, weekSnapshot, rosterOwners, draft,
 };

@@ -13,6 +13,7 @@
 
 const { activeSlots, optimalLineup, bestLegalSwap, canFill, describeRules, unstartablePositions } = require('./lineup');
 const waivers = require('./waivers');
+const churn = require('./churn');
 
 const round = n => Math.round(Number(n || 0) * 100) / 100;
 
@@ -153,9 +154,19 @@ function weekFacts(payload, players = new Map()) {
   // are the dollar amounts Sleeper reported, with no model in between. They
   // reach the prompt through factsBlock like any other fact, which also means
   // src/verify.js sees the numbers and can catch the model restating them wrong.
+  // Roster churn. Unlike the waiver lines above this needs no FAAB, so it is
+  // the half of this that fires for a rolling-priority league, which is both
+  // leagues currently on file. payload.draft is absent on older snapshots and
+  // churn degrades to counting drops rather than going silent.
+  const teamsByRoster = waivers.teamNames(payload);
+  const rosterChurn = churn.describe(
+    churn.findChurn(payload.transactions, payload.draft),
+    { names: players, teams: teamsByRoster },
+  );
+
   const waiverDrama = waivers.describe(
     waivers.findDrama(waivers.contests(payload.transactions)),
-    { names: players, teams: waivers.teamNames(payload) },
+    { names: players, teams: teamsByRoster },
   );
 
   return {
@@ -232,6 +243,7 @@ function weekFacts(payload, players = new Map()) {
     // Reading waiver_type would make this feature fail closed on exactly the
     // archive data it was calibrated against. The data gates itself.
     waiverDrama,
+    rosterChurn,
 
     // Kept for the recap's own use; not surfaced as a headline.
     perTeam: teams.map(t => ({

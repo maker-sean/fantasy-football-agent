@@ -131,6 +131,14 @@ function factsBlock(facts) {
     for (const line of facts.waiverDrama) lines.push(`  ${line}`);
   }
 
+  // Roster churn. Same contract as the waiver block: deterministic prose in,
+  // no heading when there is nothing to put under it.
+  if (facts.rosterChurn?.length) {
+    lines.push('');
+    lines.push('Roster moves this week:');
+    for (const line of facts.rosterChurn) lines.push(`  ${line}`);
+  }
+
   lines.push('');
   lines.push('All results this week:');
   for (const g of facts.games || []) {
