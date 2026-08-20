@@ -138,30 +138,172 @@
         thoughts about how your draft went.</p>
       </div>
     </div>
-
-    <div class="callout" style="margin-top:34px">
-      <h3>It will not embarrass you.</h3>
-      <p class="small" style="margin-bottom:0">
-        Every number in a recap is verified against your league's own data before the message is
-        allowed to send, and one that can't back up a claim gets held instead of posted. Your
-        commissioner approves the recap before the league sees it. And it does not speak unless
-        spoken to: silence is the default, not an oversight. An alert you can't trust is worse than
-        no alert, and a bot that talks trash and gets the score wrong is just embarrassing.
-      </p>
-    </div>
   </div>
 </section>
 
-<section>
-  <div class="wrap narrow">
-    <p class="eyebrow">Setup</p>
-    <h2>Five minutes, and nobody has to download anything.</h2>
-    <ol style="padding-left:20px">
-      <li style="margin-bottom:14px"><strong>Type your Sleeper username.</strong> We'll pull up your leagues and you pick one. No digging through app settings for an ID.</li>
-      <li style="margin-bottom:14px"><strong>Add the number to your group chat.</strong> The one you already use. iPhone and Android in the same thread is fine. That was the whole requirement this thing was built around.</li>
-      <li><strong>Everyone texts their name once.</strong> That's how it learns which phone is which roster, so it knows exactly who to blame.</li>
+<!-- ==========================================================================
+     How it works.
+
+     Three tiles, not a numbered list, because the whole claim of this section is
+     that there is almost nothing to do. A list of steps reads as work; three
+     tiles with arrows reads as a short path.
+
+     Note step one: the COMMISSIONER enters everyone's name and number during
+     onboarding (web/server.js, POST /api/leagues/:id/members). An earlier
+     version of this section said "everyone texts their name once", which is the
+     fallback path, not the normal one, and it made the setup sound like it
+     needed eleven other people to cooperate.
+     ========================================================================== -->
+<section id="how-it-works">
+  <!-- Full width, not .narrow: three tiles across a narrow column give 199px
+       each, which wraps two of the three titles and makes a "this is easy"
+       graphic look cramped. The lede has its own 62ch cap so it stays readable. -->
+  <div class="wrap">
+    <p class="eyebrow">How it works</p>
+    <h2>Three steps, and only one of them is yours.</h2>
+    <p class="lede" style="margin-bottom:34px">
+      Commish reads your Sleeper league and posts into the group text you already use. No app to
+      install, no second chat to keep alive, and nothing for the rest of your league to do. The first
+      week is free.
+    </p>
+
+    <ol class="flow">
+      <li class="flow-step">
+        <span class="flow-num">1</span>
+        <h3>Pick your league</h3>
+        <p>Type your Sleeper username, choose the league, and put in everyone's name and number
+        while you are there. That part takes about a minute.</p>
+      </li>
+      <li class="flow-step">
+        <span class="flow-num">2</span>
+        <h3>Add Commish to the chat</h3>
+        <p>Add the number to your league's group text. The thread you already use. iPhone and
+        Android together is fine.</p>
+      </li>
+      <li class="flow-step">
+        <span class="flow-num">3</span>
+        <h3>Start getting roasted</h3>
+        <p>It reads the league from there. Nobody else has to sign up, download anything, or text
+        it back. The first reckoning lands Tuesday.</p>
+      </li>
     </ol>
-    <p class="small muted">Sleeper only for now. No app, no new group chat, nothing for your league to sign up for.</p>
+
+    <p class="small muted" style="margin-top:26px">Sleeper leagues only for now.</p>
+  </div>
+</section>
+
+<!-- ==========================================================================
+     Pricing.
+
+     Mirrors pricing.html rather than replacing it, and reuses .price/.amount so
+     the two pages cannot drift apart visually. They CAN still drift in content:
+     if the numbers change, change them in both places.
+
+     There is no Stripe integration. Nothing here can be paid for today, which is
+     why every call to action points at the queue and not at a checkout.
+     ========================================================================== -->
+<section id="pricing">
+  <div class="wrap">
+    <p class="eyebrow">Pricing</p>
+    <h2>The first week is free. Then it depends how long your league lasts.</h2>
+    <p class="lede" style="margin-bottom:34px">
+      A full Sunday and a Tuesday recap before you decide anything. No card up front, and if you
+      do nothing at the end of the week it simply stops.
+    </p>
+
+    <!-- Plain .grid, no minmax override. pricing.html uses minmax(290px), which
+         needs 906px for three columns and this wrap is 891, so the third tile
+         dropped to its own row. The default 268px basis fits three across at the
+         same 285px as every other grid on the page. -->
+    <div class="grid">
+      <div class="price feature">
+        <h3>First week</h3>
+        <p class="amount">$0</p>
+        <p class="muted small">Every league starts here</p>
+        <ul>
+          <li>Every feature, no restrictions</li>
+          <li>No card, nothing to cancel</li>
+          <li>One real game week, not a demo</li>
+        </ul>
+        <a class="btn" href="start.html" style="display:block; text-align:center">Get started</a>
+      </div>
+
+      <div class="price">
+        <h3>Season</h3>
+        <p class="amount">$24</p>
+        <p class="muted small">Per league, through the championship</p>
+        <ul>
+          <li>The Tuesday recap, every week</li>
+          <li>Pre-kickoff injury alerts</li>
+          <li>Trades, waivers and roster teardowns</li>
+          <li>iPhone and Android in the same chat</li>
+        </ul>
+        <p class="small muted" style="margin:0">Two dollars a manager for the year, in a league
+        that already argues about a $50 buy-in.</p>
+      </div>
+
+      <div class="price">
+        <h3>Dynasty</h3>
+        <p class="amount">$36</p>
+        <p class="muted small">Per league, all twelve months</p>
+        <ul>
+          <li>Everything in Season</li>
+          <li>It does not switch off in January</li>
+          <li>Offseason trades still get announced and graded</li>
+        </ul>
+        <p class="small muted" style="margin:0">Dynasty leagues do most of their trading when
+        everyone else has stopped paying attention. That is the point.</p>
+      </div>
+    </div>
+
+    <p class="small muted" style="margin-top:24px">
+      Prices in USD, per league rather than per person. Message and data rates from your carrier
+      may apply. Full detail on the <a href="pricing.html">pricing page</a>.
+    </p>
+  </div>
+</section>
+
+<!-- ==========================================================================
+     FAQ.
+
+     Written to answer what a COMMISSIONER actually asks before putting a bot in
+     front of eleven friends, in roughly that order. Two of these describe real
+     limits rather than features, deliberately: an FAQ that only answers the easy
+     questions is decoration, and the limits are the ones people hit first.
+     ========================================================================== -->
+<section id="faq">
+  <div class="wrap narrow">
+    <p class="eyebrow">Questions</p>
+    <h2>What your league will ask.</h2>
+
+    <h3>We have iPhones and Androids in the same group chat. Does that work?</h3>
+    <p>That is the requirement this was built around, not a feature bolted on afterwards. Commish
+    sends over iMessage, RCS or SMS depending on what each person is carrying, in the one thread
+    your league already uses. Nobody switches apps and nobody starts a second chat.</p>
+
+    <h3>Does everyone in my league have to sign up?</h3>
+    <p>No, and this is the part people expect to be worse than it is. You put in everyone's name
+    and number once while you are setting it up, and that is the end of anybody else's involvement.
+    No app, no account, no confirmation text to reply to.</p>
+
+    <h3>How do I change the name on a team?</h3>
+    <p>Names are set once during setup, and editing them afterwards is not self-serve yet. It is
+    the next thing being built. Until then, ask and we will change it.</p>
+
+    <h3>What happens when we start a new season, or a new league?</h3>
+    <p>You add the new league the same way you added the first one. Sleeper treats each season as
+    its own league, so history does not carry across automatically today. Nothing you have already
+    set up is lost.</p>
+
+    <h3>What if it gets annoying?</h3>
+    <p>Silence is what it does by default: it stays quiet unless something actually happened or
+    someone addressed it directly. Any individual can reply <kbd>STOP</kbd> and hear nothing again,
+    and the commissioner can dial the tone down or remove the number entirely.</p>
+
+    <h3>Does it work with ESPN or Yahoo?</h3>
+    <p>Not yet. Sleeper only, because Sleeper is the one with an open API that reports what every
+    manager actually started. Guessing at the other two would mean a bot that is confidently wrong
+    about your lineup, which is worse than no bot.</p>
   </div>
 </section>
 
