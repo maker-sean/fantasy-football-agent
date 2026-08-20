@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Messaging Terms | Commish AI</title>
+<meta name="description" content="How Commish messages your league: opt-in, opt-out, message frequency, and what happens to your phone number.">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<nav>
+  <div class="wrap">
+    <a class="brand" href="index.html"><span class="mark">C</span> Commish</a>
+    <ul>
+      <li><a href="privacy.html">Privacy</a></li>
+      <li><a href="terms.html">Terms</a></li>
+    </ul>
+  </div>
+</nav>
+
+<!-- ==========================================================================
+     Its own page, not a section of the marketing site.
+
+     A2P 10DLC registration submits a URL and a carrier reviewer opens it. That
+     URL has to resolve straight to the disclosures with no login and no flow to
+     complete, and it has to keep resolving after the marketing page is rewritten
+     for the tenth time. An anchor into index.html satisfied neither: it moved
+     whenever the page above it moved, and it spent a slot in a three-item nav on
+     a document written for a reviewer rather than for a visitor.
+
+     Deliberately plain. The jokes stop where the disclosures start.
+     ========================================================================== -->
+<div class="legal">
+  <div class="wrap narrow">
+    <h1>Messaging terms</h1>
+    <p class="muted">Last updated 2026-08-16</p>
+
+    <p>What you are agreeing to when Commish is part of your league's group text.</p>
+
+    <h2>How you opt in</h2>
+    <p>Your league commissioner adds the Commish number to your league's group text. Being in that
+    group chat is the opt-in, so messages arrive in the thread you're already part of. Nobody is
+    messaged individually without asking for it first.</p>
+
+    <h2>How you opt out</h2>
+    <p>Reply <kbd>STOP</kbd> at any time and you'll get no further messages. Reply <kbd>HELP</kbd> for
+    contact information. You can also simply leave the group chat, or ask your commissioner to remove
+    the number from it.</p>
+
+    <h2>How often it messages</h2>
+    <table>
+      <tr><th>Message</th><th>When</th></tr>
+      <tr><td>Weekly recap</td><td>Once a week during the NFL season</td></tr>
+      <tr><td>Injury alerts</td><td>Only when a player you're starting will not play</td></tr>
+      <tr><td>Trade notices</td><td>Only when a trade happens in your league</td></tr>
+      <tr><td>Replies</td><td>Only when someone addresses it directly</td></tr>
+    </table>
+    <p class="small muted">Typically a handful of messages a week in season, and close to none out of season.
+    Message and data rates may apply. Carriers are not liable for delayed or undelivered messages.</p>
+
+    <h2>What we do with your number</h2>
+    <p>Your phone number is used to send these messages and to tell managers apart within your league.
+    <strong>We do not sell it, and we do not share it with third parties for their marketing.</strong>
+    Details are in the <a href="privacy.html">privacy policy</a>.</p>
+  </div>
+</div>
+
+<footer>
+  <div class="wrap">
+    <span>&copy; <span id="yr">2026</span> {{BUSINESS_NAME}}</span>
+    <nav><ul>
+      <li><a href="index.html">Home</a></li>
+      <li><a href="pricing.html">Pricing</a></li>
+      <li><a href="privacy.html">Privacy</a></li>
+      <li><a href="terms.html">Terms</a></li>
+    </ul></nav>
+  </div>
+</footer>
+<script>document.getElementById('yr').textContent = new Date().getFullYear();</script>
+</body>
+</html>

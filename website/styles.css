@@ -221,13 +221,17 @@ footer ul { display: flex; gap: 20px; list-style: none; margin: 0; padding: 0; f
   .legal td:first-of-type { font-weight: 700; color: var(--text); padding-bottom: 2px; border: 0; }
 }
 
-/* Below this the three nav links cannot coexist with the wordmark. Drop the
-   longest one rather than letting the bar wrap. */
+/* There used to be a rule here hiding the first header link below 440px, back
+   when the bar carried three of them and could not fit the wordmark too. The
+   messaging disclosures moved to their own page, so the bar is down to two short
+   links with 86px to spare at 320px, and the rule had inverted into hiding
+   Features and leaving Pricing alone in the nav.
+
+   If a third link ever comes back, measure before reaching for display:none, and
+   scope it to `body > nav` — the old rule's own comment records that
+   `nav ul li:first-child` also matches the FOOTER, where it silently dropped a
+   legal link that has to stay reachable for carrier registration. */
 @media (max-width: 440px) {
-  /* Header nav only. `nav ul li:first-child` also matches the footer, which
-     silently dropped a footer link — including, at one point, the legal pages
-     that have to stay reachable for carrier registration. */
-  body > nav ul li:first-child { display: none; }
   .brand { font-size: .98rem; }
 }
 

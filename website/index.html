@@ -13,9 +13,8 @@
   <div class="wrap">
     <a class="brand" href="index.html"><span class="mark">C</span> Commish</a>
     <ul>
-      <li><a href="index.html#how">What it does</a></li>
+      <li><a href="index.html#how">Features</a></li>
       <li><a href="pricing.html">Pricing</a></li>
-      <li><a href="index.html#messaging">Messaging</a></li>
     </ul>
   </div>
 </nav>
@@ -173,46 +172,6 @@
   </div>
 </section>
 
-<!-- ==========================================================================
-     Messaging disclosures.
-     Required for A2P 10DLC carrier registration, and separately just correct:
-     anyone about to be added to a group text deserves to know what will send
-     them messages, how often, and how to make it stop. Deliberately plain — the
-     jokes stop where the disclosures start.
-     ========================================================================== -->
-<section id="messaging">
-  <div class="wrap narrow">
-    <p class="eyebrow">Messaging terms</p>
-    <h2>What you're agreeing to.</h2>
-
-    <h3>How you opt in</h3>
-    <p>Your league commissioner adds the Commish number to your league's group text. Being in that
-    group chat is the opt-in, so messages arrive in the thread you're already part of. Nobody is
-    messaged individually without asking for it first.</p>
-
-    <h3>How you opt out</h3>
-    <p>Reply <kbd>STOP</kbd> at any time and you'll get no further messages. Reply <kbd>HELP</kbd> for
-    contact information. You can also simply leave the group chat, or ask your commissioner to remove
-    the number from it.</p>
-
-    <h3>How often it messages</h3>
-    <table>
-      <tr><th>Message</th><th>When</th></tr>
-      <tr><td>Weekly recap</td><td>Once a week during the NFL season</td></tr>
-      <tr><td>Injury alerts</td><td>Only when a player you're starting will not play</td></tr>
-      <tr><td>Trade notices</td><td>Only when a trade happens in your league</td></tr>
-      <tr><td>Replies</td><td>Only when someone addresses it directly</td></tr>
-    </table>
-    <p class="small muted">Typically a handful of messages a week in season, and close to none out of season.
-    Message and data rates may apply. Carriers are not liable for delayed or undelivered messages.</p>
-
-    <h3>What we do with your number</h3>
-    <p>Your phone number is used to send these messages and to tell managers apart within your league.
-    <strong>We do not sell it, and we do not share it with third parties for their marketing.</strong>
-    Details are in the <a href="privacy.html">privacy policy</a>.</p>
-  </div>
-</section>
-
 <footer>
   <div class="wrap">
     <span>© <span id="yr">2026</span> {{BUSINESS_NAME}}</span>
@@ -220,12 +179,18 @@
       <li><a href="pricing.html">Pricing</a></li>
       <li><a href="privacy.html">Privacy</a></li>
       <li><a href="terms.html">Terms</a></li>
-      <li><a href="index.html#messaging">Messaging terms</a></li>
+      <li><a href="messaging.html">Messaging terms</a></li>
     </ul></nav>
   </div>
 </footer>
 
 <script>
+/* The disclosures used to be a section on this page. A fragment is never sent
+   to the server, so an already-shared index.html#messaging link cannot be
+   redirected server side and would otherwise dump the reader at the top of the
+   marketing page with no clue why. */
+if (location.hash === '#messaging') location.replace('messaging.html');
+
 document.getElementById('yr').textContent = new Date().getFullYear();
 
 /*
@@ -270,7 +235,6 @@ document.getElementById('yr').textContent = new Date().getFullYear();
 
   const typing = document.createElement('div');
   typing.innerHTML = '<div class="bubble typing"><i></i><i></i><i></i></div>';
-
 
   const wait = ms => new Promise(r => setTimeout(r, ms));
   const frame = () => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));

@@ -47,7 +47,7 @@ currently blocking roll call — asks for a public site showing:
 - a privacy policy stating that mobile numbers are not sold or shared with
   third parties for marketing
 
-All of that is on `index.html#messaging`, `privacy.html`, and `terms.html`.
+All of that is on `messaging.html`, `privacy.html`, and `terms.html`.
 Registration reviewers follow links, so those pages must stay reachable from
 every page's footer — there is a CSS regression test for exactly this, because
 a media query once hid a footer link at phone width.
