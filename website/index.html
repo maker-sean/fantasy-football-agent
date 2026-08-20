@@ -145,51 +145,61 @@
 <!-- ==========================================================================
      How it works.
 
-     Three tiles, not a numbered list, because the whole claim of this section is
-     that there is almost nothing to do. A list of steps reads as work; three
-     tiles with arrows reads as a short path.
+     A vertical list, not tiles. This was the third three-across grid on the page
+     and the repetition was the problem, not any one of them: features, these,
+     then pricing, all the same shape. Pricing keeps its row because prices are
+     compared side by side; this reads top to bottom, so it is laid out that way.
 
-     Note step one: the COMMISSIONER enters everyone's name and number during
-     onboarding (web/server.js, POST /api/leagues/:id/members). An earlier
-     version of this section said "everyone texts their name once", which is the
-     fallback path, not the normal one, and it made the setup sound like it
-     needed eleven other people to cooperate.
+     Step 3 is the one worth not cutting. The COMMISSIONER binds every roster
+     during setup (web/server.js, POST /api/leagues/:id/members), which is why
+     nobody else in the league has to do anything at all. That is the most
+     surprising fact about the setup and it used to be buried.
      ========================================================================== -->
 <section id="how-it-works">
-  <!-- Full width, not .narrow: three tiles across a narrow column give 199px
-       each, which wraps two of the three titles and makes a "this is easy"
-       graphic look cramped. The lede has its own 62ch cap so it stays readable. -->
-  <div class="wrap">
+  <div class="wrap narrow">
     <p class="eyebrow">How it works</p>
-    <h2>Three steps, and only one of them is yours.</h2>
-    <p class="lede" style="margin-bottom:34px">
+    <h2>Four steps, and your league does none of them.</h2>
+    <p class="lede" style="margin-bottom:44px">
       Commish reads your Sleeper league and posts into the group text you already use. No app to
-      install, no second chat to keep alive, and nothing for the rest of your league to do. The first
-      week is free.
+      install and no second chat to keep alive. The first week is free.
     </p>
 
-    <ol class="flow">
-      <li class="flow-step">
-        <span class="flow-num">1</span>
-        <h3>Pick your league</h3>
-        <p>Type your Sleeper username, choose the league, and put in everyone's name and number
-        while you are there. That part takes about a minute.</p>
+    <ol class="steps">
+      <li>
+        <span class="step-n">1</span>
+        <div>
+          <h3>Pick your league</h3>
+          <p>Type your Sleeper username and choose it from the list. No digging through app
+          settings for a league ID.</p>
+        </div>
       </li>
-      <li class="flow-step">
-        <span class="flow-num">2</span>
-        <h3>Add Commish to the chat</h3>
-        <p>Add the number to your league's group text. The thread you already use. iPhone and
-        Android together is fine.</p>
+      <li>
+        <span class="step-n">2</span>
+        <div>
+          <h3>Add the number to your group chat</h3>
+          <p>The thread your league already uses. iPhone and Android in the same chat is fine, which
+          was the whole requirement this was built around.</p>
+        </div>
       </li>
-      <li class="flow-step">
-        <span class="flow-num">3</span>
-        <h3>Start getting roasted</h3>
-        <p>It reads the league from there. Nobody else has to sign up, download anything, or text
-        it back. The first reckoning lands Tuesday.</p>
+      <li>
+        <span class="step-n">3</span>
+        <div>
+          <h3>Match everyone to a roster</h3>
+          <p>You put in names and numbers once, and that is the end of anybody else's involvement.
+          Nobody signs up, downloads anything, or texts it back.</p>
+        </div>
+      </li>
+      <li>
+        <span class="step-n">4</span>
+        <div>
+          <h3>Start getting roasted</h3>
+          <p>It reads the league from there and picks its own targets. The first reckoning lands
+          Tuesday.</p>
+        </div>
       </li>
     </ol>
 
-    <p class="small muted" style="margin-top:26px">Sleeper leagues only for now.</p>
+    <p class="small muted" style="margin-top:34px">Sleeper leagues only for now.</p>
   </div>
 </section>
 
