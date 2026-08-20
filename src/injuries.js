@@ -146,13 +146,19 @@ function composeAlert(risks) {
     const when = r.minutesToKickoff < 60
       ? `${r.minutesToKickoff}m`
       : `${Math.round(r.minutesToKickoff / 60)}h`;
-    return `${r.team}: ${r.player.full_name} is ${r.player.injury_status}${part}. ${r.game.short_name} in ${when}`;
+    return `${r.player.full_name} is ${r.player.injury_status}${part} and ${r.game.short_name} kicks in ${when}`;
   };
 
+  // A bit of voice, but the facts stay in the first clause. Somebody may be
+  // reading this with four minutes to spare and one hand on the app, so the
+  // name, the status and the clock come before any of the personality.
   if (risks.length === 1) {
-    return `Heads up. ${line(risks[0])}. That's a zero unless you swap him.`;
+    return `${risks[0].team}, before this costs you: ${line(risks[0])}. `
+         + `That is a zero sitting in your lineup right now.`;
   }
-  return `Heads up, lineup check:\n${risks.map(r => `• ${line(r)}`).join('\n')}\n\nThose are zeros unless you swap them.`;
+  return `Lineup check, and the clock is running:\n`
+       + `${risks.map(r => `• ${r.team}: ${line(r)}`).join('\n')}\n\n`
+       + `Those are zeros unless somebody moves.`;
 }
 
 module.exports = {
