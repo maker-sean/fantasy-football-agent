@@ -88,6 +88,12 @@ async function weekSnapshot(leagueId, week) {
       total_rosters: lg.total_rosters,
       scoring_settings: lg.scoring_settings,
       roster_positions: lg.roster_positions,
+      // waiver_type lives in here, and nothing else does today. Captured so a
+      // league's waiver format is recoverable from the snapshot rather than
+      // requiring a live call months later. Snapshots taken before this exist
+      // without it, which is why the recap gates waiver drama on the bids
+      // themselves and not on this field.
+      settings: lg.settings,
     },
     week: Number(week),
     rosters: rs,

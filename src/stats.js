@@ -12,6 +12,7 @@
  */
 
 const { activeSlots, optimalLineup, bestLegalSwap, canFill, describeRules, unstartablePositions } = require('./lineup');
+const waivers = require('./waivers');
 
 const round = n => Math.round(Number(n || 0) * 100) / 100;
 
@@ -147,6 +148,16 @@ function weekFacts(payload, players = new Map()) {
   const withSwap = teams.filter(t => t.bestLegalSwap)
     .sort((a, b) => b.bestLegalSwap.swing - a.bestLegalSwap.swing);
 
+  // Finished prose, not raw figures, and that is on purpose. src/waivers.js
+  // composes these lines deterministically, so the dollar amounts in the recap
+  // are the dollar amounts Sleeper reported, with no model in between. They
+  // reach the prompt through factsBlock like any other fact, which also means
+  // src/verify.js sees the numbers and can catch the model restating them wrong.
+  const waiverDrama = waivers.describe(
+    waivers.findDrama(waivers.contests(payload.transactions)),
+    { names: players, teams: waivers.teamNames(payload) },
+  );
+
   return {
     season: payload.league?.season,
     week: payload.week,
@@ -211,6 +222,16 @@ function weekFacts(payload, players = new Map()) {
     gooseEggs: teams
       .filter(t => t.zeroStarters.length)
       .map(t => ({ team: t.team, players: t.zeroStarters.map(s => `${s.name} (${s.slot})`) })),
+
+    // Waiver wire, from the transactions already in the snapshot.
+    //
+    // Deliberately gated on the bids themselves rather than on
+    // league.settings.waiver_type. Rolling-priority leagues record no
+    // waiver_bid at all, so contests() returns empty on its own, and every
+    // snapshot captured before settings was added lacks the field entirely.
+    // Reading waiver_type would make this feature fail closed on exactly the
+    // archive data it was calibrated against. The data gates itself.
+    waiverDrama,
 
     // Kept for the recap's own use; not surfaced as a headline.
     perTeam: teams.map(t => ({

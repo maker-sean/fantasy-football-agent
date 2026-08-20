@@ -121,6 +121,16 @@ function factsBlock(facts) {
     }
   }
 
+  // Waiver wire. Already deterministic prose from src/waivers.js, so it goes in
+  // as written rather than being reassembled here. Empty for rolling-priority
+  // leagues, which record no bids, and the block disappears entirely rather
+  // than announcing that there is nothing to say.
+  if (facts.waiverDrama?.length) {
+    lines.push('');
+    lines.push('Waiver wire this week:');
+    for (const line of facts.waiverDrama) lines.push(`  ${line}`);
+  }
+
   lines.push('');
   lines.push('All results this week:');
   for (const g of facts.games || []) {
