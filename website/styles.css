@@ -268,15 +268,22 @@ footer ul { display: flex; gap: 20px; list-style: none; margin: 0; padding: 0; f
 }
 
 /* There used to be a rule here hiding the first header link below 440px, back
-   when the bar carried three of them and could not fit the wordmark too. The
-   messaging disclosures moved to their own page, so the bar is down to two short
-   links with 86px to spare at 320px, and the rule had inverted into hiding
-   Features and leaving Pricing alone in the nav.
+   when the bar carried Features / Pricing / Messaging and could not fit the
+   wordmark too. The messaging disclosures moved to their own page, the bar went
+   down to two links, and the rule inverted into hiding Features and leaving
+   Pricing alone in the nav.
 
-   If a third link ever comes back, measure before reaching for display:none, and
-   scope it to `body > nav` — the old rule's own comment records that
-   `nav ul li:first-child` also matches the FOOTER, where it silently dropped a
-   legal link that has to stay reachable for carrier registration. */
+   A third link is now back: FAQ. It was MEASURED rather than assumed, which is
+   the whole point of this note. At 320px, the narrowest phone worth supporting,
+   the bar is wordmark 110 + links 163 = 273 of 320, one line, 46px spare. At
+   375px it has 101px spare. FAQ fits where Messaging never could because it is
+   28px wide against roughly 90.
+
+   So: no display:none, and if a FOURTH link is ever proposed, measure at 320
+   first. If one has to go, scope the selector to `body > nav` — the original
+   rule matched `nav ul li:first-child`, which also hits the FOOTER, where it
+   silently dropped a legal link that has to stay reachable for carrier
+   registration. */
 @media (max-width: 440px) {
   .brand { font-size: .98rem; }
 }
@@ -485,6 +492,52 @@ input[type="range"] { accent-color: var(--turf); }
    conversation. margin-top:auto on the first message rather than
    justify-content:flex-end, which clips the top of overflowing content. */
 .phone-screen .msgs > .msg:first-child { margin-top: auto; }
+
+/* --------------------------------------------------------------- faq ----- */
+/*
+ * <details>, not a JS accordion. It is keyboard operable, screen readers
+ * announce the expanded state on their own, ctrl-F still finds text inside a
+ * closed answer in most browsers, and it works with JavaScript off, which is
+ * the same reason the legal pages substitute their tokens server side.
+ *
+ * Deliberately NOT using <details name> to make it exclusive. Closing the
+ * answer someone is halfway through reading because they opened another one is
+ * a worse experience than two being open at once.
+ */
+.faq-item { border-bottom: 1px solid var(--line); }
+.faq-item:first-of-type { border-top: 1px solid var(--line); }
+
+.faq-item summary {
+  cursor: pointer;
+  padding: 20px 40px 20px 0;
+  font-weight: 700;
+  font-size: 1.02rem;
+  position: relative;
+  /* Both are needed: the second is the only thing that removes the disclosure
+     triangle in Safari, and the first covers everyone else. */
+  list-style: none;
+}
+.faq-item summary::-webkit-details-marker { display: none; }
+.faq-item summary:hover { color: var(--turf); }
+.faq-item summary:focus-visible { outline: 2px solid var(--turf); outline-offset: 3px; border-radius: 4px; }
+
+/* Chevron, drawn rather than typed so it cannot render as a missing glyph. */
+.faq-item summary::after {
+  content: ''; position: absolute; right: 6px; top: 50%;
+  width: 8px; height: 8px;
+  border-right: 2px solid var(--muted);
+  border-bottom: 2px solid var(--muted);
+  transform: translateY(-70%) rotate(45deg);
+  transition: transform .18s ease;
+}
+.faq-item[open] summary::after { transform: translateY(-20%) rotate(-135deg); }
+.faq-item[open] summary { color: var(--text); }
+
+.faq-item p { margin: 0 0 22px; color: var(--muted); max-width: 68ch; }
+
+@media (prefers-reduced-motion: reduce) {
+  .faq-item summary::after { transition: none; }
+}
 
 /* The email alternative on the signup screen. Collapsed by default — texting is
    the better path and should stay the obvious one. */
