@@ -373,7 +373,12 @@ input[type="range"] { accent-color: var(--turf); }
    the frame is dropped and the bare thread stands on its own. */
 @media (max-width: 620px) {
   .phone-bezel { background: none; border: 0; padding: 0; box-shadow: none; }
-  .phone-screen { height: auto; max-height: 520px; border-radius: 14px; border: 1px solid var(--line); }
+  /* A FIXED height, not auto with a max. Pending messages are display:none, so
+     an auto-height thread starts one message tall and grows with every arrival,
+     shoving the rest of the page down eight times while someone is reading it.
+     Reserving the full height up front costs nothing: the thread is already
+     bottom-anchored, so it fills upward into space it was always going to use. */
+  .phone-screen { height: 520px; border-radius: 14px; border: 1px solid var(--line); }
   .phone-status, .phone-home { display: none; }
   .phone { width: 100%; }
 }
