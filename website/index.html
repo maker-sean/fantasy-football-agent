@@ -38,8 +38,10 @@
     </div>
 
     <!-- The frame is decoration; the thread inside it is the real markup, and
-         the messages are real bot output. It is hidden below 620px, where
-         drawing a phone inside a phone wastes width and looks strange. -->
+         the messages are real bot output. Below 620px the frame is dropped
+         (bezel, status bar, home indicator) and the bare thread stands on its
+         own, because drawing a phone inside a phone wastes width and looks
+         strange. The thread itself is never hidden at any width. -->
     <div class="hero-phone">
       <div class="phone" aria-hidden="false">
         <div class="phone-bezel">
