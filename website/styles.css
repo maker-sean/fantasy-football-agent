@@ -88,6 +88,9 @@ section + section { border-top: 1px solid var(--line); }
   display: inline-block; padding: 13px 24px; border-radius: var(--radius);
   background: var(--turf); color: #06130c; font-weight: 700; font-size: .97rem;
   border: 1px solid var(--turf);
+  /* No-op while a button is auto-width. Load-bearing the moment one is
+     stretched to fill its container, which is what happens on mobile. */
+  text-align: center;
 }
 .btn:hover { background: #26bd76; text-decoration: none; }
 .btn.ghost { background: transparent; color: var(--text); border-color: var(--line); }
@@ -322,6 +325,12 @@ input[type="range"] { accent-color: var(--turf); }
   .hero-copy .lede { max-width: 46ch; }
 }
 
+/* The two calls to action. Flex with a gap rather than a margin on the second
+   button: a margin only describes the space between them on ONE line, so when
+   the pair wrapped it left them touching vertically and indented the second one
+   by the 8px meant to separate them horizontally. */
+.hero-actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 30px; }
+
 .hero-phone { display: flex; justify-content: center; }
 
 .phone { width: 320px; max-width: 100%; }
@@ -372,6 +381,11 @@ input[type="range"] { accent-color: var(--turf); }
 /* Below this a phone drawn inside a phone wastes width and looks strange, so
    the frame is dropped and the bare thread stands on its own. */
 @media (max-width: 620px) {
+  /* Stack the pair and let them stretch, so they are the same width instead of
+     266px next to 144px. Same breakpoint as the frame above deliberately: the
+     hero has one mobile mode, not two that drift apart. */
+  .hero-actions { flex-direction: column; }
+
   .phone-bezel { background: none; border: 0; padding: 0; box-shadow: none; }
   /* A FIXED height, not auto with a max. Pending messages are display:none, so
      an auto-height thread starts one message tall and grows with every arrival,
