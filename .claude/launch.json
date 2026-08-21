@@ -5,10 +5,26 @@
       "name": "commish-site",
       "runtimeExecutable": "python3",
       "runtimeArgs": [
-        "-m", "http.server", "4321",
-        "--directory", "/Users/seanmihm/fantasy-agent/website"
+        "-m",
+        "http.server",
+        "4321",
+        "--directory",
+        "/Users/seanmihm/fantasy-agent/website"
       ],
       "port": 4321
+    },
+    {
+      "name": "commish-web",
+      "runtimeExecutable": "env",
+      "runtimeArgs": [
+        "DEV_AUTH=true",
+        "DEV_AUTH_EMAIL=operator@example.invalid",
+        "ADMIN_EMAILS=operator@example.invalid",
+        "PORT=4322",
+        "node",
+        "/Users/seanmihm/fantasy-agent/web/server.js"
+      ],
+      "port": 4322
     }
   ]
 }

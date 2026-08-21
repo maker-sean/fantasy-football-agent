@@ -20,6 +20,8 @@ const path = require('path');
 require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
 const express = require('express');
 const db = require('../src/db');
+const observe = require('../src/observe');
+const flags = require('../src/flags');
 const sleeper = require('../src/sleeper');
 
 const app = express();
@@ -90,6 +92,9 @@ app.get(/\.html$|^\/$/, (req, res, next) => {
 
 app.use(express.static(WEBSITE_DIR, { extensions: ['html'] }));
 app.use('/app', express.static(path.join(__dirname, 'app'), { extensions: ['html'] }));
+// Operator UI. The static files are not secret; every byte of data behind them
+// is gated on /api/admin, which is where the check belongs.
+app.use('/admin', express.static(path.join(__dirname, 'admin'), { extensions: ['html'] }));
 
 /**
  * Public browser configuration.
@@ -528,6 +533,76 @@ app.patch('/api/leagues/:leagueId/config', requireAccount, loadLeague, wrap(asyn
  * who learns it could post a message claiming to come from any number, and the
  * bot would answer it with another league's data.
  */
+// --- operator views ---------------------------------------------------------
+//
+// The highest privilege surface in the system: these read every league's
+// private group chat across every tenant. Three things follow from that.
+//
+// The allowlist is an ENV VAR, not a column. An is_admin flag is one bad UPDATE
+// away from privilege escalation, and this database is written to by a worker,
+// a web app and a handful of scripts. Changing who is an operator should take a
+// deploy or a dashboard visit, not a query.
+//
+// It FAILS CLOSED. An unset ADMIN_EMAILS makes nobody an operator, including in
+// development. The alternative, treating unset as "allow", turns a forgotten
+// environment variable into an open door over other people's messages.
+//
+// And it is layered on requireAccount rather than replacing it, so an operator
+// still has to hold a valid Supabase session. The allowlist narrows who may
+// pass; it never substitutes for proving who they are.
+const ADMIN_EMAILS = new Set(
+  String(process.env.ADMIN_EMAILS || '')
+    .split(',').map(e => e.trim().toLowerCase()).filter(Boolean)
+);
+
+if (!ADMIN_EMAILS.size) {
+  console.warn('[web] ADMIN_EMAILS is unset, so /api/admin is closed to everyone.');
+}
+
+function requireAdmin(req, res, next) {
+  const email = String(req.account?.email || '').toLowerCase();
+  if (!email || !ADMIN_EMAILS.has(email)) {
+    // 404, not 403. A 403 confirms the route exists and that this account is
+    // simply not on the list, which is a map of the system for anyone probing.
+    return res.status(404).json({ error: 'not_found' });
+  }
+  return next();
+}
+
+const admin = [requireAccount, requireAdmin];
+
+app.get('/api/admin/overview', admin, wrap(async (req, res) => {
+  const days = Math.min(Number(req.query.days) || 7, 365);
+  const [replies, decisions, flagRows] = await Promise.all([
+    observe.replyRate({ scope: null, days }),
+    observe.decisionBreakdown({ scope: null, days }),
+    flags.all(),
+  ]);
+  res.json({ days, replies, decisions, flags: flagRows, dryRunEnv: process.env.REPLY_DRY_RUN === 'true' });
+}));
+
+app.get('/api/admin/leagues', admin, wrap(async (_req, res) => {
+  res.json({ leagues: await observe.leagueList({ scope: null }) });
+}));
+
+app.get('/api/admin/leagues/:leagueId/thread', admin, wrap(async (req, res) => {
+  const limit = Math.min(Number(req.query.limit) || 200, 1000);
+  res.json(await observe.thread({ leagueId: req.params.leagueId, limit }));
+}));
+
+app.get('/api/admin/drafts', admin, wrap(async (req, res) => {
+  const limit = Math.min(Number(req.query.limit) || 25, 200);
+  res.json({ drafts: await observe.draftHistory({ scope: null, leagueId: req.query.leagueId || null, limit }) });
+}));
+
+// The one write. Not CRUD: it flips a boolean the worker reads on its next
+// poll, and it records who did it.
+app.post('/api/admin/flags/replies-paused', admin, wrap(async (req, res) => {
+  const paused = req.body?.paused === true;
+  await flags.setRepliesPaused(paused, req.account.email);
+  res.json({ replies_paused: paused, by: req.account.email });
+}));
+
 app.post('/webhooks/linq', wrap(async (req, res) => {
   const secret = process.env.LINQ_WEBHOOK_SECRET;
   if (!secret) return res.status(503).json({ error: 'webhook_not_configured' });

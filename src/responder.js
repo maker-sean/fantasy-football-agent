@@ -10,6 +10,7 @@
 const { BurstCollector } = require('./burst');
 const { conversationState } = require('./convo');
 const { decide } = require('./decide');
+const flags = require('./flags');
 const { handleControl } = require('./control');
 
 const PERSIST = Boolean(process.env.DATABASE_URL);
@@ -115,6 +116,23 @@ class Responder {
     const verdict = decide({ burst, state, league: league || {} });
     verdict.trigger = meta.trigger;
     verdict.waitedMs = meta.waitedMs;
+
+    /*
+     * The kill switch, applied AFTER the gate rather than before it.
+     *
+     * Deciding first and then refusing to send means the decisions table still
+     * records what the bot would have done while it was paused, which is the
+     * whole reason an operator pauses: to watch without being posted to. Short
+     * circuiting above decide() would leave a silent hole in the trace, and a
+     * silent hole is indistinguishable from a crashed worker, which is the
+     * ambiguity this system exists to remove.
+     */
+    if (verdict.reply && await flags.repliesPaused().catch(() => true)) {
+      verdict.reply = false;
+      verdict.layer = 'suppress';
+      verdict.reason = 'replies_paused';
+      verdict.detail = { ...verdict.detail, wouldHaveReplied: true, pausedBy: 'control_plane' };
+    }
 
     let replied = null;
     if (verdict.reply) {

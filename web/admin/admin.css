@@ -1,0 +1,78 @@
+/*
+ * Operator styling. Rides on the product's stylesheet for tokens and buttons,
+ * and adds only what a dense read-only board needs.
+ *
+ * Wider than the marketing wrap: this is a table surface, not a reading column,
+ * and 891px would force horizontal scroll on every row.
+ */
+.ops { padding-bottom: 80px; }
+
+.ops-bar {
+  position: sticky; top: 0; z-index: 20;
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  padding: 12px 22px; border-bottom: 1px solid var(--line);
+  background: rgba(18,18,18,.94); backdrop-filter: saturate(140%) blur(8px);
+}
+.ops-brand { display: flex; align-items: center; gap: 10px; }
+.ops-brand .mark { display: block; height: 20px; }
+.ops-brand .mark svg { height: 100%; width: auto; display: block; fill: var(--turf); }
+.ops-brand .mark .dots { fill: #06130c; }
+.ops-kill { display: flex; align-items: center; gap: 10px; }
+
+.pill {
+  font-family: var(--mono); font-size: .7rem; letter-spacing: .08em;
+  text-transform: uppercase; padding: 4px 9px; border-radius: 5px;
+  border: 1px solid var(--line); color: var(--muted);
+}
+.pill.live    { color: var(--turf);  border-color: var(--turf-dim); }
+.pill.paused  { color: var(--amber); border-color: var(--amber-dim); }
+
+.ops-main { max-width: 1180px; margin: 0 auto; padding: 26px 22px; }
+.ops-h { margin: 34px 0 12px; font-size: 1rem; letter-spacing: -.01em; }
+
+.ops-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 14px; }
+.stat {
+  background: var(--surface); border: 1px solid var(--line);
+  border-radius: 10px; padding: 16px 18px;
+  display: flex; flex-direction: column; gap: 4px;
+}
+.stat-label { font-family: var(--mono); font-size: .64rem; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
+.stat-value { font-size: 1.9rem; font-weight: 800; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+.stat-sub   { font-size: .8rem; color: var(--muted); }
+
+/* Tables scroll inside their own container so the page body never does. */
+.tbl-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+.tbl { width: 100%; border-collapse: collapse; font-size: .87rem; }
+.tbl td { padding: 9px 14px; border-top: 1px solid var(--line); vertical-align: top; }
+.tbl tr:first-child td { border-top: 0; }
+.tbl tr.head td { font-family: var(--mono); font-size: .64rem; letter-spacing: .09em; text-transform: uppercase; color: var(--muted); }
+.tbl tr.click { cursor: pointer; }
+.tbl tr.click:hover td { background: var(--raised); }
+.num { font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
+.dim { color: var(--muted); }
+.mono { font-family: var(--mono); font-size: .82em; }
+
+.tag-reply  { color: var(--turf); }
+.tag-silent { color: var(--muted); }
+.warn { color: var(--amber); }
+
+/* The thread. Not a grid: a conversation rendered as a paginated table sorted
+   by timestamp is unreadable, which is the whole reason this is custom. */
+.thread { display: flex; flex-direction: column; gap: 10px; padding: 4px 0; }
+.ev { display: flex; flex-direction: column; gap: 3px; max-width: 76%; }
+.ev.out { align-self: flex-end; align-items: flex-end; }
+.ev-who { font-family: var(--mono); font-size: .62rem; letter-spacing: .07em; text-transform: uppercase; color: var(--muted); }
+.ev-body { padding: 10px 13px; border-radius: 14px; background: var(--raised); white-space: pre-wrap; font-size: .9rem; }
+.ev.out .ev-body { background: var(--turf-dim); border: 1px solid var(--turf); }
+
+/* A silent decision has no message, so it appears as a gap with a reason. That
+   is the only way to tell a suppressed reply from a dry run from a dead worker. */
+.ev.silent { align-self: center; align-items: center; max-width: 100%; }
+.ev.silent .ev-body {
+  background: none; border: 1px dashed var(--line); color: var(--muted);
+  font-family: var(--mono); font-size: .74rem; padding: 5px 11px; border-radius: 6px;
+}
+.trace {
+  margin-top: 4px; font-family: var(--mono); font-size: .7rem; color: var(--muted);
+  border-left: 2px solid var(--line); padding-left: 9px; white-space: pre-wrap;
+}

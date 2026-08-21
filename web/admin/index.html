@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Operator | Commish</title>
+<meta name="robots" content="noindex, nofollow">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/styles.css">
+<link rel="stylesheet" href="admin.css">
+</head>
+<body class="ops">
+
+<!--
+  Operator view. One reader, on a laptop, at 1am on a Sunday when something
+  looks wrong. Density over polish on purpose: no responsive layout, no empty
+  state art, no onboarding. Everything that matters is on one screen.
+
+  These files are served without auth. Every byte of data behind them is gated
+  on /api/admin, which fails closed when ADMIN_EMAILS is unset. Putting the
+  check in the API rather than the page is what makes "view source" boring.
+-->
+
+<header class="ops-bar">
+  <div class="ops-brand">
+    <span class="mark" aria-hidden="true">
+      <svg viewBox="4 10 56 44" focusable="false"><path d="M20 10 H44 A16 16 0 0 1 60 26 V49 A5 5 0 0 1 55 54 H20 A16 16 0 0 1 4 38 V26 A16 16 0 0 1 20 10 Z"/><g class="dots"><circle cx="16" cy="32" r="4.5"/><circle cx="32" cy="32" r="4.5"/><circle cx="48" cy="32" r="4.5"/></g></svg>
+    </span>
+    <strong>Operator</strong>
+  </div>
+  <div class="ops-kill">
+    <span id="kill-state" class="pill">…</span>
+    <button id="kill" class="btn ghost" type="button" disabled>…</button>
+  </div>
+</header>
+
+<main class="ops-main">
+
+  <section id="signin" hidden>
+    <h2>Sign in</h2>
+    <p class="muted small">Uses the same magic link as the commissioner app. Operator access is a
+    separate allowlist on the server; a valid session is necessary but not sufficient.</p>
+    <div class="row" style="margin-top:12px">
+      <input id="email" type="email" placeholder="you@example.com" autocomplete="email">
+      <button id="send-link" class="btn" type="button">Email me a link</button>
+    </div>
+    <p id="signin-msg" class="msg-line" role="status" aria-live="polite"></p>
+  </section>
+
+  <section id="denied" hidden>
+    <h2>No operator access</h2>
+    <p class="muted small">This account is signed in but is not on the operator allowlist.</p>
+  </section>
+
+  <section id="board" hidden>
+
+    <!-- The two numbers that decide whether this product is real, side by side.
+         Reply rate alone says it might be failing. The decision breakdown says
+         WHY, which is a different problem with a different fix. -->
+    <div class="ops-grid">
+      <div class="stat">
+        <span class="stat-label">Human reply rate</span>
+        <span class="stat-value" id="reply-rate">…</span>
+        <span class="stat-sub" id="reply-sub">…</span>
+      </div>
+      <div class="stat">
+        <span class="stat-label">Bot messages</span>
+        <span class="stat-value" id="bot-msgs">…</span>
+        <span class="stat-sub" id="window-sub">…</span>
+      </div>
+      <div class="stat">
+        <span class="stat-label">Leagues live</span>
+        <span class="stat-value" id="live-count">…</span>
+        <span class="stat-sub" id="live-sub">…</span>
+      </div>
+    </div>
+
+    <h3 class="ops-h">Why it spoke, and why it didn't</h3>
+    <div class="tbl-wrap"><table class="tbl" id="decisions"><tbody></tbody></table></div>
+
+    <h3 class="ops-h">Leagues</h3>
+    <div class="tbl-wrap"><table class="tbl" id="leagues"><tbody></tbody></table></div>
+
+    <h3 class="ops-h" id="thread-h" hidden>Thread</h3>
+    <div id="thread" class="thread" hidden></div>
+
+    <h3 class="ops-h">Generated recaps</h3>
+    <div class="tbl-wrap"><table class="tbl" id="drafts"><tbody></tbody></table></div>
+  </section>
+</main>
+
+<script src="admin.js"></script>
+</body>
+</html>

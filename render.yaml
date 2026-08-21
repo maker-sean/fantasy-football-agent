@@ -35,6 +35,18 @@ services:
       # Shown on the "add me to your group chat" screen.
       - key: SENDBLUE_FROM_NUMBER
         sync: false
+      # Operator allowlist for /admin, comma separated emails.
+      #
+      # sync:false so the dashboard owns it, like REPLY_DRY_RUN and ECHO. A
+      # literal value here would be re-applied on every deploy, which is how
+      # this repo has twice had a setting silently reset underneath it.
+      #
+      # Unset means /api/admin is closed to everyone, which is the intended
+      # default: a forgotten variable must not become an open door over other
+      # people's group chats.
+      - key: ADMIN_EMAILS
+        sync: false
+
       - key: TERMS_VERSION
         value: "2026-08-16"
       - key: NODE_ENV

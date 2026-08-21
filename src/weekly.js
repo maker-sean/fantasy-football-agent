@@ -131,6 +131,10 @@ async function runWeeklyRecaps(provider, opts = {}) {
           },
           verification,
           model: out.meta.model,
+          // generateRecap has always returned this and it was being discarded,
+          // which made cost per league unanswerable. It is the only number here
+          // that cannot be recomputed after the fact.
+          usage: out.meta.usage,
         });
 
         if (!draft) { entry.result = 'draft already existed'; return entry; }

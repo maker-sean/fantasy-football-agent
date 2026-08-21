@@ -11,6 +11,7 @@
  */
 
 const db = require('./db');
+const { commitSha } = require('./version');
 
 const DEFAULT_TTL_HOURS = Number(process.env.DRAFT_TTL_HOURS || 24);
 
@@ -25,14 +26,19 @@ function autoPostEnabled(league) {
   return Boolean(league?.config?.autoPost);
 }
 
-async function createDraft({ leagueId, season, week, kind = 'recap', body, facts = {}, verification = {}, model, ttlHours = DEFAULT_TTL_HOURS }) {
+async function createDraft({ leagueId, season, week, kind = 'recap', body, facts = {}, verification = {}, model, usage = null, promptSha, ttlHours = DEFAULT_TTL_HOURS }) {
+  // Defaulted here rather than at every call site: a draft written without a
+  // sha is a hole in the trace, and the caller forgetting is the likely way
+  // that happens.
+  const sha = promptSha === undefined ? commitSha() : promptSha;
   const { rows } = await db.query(
-    `insert into recap_drafts (league_id, season, week, kind, body, facts, verification, model, expires_at)
-     values ($1,$2,$3,$4,$5,$6,$7,$8, now() + ($9 || ' hours')::interval)
+    `insert into recap_drafts (league_id, season, week, kind, body, facts, verification, model, usage, prompt_sha, expires_at)
+     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10, now() + ($11 || ' hours')::interval)
      on conflict (league_id, season, week, kind) where status in ('pending','approved','sent')
      do nothing
      returning *`,
-    [leagueId, String(season), Number(week), kind, body, facts, verification, model || null, String(ttlHours)]
+    [leagueId, String(season), Number(week), kind, body, facts, verification, model || null,
+     usage ? JSON.stringify(usage) : null, sha, String(ttlHours)]
   );
   return rows[0] || null;   // null means one already exists for this week
 }
