@@ -152,12 +152,26 @@ class Responder {
         needsBinding: needs,
         dryRun: this.dryRun,
       });
-      // Recorded as its own layer so the operator board shows an introduction
-      // rather than a mention that mysteriously produced no reply.
-      verdict.reply = false;
-      verdict.layer = 'welcome';
-      verdict.reason = res.sent ? 'introduced' : 'introduction_pending';
-      verdict.detail = { ...verdict.detail, welcomed: res.sent, wouldHaveReplied: true };
+      /*
+       * A PREFIX, not a replacement.
+       *
+       * The introduction goes out first and then the request is answered, which
+       * is what a person would do when joining a group and being asked
+       * something. An earlier version consumed the mention and replied with
+       * only the introduction, which meant "Commish who won in 2023" got a
+       * greeting and no answer. That contradicted the precondition idea it was
+       * meant to implement: first, not instead.
+       *
+       * The one case that still suppresses is a FAILED introduction. If the
+       * group could not be told who we are, answering anyway means a roast from
+       * an unknown number, which is the thing this exists to prevent.
+       */
+      verdict.detail = { ...verdict.detail, welcomed: res.sent };
+      if (!res.welcomed) {
+        verdict.reply = false;
+        verdict.layer = 'welcome';
+        verdict.reason = 'introduction_failed';
+      }
     }
 
     let replied = null;

@@ -128,6 +128,30 @@ async function main() {
     } finally { db.query = real; }
   });
 
+  console.log('\nthe introduction is a prefix, not a replacement');
+
+  await it('a successful introduction leaves the reply intact', async () => {
+    // "Commish who won in 2023" must get the introduction AND the answer.
+    // Consuming the mention would mean the first question anyone ever asks is
+    // silently dropped, which is not what "first, not instead" means.
+    const real = db.query;
+    db.query = async () => ({ rows: [] });
+    try {
+      const r = await welcome.ensureWelcomed(league(), { send: async () => {} });
+      assert.strictEqual(r.welcomed, true,
+        'a caller checks this to decide whether it may still send its own message');
+    } finally { db.query = real; }
+  });
+
+  await it('a failed introduction is the one case that blocks the reply', async () => {
+    // Answering anyway means a roast from a number the group has never been
+    // told anything about, which is the thing the precondition exists to stop.
+    const r = await welcome.ensureWelcomed(league(), {
+      send: async () => { throw new Error('provider down'); },
+    });
+    assert.strictEqual(r.welcomed, false);
+  });
+
   if (!process.env.DATABASE_URL) {
     console.log('\nagainst a database\n  SKIPPED — no DATABASE_URL');
     console.log(`\n${pass} passing`);
