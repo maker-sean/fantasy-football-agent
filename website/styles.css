@@ -74,6 +74,17 @@ nav ul { display: flex; align-items: center; gap: 22px; list-style: none; margin
 nav ul a { color: var(--muted); font-weight: 600; }
 nav ul a:hover { color: var(--text); text-decoration: none; }
 
+/* The persistent call to action.
+ *
+ * The bar is sticky, so this is the only CTA that is on screen for the whole
+ * page. Before it existed, 57% of the home page had nothing to click: two
+ * signup links, at screen 0.7 and 5.3 of 7.9.
+ *
+ * Smaller than a body button on purpose. At .btn's normal 13px/24px padding it
+ * out-weighed the wordmark and the bar read as a banner ad. */
+.btn.nav-cta { padding: 8px 15px; font-size: .87rem; white-space: nowrap; }
+.btn.nav-cta:hover { color: #06130c; }
+
 /* -------------------------------------------------------------- type ---- */
 h1 { font-size: clamp(2.1rem, 5.5vw, 3.4rem); line-height: 1.08; letter-spacing: -.032em; font-weight: 800; margin: 0 0 20px; }
 h2 { font-size: clamp(1.4rem, 3vw, 1.85rem); letter-spacing: -.02em; font-weight: 750; margin: 0 0 14px; }
@@ -171,7 +182,14 @@ section + section { border-top: 1px solid var(--line); }
 .card h3 { color: var(--text); }
 .card p { margin: 0; color: var(--muted); font-size: .95rem; }
 
-.price { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 30px; }
+.price {
+  background: var(--surface); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 30px;
+  /* Column + auto margin on the button so the two calls to action sit on
+     the same line regardless of how many bullets each plan has. */
+  display: flex; flex-direction: column;
+}
+.price .btn { margin-top: auto; }
 .price.feature { border-color: var(--turf); }
 .price .amount { font-size: 2.6rem; font-weight: 800; letter-spacing: -.03em; }
 .price ul { list-style: none; padding: 0; margin: 20px 0 26px; }
@@ -255,8 +273,11 @@ footer ul { display: flex; gap: 20px; list-style: none; margin: 0; padding: 0; f
   section { padding: 54px 0; }
   /* Links must not wrap: a two-line "How it works" shoves the logo off-centre
      and makes the bar look broken on a phone, which is where this is read. */
-  nav ul { gap: 15px; font-size: .87rem; }
+  nav ul { gap: 12px; font-size: .85rem; }
   nav ul a { white-space: nowrap; }
+  /* The button is the widest thing in the bar once the wordmark goes, so it
+     gives up padding before any link gives up its place. */
+  .btn.nav-cta { padding: 7px 12px; font-size: .82rem; }
   .msg { max-width: 95%; }
   .legal table, .legal td, .legal th { display: block; }
   .legal th { border: 0; padding-bottom: 2px; }
@@ -283,6 +304,15 @@ footer ul { display: flex; gap: 20px; list-style: none; margin: 0; padding: 0; f
    registration. */
 @media (max-width: 440px) {
   .brand { font-size: .98rem; }
+
+  /* Below this the bar cannot hold wordmark + three links + the button. The
+     WORDMARK is what gives way, not a link and not the button.
+     Measured at 320px: mark 28 + links 164 + button ~95 + gaps leaves the row
+     fitting, where keeping "Commish" needs another 80px it does not have.
+     The mark still says who this is and still links home, so nothing is lost
+     that a visitor can act on. Dropping a nav link instead would hide
+     navigation to buy 80px, which is the trade the old rule here got wrong. */
+  .brand-word { display: none; }
 }
 
 /* --------------------------------------------------- commissioner app ---- */
