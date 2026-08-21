@@ -64,15 +64,19 @@ async function sendMagicLink() {
   $('send-link').disabled = true;
   say($('signin-msg'), 'Sending…');
   try {
-    const res = await fetch(`${CONFIG.supabaseUrl}/auth/v1/otp`, {
+    // redirect_to is a QUERY parameter. It was in the body as
+    // options.email_redirect_to, which is the supabase-js client shape and is
+    // ignored by the REST endpoint, so every link went to the project's Site
+    // URL instead. Nothing errored; the email just arrived pointing elsewhere.
+    const res = await fetch(otpUrl(CONFIG.supabaseUrl, location.origin + '/app/'), {
       method: 'POST',
       headers: { 'content-type': 'application/json', apikey: CONFIG.supabaseAnonKey },
-      body: JSON.stringify({ email, create_user: true, options: { email_redirect_to: location.origin + '/app/' } }),
+      body: JSON.stringify({ email, create_user: true }),
     });
-    if (!res.ok) throw new Error(await res.text());
+    if (!res.ok) { const t = await res.text(); throw Object.assign(new Error(t), { status: res.status, raw: t }); }
     say($('signin-msg'), `Sent. Check ${email} and click the link — you can close this tab.`, 'ok');
   } catch (err) {
-    say($('signin-msg'), 'Could not send the link. Try again in a moment.', 'err');
+    say($('signin-msg'), otpError(err.status, err.raw), 'err');
     console.error(err);
   } finally {
     $('send-link').disabled = false;

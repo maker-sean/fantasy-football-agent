@@ -96,6 +96,15 @@ app.use('/app', express.static(path.join(__dirname, 'app'), { extensions: ['html
 // is gated on /api/admin, which is where the check belongs.
 app.use('/admin', express.static(path.join(__dirname, 'admin'), { extensions: ['html'] }));
 
+// One copy of the shared browser helper, served from src/ rather than copied
+// into each front end. The bug it fixes came from app.js and admin.js building
+// the same request slightly differently; duplicating the fix into two files
+// would have set up the next divergence.
+app.get('/shared/authlink.js', (_req, res) => {
+  res.type('application/javascript')
+     .sendFile(path.join(__dirname, '..', 'src', 'authlink.js'));
+});
+
 /**
  * Public browser configuration.
  *

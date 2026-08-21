@@ -37,17 +37,17 @@ async function sendLink() {
   const msg = $('signin-msg');
   msg.textContent = 'Sending…';
   try {
-    const res = await fetch(`${CONFIG.supabaseUrl}/auth/v1/otp`, {
+    // redirect_to is a QUERY parameter; the body form is ignored by the REST
+    // endpoint. create_user matches the commissioner app and is not a hole:
+    // the allowlist is the gate, so an account created here still gets a 404
+    // from every operator route.
+    const res = await fetch(otpUrl(CONFIG.supabaseUrl, location.origin + '/admin/'), {
       method: 'POST',
       headers: { 'content-type': 'application/json', apikey: CONFIG.supabaseAnonKey },
-      // create_user matches the commissioner app. It is not a hole: the
-      // allowlist is the gate, so anyone who creates an account here still
-      // gets a 404 from every operator route. Without it, an operator who has
-      // never signed in anywhere gets an opaque failure on first use.
-      body: JSON.stringify({ email, create_user: true, options: { email_redirect_to: location.origin + '/admin/' } }),
+      body: JSON.stringify({ email, create_user: true }),
     });
-    msg.textContent = res.ok ? 'Check your email.' : 'Could not send the link.';
-  } catch { msg.textContent = 'Could not send the link.'; }
+    msg.textContent = res.ok ? 'Check your email.' : otpError(res.status, await res.text());
+  } catch { msg.textContent = 'Could not reach Supabase.'; }
 }
 
 function captureTokenFromHash() {
