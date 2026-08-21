@@ -235,6 +235,7 @@
           <li>The Tuesday recap, every week</li>
           <li>Pre-kickoff injury alerts</li>
           <li>Trades, waivers and roster teardowns</li>
+          <li>Answers when someone actually asks it</li>
           <li>iPhone and Android in the same chat</li>
         </ul>
         <a class="btn" href="start.html" style="display:block; text-align:center">Start trial</a>
@@ -292,6 +293,16 @@
     <details class="faq-item">
       <summary>What happens when we start a new season, or a new league?</summary>
       <p>You add the new league the same way you added the first one. Sleeper treats each season as its own league, so history does not carry across automatically today. Nothing you have already set up is lost.</p>
+    </details>
+
+    <!-- Says "its name" and nothing else on purpose. src/decide.js layerMention
+         has two triggers, the bot's name and a reply to one of its own
+         messages, but the reply path needs a reply-to reference the provider
+         has to expose and Sendblue does not. Promising it here would be
+         promising something that never fires on the live transport. -->
+    <details class="faq-item">
+      <summary>Can we ask it things?</summary>
+      <p>Say its name and it answers. It has been reading the whole time, so it knows who won the league in 2023, who has the worst bench luck, and what your record is against Dave. Don't say its name and it stays out of the way.</p>
     </details>
 
     <details class="faq-item">
