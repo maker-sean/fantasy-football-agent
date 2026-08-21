@@ -11,7 +11,6 @@ const $ = id => document.getElementById(id);
 const token = () => localStorage.getItem(TOKEN_KEY);
 const show = (id, on) => { $(id).hidden = !on; };
 
-let CONFIG = {};
 let LEAGUES = [];
 
 async function api(method, path, body) {
@@ -37,17 +36,27 @@ async function sendLink() {
   const msg = $('signin-msg');
   msg.textContent = 'Sending…';
   try {
-    // redirect_to is a QUERY parameter; the body form is ignored by the REST
-    // endpoint. create_user matches the commissioner app and is not a hole:
-    // the allowlist is the gate, so an account created here still gets a 404
-    // from every operator route.
-    const res = await fetch(otpUrl(CONFIG.supabaseUrl, location.origin + '/admin/'), {
+    /*
+     * Through our own server, not straight to Supabase.
+     *
+     * The allowlist is checked there, before any email is sent. Doing it here
+     * would be theatre: the anon key is public, so anyone can call Supabase
+     * directly. And the built-in SMTP allows two emails per hour across the
+     * whole project, so an unchecked form is not a nuisance, it is a way to
+     * lock the operator out of their own dashboard.
+     *
+     * The reply is the same whether or not the address is an operator.
+     */
+    const r = await fetch('/api/admin/request-link', {
       method: 'POST',
-      headers: { 'content-type': 'application/json', apikey: CONFIG.supabaseAnonKey },
-      body: JSON.stringify({ email, create_user: true }),
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ email }),
     });
-    msg.textContent = res.ok ? 'Check your email.' : otpError(res.status, await res.text());
-  } catch { msg.textContent = 'Could not reach Supabase.'; }
+    const j = await r.json().catch(() => ({}));
+    msg.textContent = j.message || 'If that address can sign in here, a link is on its way.';
+  } catch {
+    msg.textContent = 'Could not reach the server.';
+  }
 }
 
 function captureTokenFromHash() {
@@ -198,7 +207,8 @@ async function load() {
 }
 
 async function boot() {
-  CONFIG = await fetch('/api/config').then(r => r.json()).catch(() => ({}));
+  // No /api/config fetch and no Supabase keys: this page never talks to
+  // Supabase directly any more, the server does the sending.
   captureTokenFromHash();
   show('signin', false); show('denied', false); show('board', false);
 

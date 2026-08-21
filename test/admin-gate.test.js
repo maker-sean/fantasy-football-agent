@@ -27,7 +27,7 @@ process.env.DEV_AUTH_EMAIL = 'not-an-operator@example.invalid';
 process.env.NODE_ENV = 'test';
 // Set BEFORE the server is required: the allowlist is read once at module load,
 // which is the point. Operator access should not be re-readable at runtime.
-process.env.ADMIN_EMAILS = 'boss@example.invalid, MixedCase@Example.Invalid';
+process.env.ADMIN_EMAILS = 'boss@example.invalid, MixedCase@Example.Invalid, throttle@example.invalid, oracle@example.invalid';
 
 const assert = require('assert');
 const { app } = require('../web/server');
@@ -110,6 +110,77 @@ const server = app.listen(0, async () => {
     const r = await call('GET', '/api/me');
     assert.strictEqual(r.status, 200);
   });
+
+  console.log('\nrequesting a link is gated before any email is sent');
+
+  /*
+   * One stub for the whole group, installed before any case runs.
+   *
+   * An earlier version left the first case unstubbed and it made a REAL call to
+   * Supabase, which came back 429 and burned part of a two-per-hour project
+   * quota from a test run. A test suite that can lock a person out of their own
+   * dashboard is not a test suite.
+   *
+   * Each case also uses its own address. The throttle is keyed by email and
+   * lives for the process, so sharing one address made the cases order
+   * dependent: whichever ran first spent the slot the next one was asserting on.
+   */
+  const realFetch = global.fetch;
+  let outbound = [];
+  global.fetch = (u, o) => {
+    if (String(u).includes('/auth/v1/otp')) {
+      outbound.push(String(u));
+      return Promise.resolve({ ok: true, status: 200, text: async () => '' });
+    }
+    return realFetch(u, o);
+  };
+  const sent = () => outbound.length;
+  const reset = () => { outbound = []; };
+
+  try {
+    await it('a stranger gets the same answer as an operator', async () => {
+      reset();
+      const a = await call('POST', '/api/admin/request-link', { email: 'random@example.invalid' });
+      const b = await call('POST', '/api/admin/request-link', { email: 'oracle@example.invalid' });
+      assert.strictEqual(a.status, b.status);
+      assert.deepStrictEqual(await a.json(), await b.json(),
+        'the reply differs, which makes this an oracle for who is an operator');
+    });
+
+    await it('an unknown address never reaches Supabase', async () => {
+      // The point of the whole endpoint: the built-in SMTP allows two emails an
+      // hour across the project, so an unchecked form locks the operator out
+      // rather than merely wasting a message.
+      reset();
+      await call('POST', '/api/admin/request-link', { email: 'nobody@example.invalid' });
+      await call('POST', '/api/admin/request-link', { email: '' });
+      await call('POST', '/api/admin/request-link', {});
+      assert.strictEqual(sent(), 0, 'a non-operator address caused an email to be attempted');
+    });
+
+    await it('a real operator does reach Supabase, with the redirect in the query', async () => {
+      reset();
+      await call('POST', '/api/admin/request-link', { email: 'boss@example.invalid' });
+      assert.strictEqual(sent(), 1);
+      assert.match(outbound[0], /\?redirect_to=/, 'the redirect must be a query parameter');
+      assert.match(outbound[0], /%2Fadmin%2F/, 'the link must come back to the operator page');
+    });
+
+    await it('a repeat request is throttled, so a double click cannot spend the quota', async () => {
+      reset();
+      await call('POST', '/api/admin/request-link', { email: 'throttle@example.invalid' });
+      await call('POST', '/api/admin/request-link', { email: 'throttle@example.invalid' });
+      assert.strictEqual(sent(), 1, 'a double click spent two of the two hourly messages');
+    });
+
+    await it('the allowlist comparison ignores case and padding', async () => {
+      reset();
+      await call('POST', '/api/admin/request-link', { email: '  MIXEDCASE@example.INVALID ' });
+      assert.strictEqual(sent(), 1, 'a real operator was refused over casing');
+    });
+  } finally {
+    global.fetch = realFetch;
+  }
 
   console.log(`\n${pass} passing`);
   server.close();

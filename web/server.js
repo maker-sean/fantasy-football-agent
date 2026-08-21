@@ -580,6 +580,61 @@ function requireAdmin(req, res, next) {
 
 const admin = [requireAccount, requireAdmin];
 
+/*
+ * Requesting an operator link.
+ *
+ * Public by necessity, since nobody is signed in yet, and gated anyway. The
+ * browser used to call Supabase directly, which meant anyone could make this
+ * project send an email by typing an address into the operator page.
+ *
+ * That matters more than it looks. Supabase's built-in SMTP allows two emails
+ * per hour ACROSS THE WHOLE PROJECT, so a stranger hitting that form does not
+ * just waste a message, they lock the operator out of signing in at all. The
+ * allowlist check has to happen before Supabase is touched, and it has to
+ * happen on the server: a browser-side check is bypassed by calling Supabase
+ * directly with the anon key, which is public by design.
+ *
+ * The response is IDENTICAL either way. Saying "not an operator" would turn
+ * this into an oracle for which addresses are operators, which is the one piece
+ * of information the allowlist exists to protect.
+ */
+const LINK_MIN_GAP_MS = 60_000;
+const linkLastSent = new Map();
+
+app.post('/api/admin/request-link', wrap(async (req, res) => {
+  const email = String(req.body?.email || '').trim().toLowerCase();
+  const same = { ok: true, message: 'If that address can sign in here, a link is on its way.' };
+
+  if (!email || !ADMIN_EMAILS.has(email)) return res.json(same);
+
+  // Throttled even for a real operator: the project quota is two per hour, so
+  // an impatient double click is enough to spend half of it.
+  const last = linkLastSent.get(email) || 0;
+  if (Date.now() - last < LINK_MIN_GAP_MS) return res.json(same);
+  linkLastSent.set(email, Date.now());
+
+  // Fixed origin, never the request's. A redirect built from attacker supplied
+  // headers is how an open redirect starts, and Supabase's allowlist is a
+  // second line of defence rather than the only one.
+  const origin = process.env.PUBLIC_ORIGIN || `${req.protocol}://${req.get('host')}`;
+  const url = `${SUPABASE_URL.replace(/\/+$/, '')}/auth/v1/otp`
+            + `?redirect_to=${encodeURIComponent(origin + '/admin/')}`;
+
+  try {
+    const r = await fetch(url, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', apikey: SUPABASE_ANON_KEY },
+      body: JSON.stringify({ email, create_user: true }),
+    });
+    if (!r.ok) console.error('[admin] link request failed:', r.status, (await r.text()).slice(0, 200));
+    else console.log(`[admin] sign-in link sent to ${email}`);
+  } catch (err) {
+    console.error('[admin] link request threw:', err.message);
+  }
+
+  res.json(same);
+}));
+
 app.get('/api/admin/overview', admin, wrap(async (req, res) => {
   const days = Math.min(Number(req.query.days) || 7, 365);
   const [replies, decisions, flagRows] = await Promise.all([
