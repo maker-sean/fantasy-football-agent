@@ -27,7 +27,7 @@ process.env.DEV_AUTH_EMAIL = 'not-an-operator@example.invalid';
 process.env.NODE_ENV = 'test';
 // Set BEFORE the server is required: the allowlist is read once at module load,
 // which is the point. Operator access should not be re-readable at runtime.
-process.env.ADMIN_EMAILS = 'boss@example.invalid, MixedCase@Example.Invalid, throttle@example.invalid, oracle@example.invalid';
+process.env.ADMIN_EMAILS = 'boss@example.invalid, MixedCase@Example.Invalid, throttle@example.invalid, oracle@example.invalid, proxy@example.invalid, localdev@example.invalid';
 
 const assert = require('assert');
 const { app } = require('../web/server');
@@ -171,6 +171,34 @@ const server = app.listen(0, async () => {
       await call('POST', '/api/admin/request-link', { email: 'throttle@example.invalid' });
       await call('POST', '/api/admin/request-link', { email: 'throttle@example.invalid' });
       assert.strictEqual(sent(), 1, 'a double click spent two of the two hourly messages');
+    });
+
+    await it('the redirect scheme follows x-forwarded-proto, not the raw connection', async () => {
+      // The actual bug: Render terminates TLS and forwards over plain http, so
+      // without trust proxy req.protocol said "http" and the link was built as
+      // http://host/admin/, which matches no https allowlist entry. Supabase
+      // discards it and falls back to Site URL, silently.
+      //
+      // Only the SCHEME is asserted. fetch refuses to override the Host header,
+      // so the host here is always the loopback the test connected to; an
+      // earlier version of this case asserted on the host and was testing the
+      // client library rather than the server.
+      reset();
+      const r = await fetch(base + '/api/admin/request-link', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-forwarded-proto': 'https' },
+        body: JSON.stringify({ email: 'proxy@example.invalid' }),
+      });
+      assert.strictEqual(r.status, 200);
+      assert.strictEqual(sent(), 1);
+      assert.match(outbound[0], /redirect_to=https%3A/, 'the scheme must follow the forwarded proto');
+    });
+
+    await it('without a forwarded proto it stays http, so local development works', async () => {
+      reset();
+      await call('POST', '/api/admin/request-link', { email: 'localdev@example.invalid' });
+      assert.strictEqual(sent(), 1);
+      assert.match(outbound[0], /redirect_to=http%3A/, 'local development must stay on http');
     });
 
     await it('the allowlist comparison ignores case and padding', async () => {

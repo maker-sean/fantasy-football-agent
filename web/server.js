@@ -37,6 +37,20 @@ app.use(express.json({
 }));
 app.disable('x-powered-by');
 
+/*
+ * Render terminates TLS and forwards to this process over plain HTTP, so
+ * without this req.protocol reports "http" on a site that is only ever reached
+ * over https. That is not cosmetic: the operator sign-in builds its redirect
+ * from the origin, and http://host/admin/ does not match an https allowlist
+ * entry, so Supabase silently discards it and falls back to Site URL. The link
+ * arrives and goes to the wrong place, which is the same failure this codebase
+ * has now hit three times.
+ *
+ * 1, not true: trust exactly one hop, Render's proxy. Trusting the whole chain
+ * would let a client forge X-Forwarded-For and, later, whatever is keyed on it.
+ */
+app.set('trust proxy', 1);
+
 /**
  * Operator details, substituted into the pages at serve time.
  *
@@ -616,6 +630,11 @@ app.post('/api/admin/request-link', wrap(async (req, res) => {
   // Fixed origin, never the request's. A redirect built from attacker supplied
   // headers is how an open redirect starts, and Supabase's allowlist is a
   // second line of defence rather than the only one.
+  // PUBLIC_ORIGIN wins when set. Otherwise req.protocol, which is only correct
+  // because of the trust proxy above: Render forwards over plain http, so
+  // without it this built http:// links for an https-only site and Supabase
+  // discarded them. req.get('host') is the real public host in production;
+  // locally it carries the port, which req.hostname would drop.
   const origin = process.env.PUBLIC_ORIGIN || `${req.protocol}://${req.get('host')}`;
   const url = `${SUPABASE_URL.replace(/\/+$/, '')}/auth/v1/otp`
             + `?redirect_to=${encodeURIComponent(origin + '/admin/')}`;
