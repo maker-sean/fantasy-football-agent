@@ -21,9 +21,38 @@ const db = require('./db');
 
 /** Whatever the league configured, falling back to what the site advertises. */
 function botName(league) {
-  const names = league?.config?.botNames;
-  const first = Array.isArray(names) ? names[0] : names;
-  return (first && String(first).trim()) || 'Commish';
+  return botNames(league)[0];
+}
+
+/**
+ * EVERY configured trigger, not just the first.
+ *
+ * A league can register several: FF Test answers to both "bot" and "jarvis".
+ * Advertising one of them means half the ways people will actually try to get
+ * its attention look broken, and the gate is the thing that decides, so the
+ * introduction has to read from the same list the gate reads.
+ */
+function botNames(league) {
+  const raw = league?.config?.botNames;
+  const list = (Array.isArray(raw) ? raw : [raw])
+    .map(n => (n == null ? '' : String(n).trim()))
+    .filter(Boolean);
+  return list.length ? list : ['Commish'];
+}
+
+/** a  |  a or b  |  a, b or c */
+function orList(items, joiner = 'or') {
+  const q = items.map(i => `"${i}"`);
+  if (q.length <= 1) return q[0] || '';
+  if (q.length === 2) return `${q[0]} ${joiner} ${q[1]}`;
+  return `${q.slice(0, -1).join(', ')} ${joiner} ${q[q.length - 1]}`;
+}
+
+/** a  |  a and b  |  a, b and c */
+function andList(items) {
+  if (items.length <= 1) return items[0] || '';
+  if (items.length === 2) return `${items[0]} and ${items[1]}`;
+  return `${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}`;
 }
 
 /**
@@ -32,8 +61,14 @@ function botName(league) {
  *                      introduction into the fix for that as well: a league
  *                      that never binds gets recaps naming "Roster 7"
  */
-function welcomeText(league, { needsBinding = false } = {}) {
+/**
+ * @param opts.known    display names of members we can actually reach, i.e.
+ *                      the ones with a phone number attached
+ * @param opts.unknown  how many rosters have nobody attached yet
+ */
+function welcomeText(league, { needsBinding = false, known = [], unknown = 0 } = {}) {
   const name = botName(league);
+  const triggers = orList(botNames(league));
 
   const first =
     `Alright. I am ${name}, and I have already read every box score this league has ever produced.\n\n` +
@@ -41,17 +76,28 @@ function welcomeText(league, { needsBinding = false } = {}) {
     `starting someone who is Out, including the 9:30am games nobody remembers until it is too late.`;
 
   const second =
-    `Say "${name}" and I answer. Ask who won in 2023, who has the worst bench luck, whatever you think ` +
+    `Say ${triggers} and I answer. Ask who won in 2023, who has the worst bench luck, whatever you think ` +
     `you can prove. Do not say it and I stay quiet, which is most of the time.\n\n` +
+    /*
+     * The roll call. Only members with a phone number, because the point is to
+     * verify the mapping between a person and a number, and a roster with
+     * nobody attached has no mapping to verify.
+     *
+     * Names, never numbers. Everyone here is already in this chat, so the names
+     * tell them nothing new, while reading somebody's mobile number aloud to
+     * twelve people would be a genuinely bad way to introduce yourself.
+     */
+    (known.length
+      ? `I have you as ${andList(known)}.` +
+        (unknown ? ` ${unknown} more ${unknown === 1 ? 'roster is' : 'rosters are'} still just a team name to me.` : '') +
+        ` Your commissioner can fix any of that on the website.\n\n`
+      : '') +
     // No "reply with your name" line, though an earlier version had one.
     // db.renameMember exists and NOTHING calls it: there is no code path that
-    // reads a name out of a group chat and binds it to a roster. The
-    // commissioner enters every name and number on the website, so the fallback
-    // was both unimplemented and unnecessary. A promise nothing keeps is worse
-    // than no promise, which this file already learned once over HELP.
-    (needsBinding
-      ? `Some of you are still "Roster 7" to me. Your commissioner can fix that on the website.\n\n`
-      : '') +
+    // reads a name out of a group chat and binds it to a roster. The roll call
+    // above replaces it, and points at the commissioner, who is the only one
+    // who can actually change anything.
+    ''  +
     // STOP only. An earlier draft promised "HELP brings this back", which is
     // not true and could not be made true: src/signup.js deliberately never
     // replies to a reserved keyword, because the provider suppresses outbound
@@ -75,12 +121,19 @@ function welcomeText(league, { needsBinding = false } = {}) {
  * introduced again. That is the same shape as the poller cursor bug this repo
  * already paid for: commit after the work, never before it.
  */
-async function ensureWelcomed(league, { send, needsBinding = false, dryRun = false } = {}) {
+async function ensureWelcomed(league, { send, needsBinding = false, known, unknown, dryRun = false } = {}) {
   if (!league) return { welcomed: false, sent: false };
   if (league.welcomed_at) return { welcomed: true, sent: false };
   if (!league.chat_id) return { welcomed: false, sent: false };
 
-  const text = welcomeText(league, { needsBinding });
+  // Looked up here when the caller did not supply it, so no call site can
+  // accidentally introduce the bot to a league without its roll call.
+  let roll = { known: known || [], unknown: unknown || 0 };
+  if (known === undefined) {
+    roll = await roster(league.id).catch(() => ({ known: [], unknown: 0 }));
+  }
+
+  const text = welcomeText(league, { needsBinding, known: roll.known, unknown: roll.unknown });
 
   if (dryRun) {
     console.log(`[welcome] DRY RUN, would introduce to ${league.name}`);
@@ -99,16 +152,34 @@ async function ensureWelcomed(league, { send, needsBinding = false, dryRun = fal
   return { welcomed: true, sent: true, text };
 }
 
-/** Are there members on this league with no phone bound to a roster yet? */
-async function needsBinding(leagueId) {
+/**
+ * Who the introduction can name, and how many it cannot.
+ *
+ * "Reachable" means a phone number is attached. A roster with no number is not
+ * a person as far as this bot is concerned: it cannot be messaged, it cannot
+ * trigger a reply, and naming it in a roll call would claim a mapping that does
+ * not exist.
+ *
+ * The names come from members.display_name, which is what the commissioner
+ * typed on the roster screen. Be aware that the daily Sleeper reconcile also
+ * writes this column and fills it with TEAM names, so an un-onboarded league
+ * reads like "Big Yardage" and "Punt Intended" rather than people. Filtering on
+ * a phone number happens to avoid that too, since only the commissioner's path
+ * sets both.
+ */
+async function roster(leagueId) {
   const { rows } = await db.query(
-    `select count(*) filter (where phone is null or sleeper_user_id is null)::int as unbound,
-            count(*)::int as total
-       from members where league_id = $1`,
+    `select display_name, phone from members where league_id = $1 order by display_name`,
     [leagueId]
   );
-  const r = rows[0] || { unbound: 0, total: 0 };
-  return r.total > 0 && r.unbound > 0;
+  const known = rows.filter(r => r.phone && r.display_name).map(r => r.display_name);
+  const unknown = rows.length - known.length;
+  return { known, unknown, needsBinding: unknown > 0 };
 }
 
-module.exports = { welcomeText, ensureWelcomed, needsBinding, botName };
+/** Kept for callers that only want the boolean. */
+async function needsBinding(leagueId) {
+  return (await roster(leagueId)).needsBinding;
+}
+
+module.exports = { welcomeText, ensureWelcomed, needsBinding, roster, botName, botNames, orList, andList };

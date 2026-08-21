@@ -67,12 +67,54 @@ async function main() {
     }
   });
 
+  console.log('\nit advertises every trigger, and names who it can reach');
+
+  await it('it lists all configured triggers, not just the first', async () => {
+    // FF Test answers to both "bot" and "jarvis". Advertising one means half
+    // the ways people will try to get its attention look broken.
+    const t = welcome.welcomeText(league({ config: { botNames: ['bot', 'jarvis'] } }));
+    assert.match(t, /Say "bot" or "jarvis"/);
+  });
+
+  await it('three triggers read as a list, not a run-on', async () => {
+    const t = welcome.welcomeText(league({ config: { botNames: ['a', 'b', 'c'] } }));
+    assert.match(t, /Say "a", "b" or "c"/);
+  });
+
+  await it('it names the people it can actually reach', async () => {
+    const t = welcome.welcomeText(league(), { known: ['Dave', 'Mike', 'Jordan'], unknown: 0 });
+    assert.match(t, /I have you as Dave, Mike and Jordan\./);
+  });
+
+  await it('it counts the rosters it cannot, in the right grammar', async () => {
+    assert.match(welcome.welcomeText(league(), { known: ['Dave'], unknown: 12 }),
+      /12 more rosters are still just a team name/);
+    assert.match(welcome.welcomeText(league(), { known: ['Dave'], unknown: 1 }),
+      /1 more roster is still just a team name/);
+  });
+
+  await it('a fully bound league is not told about rosters it does not have', async () => {
+    const t = welcome.welcomeText(league(), { known: ['Dave', 'Mike'], unknown: 0 });
+    assert.ok(!/still just a team name/.test(t));
+    assert.ok(!/commissioner can fix/.test(t) === false, 'the fix path should still be offered');
+  });
+
+  await it('with nobody reachable it says nothing rather than an empty list', async () => {
+    // "I have you as ." would be worse than silence, and this is the state
+    // every league starts in.
+    const t = welcome.welcomeText(league(), { known: [], unknown: 13 });
+    assert.ok(!/I have you as/.test(t));
+  });
+
+  await it('it never reads a phone number aloud to the group', async () => {
+    const t = welcome.welcomeText(league(), { known: ['Dave'], unknown: 0 });
+    assert.ok(!/\+?\d[\d ().-]{8,}\d/.test(t), 'a phone number reached the message');
+  });
+
   await it('the roster line appears only when binding is incomplete', async () => {
-    // The copy changed: it used to ask people to reply with their name, which
-    // nothing implements. It now points at the commissioner, who is the only
-    // one who can actually fix it.
-    assert.match(welcome.welcomeText(league(), { needsBinding: true }), /still "Roster 7" to me/);
-    assert.ok(!/Roster 7/.test(welcome.welcomeText(league(), { needsBinding: false })));
+    // Superseded by the roll call, which says the same thing with names in it.
+    assert.match(welcome.welcomeText(league(), { known: ['Dave'], unknown: 3 }),
+      /commissioner can fix any of that on the website/);
   });
 
   await it('it never asks anyone to text their name, because nothing reads it', async () => {
