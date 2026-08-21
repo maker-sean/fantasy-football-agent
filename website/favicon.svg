@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Commish">
+  <!--
+    The bot's typing bubble, lifted from the product rather than invented for it.
+    Geometry matches .msg.bot .bubble in styles.css: three corners at the large
+    radius and the bottom-right cut to a 5px tail, which is what marks it as an
+    outgoing message. Dots match .typing, three of them, evenly spaced.
+
+    No font, no external request. A rounded path and three circles.
+  -->
+  <path fill="#21a366"
+        d="M20 10 H44 A16 16 0 0 1 60 26 V49 A5 5 0 0 1 55 54 H20 A16 16 0 0 1 4 38 V26 A16 16 0 0 1 20 10 Z"/>
+  <g fill="#06130c">
+    <circle cx="16" cy="32" r="4.5"/>
+    <circle cx="32" cy="32" r="4.5"/>
+    <circle cx="48" cy="32" r="4.5"/>
+  </g>
+</svg>

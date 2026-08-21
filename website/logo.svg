@@ -1,0 +1,28 @@
+<!--
+  Commish lockup.
+
+  COMMISH set in Chakra Petch Bold Italic (SIL Open Font License) and OUTLINED
+  to paths. Nothing loads at runtime: this site makes zero external requests,
+  which the privacy policy states, and a webfont would break that. Outlining
+  also means the mark renders identically everywhere and stays sharp at any size.
+
+  The -10 degree lean is the typeface's own designed italic, not a skew. A skew
+  distorts the curves; a designed italic redraws them.
+
+  The bubble is the bot's own typing indicator, geometry matching
+  .msg.bot .bubble and .typing in styles.css, tail corner included.
+
+  Wordmark takes currentColor. The bubble is fixed green because it is the mark.
+  Regenerating: see scripts, or re-outline from the same font at 0.01em tracking.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 5598 700" role="img" aria-label="Commish">
+  <g transform="translate(-33 700)" fill="currentColor">
+    <path d="M33 -124 116 -593 241 -700H582L683 -579L665 -480H529L539 -537L501 -584H301L241 -533L176 -167L218 -116H418L473 -163L484 -220H620L599 -105L476 0H135Z M698 -124 781 -593 906 -700H1266L1368 -577L1284 -103L1162 0H800ZM1099 -116 1159 -167 1224 -533 1182 -584H967L907 -533L841 -167L883 -116Z M1520 -700H1638L1767 -248H1769L2056 -700H2190L2067 0H1936L2011 -426H2009L1791 -98H1707L1605 -426H1603L1528 0H1397Z M2331 -700H2449L2578 -248H2580L2867 -700H3001L2878 0H2747L2822 -426H2820L2602 -98H2518L2416 -426H2414L2339 0H2208Z M3147 -700H3283L3159 0H3023Z M3310 -116 3327 -208H3461L3450 -149L3477 -116H3683L3723 -150L3744 -266L3717 -299H3460L3364 -415L3396 -600L3514 -700H3829L3926 -584L3910 -491H3776L3786 -551L3759 -584H3561L3522 -551L3504 -448L3531 -415H3788L3884 -299L3848 -100L3731 0H3406Z M4075 -700H4211L4160 -407H4455L4506 -700H4642L4519 0H4383L4434 -291H4139L4088 0H3952Z"/>
+  </g>
+  <g transform="translate(4809 40) scale(14.0909) translate(-4 -10)">
+    <path fill="#21a366" d="M20 10 H44 A16 16 0 0 1 60 26 V49 A5 5 0 0 1 55 54 H20 A16 16 0 0 1 4 38 V26 A16 16 0 0 1 20 10 Z"/>
+    <g fill="#06130c">
+      <circle cx="16" cy="32" r="4.5"/><circle cx="32" cy="32" r="4.5"/><circle cx="48" cy="32" r="4.5"/>
+    </g>
+  </g>
+</svg>

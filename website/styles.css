@@ -63,13 +63,34 @@ nav {
   backdrop-filter: saturate(140%) blur(8px);
 }
 nav .wrap { display: flex; align-items: center; justify-content: space-between; height: 66px; gap: 16px; }
-.brand { display: flex; align-items: center; gap: 11px; font-weight: 800; letter-spacing: -.02em; color: var(--text); font-size: 1.05rem; }
+/*
+ * The lockup: wordmark, then the bubble. That order is the whole joke, it reads
+ * as "Commish is typing".
+ *
+ * Both halves are inline SVG. The wordmark is COMMISH outlined from Chakra Petch
+ * Bold Italic, so the typeface never loads and the -10 degree lean is the real
+ * designed italic rather than a skew. See website/logo.svg for provenance.
+ */
+.brand { display: flex; align-items: center; gap: 9px; color: var(--text); }
 .brand:hover { text-decoration: none; }
-.mark {
-  background: var(--turf); color: #06130c; font-weight: 900;
-  width: 28px; height: 28px; border-radius: 7px;
-  display: grid; place-items: center; font-size: .95rem;
-}
+.brand-word { display: block; height: 17px; }
+.brand-word svg { height: 100%; width: auto; display: block; fill: currentColor; }
+/*
+ * The mark is the bot's own typing bubble, not a lettered tile.
+ *
+ * Inline SVG rather than an <img> or an icon font: this site makes zero
+ * external requests, and inline also lets the shape inherit colour. It is a
+ * rounded path and three circles, so it costs a few hundred bytes and stays
+ * sharp at any size, including the 16px favicon where a letter would mush.
+ *
+ * The bubble is WIDER than it is tall, so the old 28px square would have
+ * squashed it. Height is what has to match the bar, not width.
+ */
+/* Sized against the wordmark rather than the bar: in the lockup the bubble
+   sits a little under cap height so the name leads and the mark answers. */
+.mark { display: block; height: 21px; flex: none; }
+.mark svg { height: 100%; width: auto; display: block; fill: var(--turf); }
+.mark .dots { fill: #06130c; }
 nav ul { display: flex; align-items: center; gap: 22px; list-style: none; margin: 0; padding: 0; font-size: .93rem; }
 nav ul a { color: var(--muted); font-weight: 600; }
 nav ul a:hover { color: var(--text); text-decoration: none; }
@@ -310,9 +331,11 @@ footer ul { display: flex; gap: 20px; list-style: none; margin: 0; padding: 0; f
    rule matched `nav ul li:first-child`, which also hits the FOOTER, where it
    silently dropped a legal link that has to stay reachable for carrier
    registration. */
-@media (max-width: 440px) {
-  .brand { font-size: .98rem; }
-
+/* 480, not 440. Measured: with the wordmark showing, the bar needs 457px, so
+   the old 440 left a 17px band where it wrapped. The outlined wordmark is wider
+   than the text it replaced, 154px against 110, and it outran its own
+   breakpoint. Re-measure this if the wordmark or the links ever change. */
+@media (max-width: 480px) {
   /* Below this the bar cannot hold wordmark + three links + the button. The
      WORDMARK is what gives way, not a link and not the button.
      Measured at 320px: mark 28 + links 164 + button ~95 + gaps leaves the row
@@ -321,6 +344,9 @@ footer ul { display: flex; gap: 20px; list-style: none; margin: 0; padding: 0; f
      that a visitor can act on. Dropping a nav link instead would hide
      navigation to buy 80px, which is the trade the old rule here got wrong. */
   .brand-word { display: none; }
+  /* With the wordmark gone the bubble is the entire brand, so it takes the
+     space the wordmark vacated rather than sitting there looking incidental. */
+  .mark { height: 26px; }
 }
 
 /* --------------------------------------------------- commissioner app ---- */
