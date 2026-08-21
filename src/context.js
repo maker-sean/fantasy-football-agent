@@ -14,6 +14,7 @@
  */
 
 const db = require('./db');
+const { selfFacts } = require('./selfknowledge');
 
 const round = n => Math.round(Number(n || 0) * 100) / 100;
 
@@ -63,6 +64,10 @@ async function leagueContext(leagueId, opts = {}) {
   );
 
   const ctx = {
+    // Built from the league row so the trigger word matches what is actually
+    // configured. A bot that tells you to say "Commish" when the gate is
+    // listening for "ref" is worse than one that says nothing.
+    self: selfFacts(league, { autoPost: Boolean(league.config?.autoPost) }),
     leagueName: league.name,
     identityLinked: members.length,
     members: members.map(m => ({
@@ -143,6 +148,22 @@ async function leagueContext(leagueId, opts = {}) {
 function contextBlock(ctx) {
   const L = [];
   L.push(`League: ${ctx.leagueName}. Season ${ctx.season || 'unknown'}, status ${ctx.status || 'unknown'}${ctx.teamCount ? `, ${ctx.teamCount} teams` : ''}.`);
+
+  /*
+   * FIRST, before any league fact.
+   *
+   * A question about the product is the one kind the model would otherwise
+   * answer with "I don't know", correctly, because src/answer.js forbids
+   * filling gaps. Putting this above the standings means how-do-I questions
+   * resolve from grounded text rather than from invention, which matters most
+   * for the one subject where a plausible guess is genuinely harmful: how to
+   * stop receiving messages.
+   */
+  if (ctx.self?.length) {
+    L.push('');
+    L.push('ABOUT YOU. True, and the only place to answer questions about how you work:');
+    for (const f of ctx.self) L.push(`  - ${f}`);
+  }
 
   if (ctx.members.length) {
     L.push('');

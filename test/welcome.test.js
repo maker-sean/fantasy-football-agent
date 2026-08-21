@@ -68,8 +68,18 @@ async function main() {
   });
 
   await it('the roster line appears only when binding is incomplete', async () => {
-    assert.match(welcome.welcomeText(league(), { needsBinding: true }), /which roster is yours/);
-    assert.ok(!/which roster is yours/.test(welcome.welcomeText(league(), { needsBinding: false })));
+    // The copy changed: it used to ask people to reply with their name, which
+    // nothing implements. It now points at the commissioner, who is the only
+    // one who can actually fix it.
+    assert.match(welcome.welcomeText(league(), { needsBinding: true }), /still "Roster 7" to me/);
+    assert.ok(!/Roster 7/.test(welcome.welcomeText(league(), { needsBinding: false })));
+  });
+
+  await it('it never asks anyone to text their name, because nothing reads it', async () => {
+    for (const needsBinding of [true, false]) {
+      const t = welcome.welcomeText(league(), { needsBinding });
+      assert.ok(!/reply with your name/i.test(t), 'db.renameMember is called by nothing');
+    }
   });
 
   await it('it falls back to a name rather than saying undefined', async () => {

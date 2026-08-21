@@ -43,8 +43,14 @@ function welcomeText(league, { needsBinding = false } = {}) {
   const second =
     `Say "${name}" and I answer. Ask who won in 2023, who has the worst bench luck, whatever you think ` +
     `you can prove. Do not say it and I stay quiet, which is most of the time.\n\n` +
+    // No "reply with your name" line, though an earlier version had one.
+    // db.renameMember exists and NOTHING calls it: there is no code path that
+    // reads a name out of a group chat and binds it to a roster. The
+    // commissioner enters every name and number on the website, so the fallback
+    // was both unimplemented and unnecessary. A promise nothing keeps is worse
+    // than no promise, which this file already learned once over HELP.
     (needsBinding
-      ? `Reply with your name so I know which roster is yours, otherwise you are "Roster 7" to me forever.\n\n`
+      ? `Some of you are still "Roster 7" to me. Your commissioner can fix that on the website.\n\n`
       : '') +
     // STOP only. An earlier draft promised "HELP brings this back", which is
     // not true and could not be made true: src/signup.js deliberately never
