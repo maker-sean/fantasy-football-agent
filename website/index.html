@@ -76,30 +76,24 @@
           <div class="bubble">Berlin. Kicks off four hours before the rest of the slate. Your lineup locks with it.</div>
         </div>
 
-        <div class="msg bot">
-          <div class="who">Commish AI · Tuesday 9:02 AM</div>
-          <div class="bubble">Third &amp; Long lost by 1.08 to Ridgeline FC, the closest game of the week, and it's entirely self-inflicted. Romeo Doubs in the FLEX for 3.3 while DJ Moore sat for 20.9 on the bench. Their optimal lineup was 103.44, which beats 86.92 by a mile. Set the dang lineup.</div>
-        </div>
-
-        <div class="msg">
-          <div class="who">Dave · Tuesday 9:04 AM</div>
-          <div class="bubble">every single week with this thing</div>
-        </div>
-
-        <div class="msg">
-          <div class="who">Mike · Tuesday 9:05 AM</div>
-          <div class="bubble">"set the dang lineup" 💀</div>
-        </div>
-
-        <div class="msg bot">
-          <div class="who">Commish AI · Tuesday 9:02 AM</div>
-          <div class="bubble">Honorable mention to Tank Commanders, who got straight zeroes out of De'Von Achane, Jaylen Waddle, AND Cameron Dicker in the same week. Statistically impressive. Still lost by only 19, so somebody else on that roster showed up. Anyone want to explain the bye week math there?</div>
-        </div>
-
-        <div class="msg">
-          <div class="who">Jordan · Tuesday 9:06 AM</div>
-          <div class="bubble">💀💀💀</div>
-        </div>
+        <div class="msg bot" data-animate>
+              <div class="who">Commish AI · Tuesday 9:02 AM</div>
+              <div class="bubble">Third &amp; Long didn't just lose to Ridgeline FC by 1.08 points; they mathematically engineered their own demise. You started Romeo Doubs (3.3) over DJ Moore (20.9) in the FLEX. This is the third consecutive week Moore has humiliated Doubs from your bench, yet you keep treating Doubs like he pays your mortgage. Your optimal lineup was 103.44. You chose to score 85.84. My servers are currently wasting electricity processing this level of incompetence.</div>
+            </div>
+            <!-- data-after: an explicit gap from the message above landing,
+                 replacing that message's dwell and the usual human lead-in. A
+                 reaction this short is fired off immediately, not composed. -->
+            <div class="msg" data-animate data-after="1200">
+              <div class="who">Dave · Tuesday 9:04 AM</div>
+              <div class="bubble">every single week with this thing</div>
+            </div>
+            <!-- Quotes the bot verbatim. If the message above is ever rewritten,
+                 this line has to be rewritten with it: nothing checks that the
+                 quoted phrase still exists, and a mismatch here is invisible. -->
+            <div class="msg" data-animate>
+              <div class="who">Mike · Tuesday 9:05 AM</div>
+              <div class="bubble">"wasting electricity processing this" 💀</div>
+            </div>
 
             </div><!-- /msgs -->
           </div><!-- /phone-screen -->
@@ -346,7 +340,7 @@ document.getElementById('yr').textContent = new Date().getFullYear();
 
   const items = [...msgs.querySelectorAll('.msg')];
   const reduced = window.matchMedia('(prefers-reduced-motion: reduce)');
-  if (reduced.matches || items.length < 2) return;
+  if (reduced.matches) return;
 
   /*
    * Pacing is proportional to message length rather than fixed.
@@ -371,7 +365,18 @@ document.getElementById('yr').textContent = new Date().getFullYear();
   const typingFor = el => clamp(PACE.typingBase + len(el) * PACE.typingPerChar, PACE.typingMax);
   const dwellFor = el => clamp(PACE.dwellBase + len(el) * PACE.dwellPerChar, PACE.dwellMax);
 
-  items.slice(1).forEach(m => m.classList.add('pending'));
+  /*
+   * Only the messages tagged data-animate play. The Sunday exchange above them
+   * is present at paint.
+   *
+   * It used to animate all eight from the first one, which took 26 seconds and
+   * put the recap, the single best thing on the page, at second 20. Nobody
+   * waits 20 seconds. Setup is the part to hand the reader for free; the payoff
+   * is the part worth animating.
+   */
+  const animated = items.filter(m => m.hasAttribute('data-animate'));
+  if (!animated.length) return;
+  animated.forEach(m => m.classList.add('pending'));
 
   const typing = document.createElement('div');
   typing.innerHTML = '<div class="bubble typing"><i></i><i></i><i></i></div>';
@@ -400,8 +405,24 @@ document.getElementById('yr').textContent = new Date().getFullYear();
   };
 
   async function play() {
-    for (const m of items.slice(1)) {
+    /*
+     * The dwell is taken BEFORE the next message rather than after the current
+     * one, which is the same thing to watch and lets data-after replace it. A
+     * message that carries data-after states its own gap from the previous one
+     * landing, in place of both that dwell and the lead-in.
+     */
+    let prevDwell = 0;
+
+    for (const m of animated) {
       const isBot = m.classList.contains('bot');
+      const custom = m.dataset.after ? Number(m.dataset.after) : null;
+
+      if (custom !== null) {
+        await wait(custom);
+      } else {
+        await wait(prevDwell);
+        if (!isBot) await wait(PACE.humanLead);
+      }
 
       if (isBot) {
         typing.className = 'msg bot';
@@ -409,14 +430,12 @@ document.getElementById('yr').textContent = new Date().getFullYear();
         await reveal();
         await wait(typingFor(m));
         typing.remove();
-      } else {
-        await wait(PACE.humanLead);
       }
 
       m.classList.remove('pending');
       m.classList.add('arrive');
       await reveal();
-      await wait(dwellFor(m));
+      prevDwell = dwellFor(m);
     }
   }
 
