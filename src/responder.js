@@ -11,6 +11,8 @@ const { BurstCollector } = require('./burst');
 const { conversationState } = require('./convo');
 const { decide } = require('./decide');
 const flags = require('./flags');
+const welcome = require('./welcome');
+const drafts = require('./drafts');
 const { handleControl } = require('./control');
 
 const PERSIST = Boolean(process.env.DATABASE_URL);
@@ -132,6 +134,30 @@ class Responder {
       verdict.layer = 'suppress';
       verdict.reason = 'replies_paused';
       verdict.detail = { ...verdict.detail, wouldHaveReplied: true, pausedBy: 'control_plane' };
+    }
+
+    /*
+     * The introduction, before anything else this league hears.
+     *
+     * Placed after the kill switch so a paused bot introduces nothing either,
+     * and before generate() so the first mention produces the welcome rather
+     * than an answer. Two model-shaped things arriving together muddies the
+     * introduction, and a first mention is almost always "welcome commish" or
+     * "is this thing on", which has no answer worth generating.
+     */
+    if (verdict.reply && league && !league.welcomed_at) {
+      const needs = await welcome.needsBinding(league.id).catch(() => false);
+      const res = await welcome.ensureWelcomed(league, {
+        send: (chat, text) => drafts.sendRecap(this.provider, chat, text),
+        needsBinding: needs,
+        dryRun: this.dryRun,
+      });
+      // Recorded as its own layer so the operator board shows an introduction
+      // rather than a mention that mysteriously produced no reply.
+      verdict.reply = false;
+      verdict.layer = 'welcome';
+      verdict.reason = res.sent ? 'introduced' : 'introduction_pending';
+      verdict.detail = { ...verdict.detail, welcomed: res.sent, wouldHaveReplied: true };
     }
 
     let replied = null;

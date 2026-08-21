@@ -9,6 +9,7 @@
 
 const db = require('./db');
 const drafts = require('./drafts');
+const welcome = require('./welcome');
 const sleeper = require('./sleeper');
 const fanout = require('./fanout');
 const trades = require('./trades');
@@ -141,6 +142,20 @@ async function runWeeklyRecaps(provider, opts = {}) {
         entry.draftId = draft.id;
 
         if (drafts.autoPostEnabled(league) && league.chat_id && !dryRun) {
+          // A recap must never be a league's first contact. Scheduled sends
+          // do not wait to be addressed, so without this a group that nobody
+          // greeted before Tuesday would meet us with a roast carrying no
+          // identification and no STOP.
+          const intro = await welcome.ensureWelcomed(league, {
+            send: (chat, text) => drafts.sendRecap(provider, chat, text),
+            needsBinding: await welcome.needsBinding(league.id).catch(() => false),
+            dryRun,
+          });
+          if (!intro.welcomed) {
+            entry.result = 'held: league not introduced yet';
+            return entry;
+          }
+
           const { sent } = await drafts.sendRecap(provider, league.chat_id, body);
           const res = sent[0];
           await drafts.markSent(draft.id, { by: 'autoPost', messageId: res?.message_handle || null });

@@ -13,6 +13,7 @@
 
 const db = require('./db');
 const drafts = require('./drafts');
+const welcome = require('./welcome');
 
 const APPROVE = /^(send|send it|post|post it|yes|y|yep|yeah|ship|ship it|go|approve|do it|👍|🚀)[.!]*$/i;
 const REJECT  = /^(no|nope|n|kill|kill it|skip|reject|nah|don'?t|delete|👎)[.!]*$/i;
@@ -96,6 +97,20 @@ async function handleControl({ burst, provider, providerName = 'sendblue', dryRu
   try {
     // Same split as the auto-post path: an approved recap posts exactly as it
     // would have unattended.
+    // Same precondition on the approval path. A commissioner replying SEND
+    // is not evidence the group has been introduced to us.
+    const league = await db.leagueById(draft.league_id).catch(() => null);
+    if (league) {
+      const intro = await welcome.ensureWelcomed(league, {
+        send: (chat, text) => drafts.sendRecap(provider, chat, text),
+        needsBinding: await welcome.needsBinding(league.id).catch(() => false),
+      });
+      if (!intro.welcomed) {
+        await say('Could not introduce myself to the group yet, so I am holding the recap.');
+        return { handled: true, action: 'approve_failed', draftId: draft.id };
+      }
+    }
+
     const { sent } = await drafts.sendRecap(provider, draft.chat_id, draft.body);
     const res = sent[0];
     await drafts.markSent(draft.id, { by: sender, messageId: res?.message_handle || null });
