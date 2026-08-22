@@ -565,11 +565,68 @@ if (!process.env.BALLOT_SECRET) {
   console.warn('[web] Set the SAME value here and on the worker, which mints the links.');
 }
 
-// The static shell. The token never appears in this response; the page reads it
-// from its own URL and calls the API below with it.
-app.get('/v/:token', (_req, res) => {
-  res.sendFile(path.join(__dirname, 'vote', 'index.html'));
-});
+/*
+ * The shell, with the question written into its Open Graph tags.
+ *
+ * This was a static sendFile, and the card iMessage drew for it said "A league
+ * vote" over a Safari compass — indistinguishable from every other link anyone
+ * has ever sent. The question is what makes it worth tapping.
+ *
+ * The first instinct was to keep the card contentless, on the reasoning that an
+ * unfurl is visible to a whole group thread. That is the wrong model here:
+ * ballot links are minted per member and fanned out 1:1 precisely because they
+ * carry identity, so the card lands in one person's own thread. The question is
+ * theirs to see.
+ *
+ * RESULTS STILL NEVER GO IN. Not the split, not the counts, not even for a
+ * results_visible='live' ballot. A card is cached by Apple and by the device,
+ * survives being forwarded, and cannot be revoked — so a tally in there is both
+ * a leak and, minutes later, a lie. The page itself is the only place a number
+ * is allowed to appear, because that is the only place the visibility rule in
+ * ballots.view() is applied.
+ *
+ * The voter's NAME stays out for the same reason. The page greets them once
+ * they open it; a card that says it can be screenshotted by anyone.
+ *
+ * An unknown or forged token still gets the generic card rather than a 404, so
+ * a link mangled in transit shows something sane instead of an error page.
+ */
+const VOTE_SHELL = require('fs').readFileSync(path.join(__dirname, 'vote', 'index.html'), 'utf8');
+
+const escapeAttr = s => String(s)
+  .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
+app.get('/v/:token', wrap(async (req, res) => {
+  let title = 'A league vote';
+  let description = 'Tap to cast your vote.';
+
+  const claim = ballotlink.read(req.params.token);
+  if (claim) {
+    const ballot = await ballots.byId(claim.ballotId).catch(() => null);
+    if (ballot) {
+      title = ballot.question;
+      const opts = await ballots.optionsFor(ballot.id).catch(() => []);
+      // Options, not results. Naming the choices is a fair thing to show
+      // someone before they tap; how the others voted is not.
+      const listed = opts.map(o => (o.emoji ? o.emoji + ' ' : '') + o.label).join(' · ');
+      description = ballot.closed_at ? 'Voting is closed.'
+        : listed ? `Tap to vote: ${listed}` : 'Tap to cast your vote.';
+    }
+  }
+
+  // Rendered rather than templated at build time so the tags cannot drift from
+  // the ballot, and so a question edited in the database is right on the next
+  // send without a redeploy.
+  const html = VOTE_SHELL
+    .replace('<meta property="og:title" content="A league vote">',
+             `<meta property="og:title" content="${escapeAttr(title)}">`)
+    .replace('<meta property="og:description" content="Tap to cast your vote.">',
+             `<meta property="og:description" content="${escapeAttr(description)}">`)
+    .replace('<title>League vote</title>', `<title>${escapeAttr(title)}</title>`);
+
+  // Apple caches aggressively and a stale question is worse than a slow one.
+  res.set('cache-control', 'no-store').type('html').send(html);
+}));
 
 /**
  * One answer for every failure.

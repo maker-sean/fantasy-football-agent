@@ -301,6 +301,62 @@ async function dbTests() {
       assert.strictEqual(r.status, 409);
     });
 
+    console.log('\nthe link preview card');
+
+    await it('the card carries the question, not "A league vote"', async () => {
+      const b = await ballots.open({ leagueId: league.id, question: 'Trade deadline in week 10?',
+        options: opts });
+      const r = await fetch(base + '/v/' + ballotlink.mint(b.id, members[0].id));
+      const html = await r.text();
+      assert.ok(html.includes('<meta property="og:title" content="Trade deadline in week 10?">'),
+        'the question is what makes the card worth tapping');
+      assert.ok(html.includes('<title>Trade deadline in week 10?</title>'));
+    });
+
+    await it('the card NEVER carries a tally, even on a live ballot', async () => {
+      // Apple caches the card, it survives forwarding, and it cannot be
+      // revoked. A number in there is a leak now and wrong ten minutes later.
+      const b = await ballots.open({ leagueId: league.id, question: 'Live one', options: opts,
+        resultsVisible: 'live' });
+      const o = await ballots.optionsFor(b.id);
+      await ballots.castVote(b.id, members[0].id, [o[0].id]);
+      await ballots.castVote(b.id, members[1].id, [o[0].id]);
+
+      const html = await (await fetch(base + '/v/' + ballotlink.mint(b.id, members[2].id))).text();
+      const head = html.slice(0, html.indexOf('</head>'));
+      // A NUMBER attached to a vote. The word "vote" itself is fine and
+      // expected — the description says "Tap to vote".
+      assert.ok(!/\d+\s*%/.test(head), 'no percentage reached the card');
+      assert.ok(!/\d+\s*votes?\b/i.test(head), 'no vote count reached the card');
+      // And prove the description really is listing options, so this test is
+      // not passing simply because the card came out empty.
+      assert.ok(/og:description[^>]*Tap to vote:[^>]*Snake/.test(head),
+        'the card does name the choices');
+    });
+
+    await it('the voter is not named in the card', async () => {
+      const b = await ballots.open({ leagueId: league.id, question: 'Who am I', options: opts });
+      const html = await (await fetch(base + '/v/' + ballotlink.mint(b.id, members[0].id))).text();
+      assert.ok(!html.slice(0, html.indexOf('</head>')).includes('Voter 1'),
+        'a card can be screenshotted by anyone');
+    });
+
+    await it('a question containing markup cannot break out of the tag', async () => {
+      const b = await ballots.open({ leagueId: league.id,
+        question: 'Is "A" > "B" & <script>alert(1)</script> fair?', options: opts });
+      const html = await (await fetch(base + '/v/' + ballotlink.mint(b.id, members[0].id))).text();
+      const head = html.slice(0, html.indexOf('</head>'));
+      assert.ok(!head.includes('<script>alert(1)</script>'), 'the script tag is escaped');
+      assert.ok(head.includes('&quot;A&quot; &gt; &quot;B&quot; &amp;'), 'quotes and angles are entities');
+    });
+
+    await it('a forged token still gets a page, with the generic card', async () => {
+      // A link mangled in transit should show something sane, not an error.
+      const r = await fetch(base + '/v/' + 'A'.repeat(64));
+      assert.strictEqual(r.status, 200);
+      assert.ok((await r.text()).includes('content="A league vote"'));
+    });
+
     await it('every eligible member gets exactly one distinct link', async () => {
       const b = await ballots.open({ leagueId: league.id, question: 'Fanout', options: opts });
       const ls = await ballots.links(b.id);

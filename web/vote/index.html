@@ -7,12 +7,20 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="color-scheme" content="light dark">
 <meta name="robots" content="noindex">
-<!-- A ballot link goes into a group chat, and iMessage unfurls it. Without
-     these the preview shows a blank card; with the question in them it would
-     show the question to the whole thread, which is fine, and the RESULTS,
-     which is not. So the card is deliberately contentless. -->
+<!-- iMessage unfurls this link into a card. These two are DEFAULTS: the server
+     rewrites them per ballot in web/server.js so the card carries the actual
+     question, which is what makes it worth tapping. They stay here so the file
+     is still a valid page on its own and so the strings the server replaces are
+     visible where the markup is.
+
+     Results never go in the card, for any ballot. Apple caches it, it survives
+     forwarding, and it cannot be revoked — a tally in there is a leak now and a
+     lie ten minutes later. -->
 <meta property="og:title" content="A league vote">
 <meta property="og:description" content="Tap to cast your vote.">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Commish AI">
+<meta name="twitter:card" content="summary">
 <title>League vote</title>
 <style>
   :root {
