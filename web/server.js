@@ -200,6 +200,63 @@ for (const [route, dir] of [['/app', 'app'], ['/admin', 'admin']]) {
   });
 }
 
+/*
+ * A contact card for the bot.
+ *
+ * A group chat gets a message from a bare number and nobody knows what it is.
+ * Sendblue has no way to give a line a name or a face — /api/lines returns the
+ * number and nothing else — so the only route is to send a vCard the group can
+ * tap and save.
+ *
+ * The photo is EMBEDDED base64 rather than linked. A linked photo is a request
+ * the recipient's phone makes to us later, which is both a tracking vector this
+ * site's privacy policy promises not to create and a picture that vanishes the
+ * day the URL changes.
+ *
+ * vCard 3.0, not 4.0: it is what iOS and Android Contacts both import without
+ * argument, and this is the one file where compatibility beats being current.
+ */
+let vcardCache = null;
+
+function contactCard() {
+  if (vcardCache) return vcardCache;
+  const number = process.env.SENDBLUE_FROM_NUMBER || '';
+  const photo = require('fs')
+    .readFileSync(path.join(WEBSITE_DIR, 'logo-512.png')).toString('base64');
+
+  const lines = [
+    'BEGIN:VCARD',
+    'VERSION:3.0',
+    'N:;Commish AI;;;',
+    'FN:Commish AI',
+    'ORG:Commish AI',
+    'TITLE:League assistant',
+    number ? `TEL;type=CELL;type=VOICE;type=pref:${number}` : null,
+    `URL:${process.env.PUBLIC_BASE_URL || 'https://commish-web.onrender.com'}`,
+    `PHOTO;ENCODING=b;TYPE=PNG:${photo}`,
+    'END:VCARD',
+  ].filter(Boolean);
+
+  // Folding is not optional at this size. A vCard line over 75 octets must be
+  // continued with CRLF and a single space, and an unfolded 7KB photo line is
+  // exactly the kind of thing a strict parser rejects outright.
+  const folded = lines.flatMap(line => {
+    if (line.length <= 75) return [line];
+    const out = [line.slice(0, 75)];
+    for (let i = 75; i < line.length; i += 74) out.push(' ' + line.slice(i, i + 74));
+    return out;
+  });
+
+  vcardCache = folded.join('\r\n') + '\r\n';
+  return vcardCache;
+}
+
+app.get('/contact.vcf', (_req, res) => {
+  res.type('text/vcard; charset=utf-8')
+     .set('content-disposition', 'attachment; filename="Commish AI.vcf"')
+     .send(contactCard());
+});
+
 app.use(express.static(WEBSITE_DIR, { extensions: ['html'] }));
 app.use('/app', express.static(path.join(__dirname, 'app'), { extensions: ['html'] }));
 // Operator UI. The static files are not secret; every byte of data behind them

@@ -122,6 +122,9 @@ class SendblueProvider extends MessagingProvider {
     if (this.fromNumber) body.from_number = this.fromNumber;
     if (opts.statusCallback) body.status_callback = opts.statusCallback;
     if (opts.sendStyle) body.send_style = opts.sendStyle;
+    // Attachments. The only current use is the bot's own contact card, which is
+    // how a group learns that the number texting them has a name.
+    if (opts.mediaUrl) body.media_url = opts.mediaUrl;
     return this.recorded(chatId, isGroup, opts, () => this.request('POST', path, body));
   }
 
