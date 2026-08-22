@@ -86,6 +86,16 @@ function fillTokens(html) {
 const WEBSITE_DIR = path.join(__dirname, '..', 'website');
 const pageCache = new Map();
 
+/** Read a page and substitute the operator details, cached in production. */
+function filledPage(file) {
+  let html = pageCache.get(file);
+  if (html === undefined) {
+    html = fillTokens(require('fs').readFileSync(file, 'utf8'));
+    if (process.env.NODE_ENV === 'production') pageCache.set(file, html);
+  }
+  return html;
+}
+
 app.get(/\.html$|^\/$/, (req, res, next) => {
   const rel = req.path === '/' ? 'index.html' : req.path.replace(/^\//, '');
   if (rel.includes('..')) return next();
@@ -93,16 +103,30 @@ app.get(/\.html$|^\/$/, (req, res, next) => {
   if (!file.startsWith(WEBSITE_DIR)) return next();
 
   try {
-    let html = pageCache.get(file);
-    if (html === undefined) {
-      html = fillTokens(require('fs').readFileSync(file, 'utf8'));
-      if (process.env.NODE_ENV === 'production') pageCache.set(file, html);
-    }
-    res.type('html').send(html);
+    res.type('html').send(filledPage(file));
   } catch {
     next();      // not a page we serve; fall through to static
   }
 });
+
+/*
+ * The app and the operator board get the same substitution as the marketing
+ * site.
+ *
+ * They did not, because express.static serves bytes and knows nothing about
+ * {{BUSINESS_NAME}}. The consequence was visible and easy to misread: the
+ * commissioner app's footer showed the loud [LEGAL BUSINESS NAME] placeholder,
+ * which is what fillTokens renders for a MISSING value — so it looked like an
+ * unset environment variable rather than a page that never ran the substitution
+ * at all. Registered ahead of the static mounts, which still serve the CSS and
+ * the JS beside them.
+ */
+for (const [route, dir] of [['/app', 'app'], ['/admin', 'admin']]) {
+  const file = path.join(__dirname, dir, 'index.html');
+  app.get([route, route + '/'], (_req, res, next) => {
+    try { res.type('html').send(filledPage(file)); } catch { next(); }
+  });
+}
 
 app.use(express.static(WEBSITE_DIR, { extensions: ['html'] }));
 app.use('/app', express.static(path.join(__dirname, 'app'), { extensions: ['html'] }));
