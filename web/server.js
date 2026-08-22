@@ -99,9 +99,32 @@ const SITE = {
 
 const loud = name => `<span class="todo">[${name.replace(/_/g, ' ')}]</span>`;
 const mailto = e => `<a href="mailto:${e}">${e}</a>`;
+const tel = n => `<a href="sms:${n}">${n}</a>`;
+
+/**
+ * How to reach a person, with a fallback that is true.
+ *
+ * The loud placeholder is right for a value nobody has decided yet and wrong
+ * for this one, because these pages are live: the privacy policy promises data
+ * deletion on request, commits to removing a child's data on contact, and
+ * offers no way to make either request. "[SUPPORT EMAIL]" on a public legal
+ * page is worse than an imperfect contact.
+ *
+ * So it degrades to the messaging number rather than shouting. That number is
+ * genuinely monitored — the worker polls it every ten seconds, which is more
+ * than most support inboxes manage — and for a product delivered over SMS it is
+ * the obvious place to reach somebody. The prose on both pages was reworded to
+ * say "contact" rather than "email" so neither answer reads oddly.
+ */
+function supportContact() {
+  if (SITE.SUPPORT_EMAIL) return mailto(SITE.SUPPORT_EMAIL);
+  const number = process.env.SENDBLUE_FROM_NUMBER;
+  return number ? tel(number) : loud('SUPPORT_CONTACT');
+}
 
 function fillTokens(html) {
   return html.replace(/\{\{([A-Z_]+)\}\}/g, (_, key) => {
+    if (key === 'SUPPORT_CONTACT') return supportContact();
     const v = SITE[key];
     if (!v) return loud(key);
     return key === 'SUPPORT_EMAIL' ? mailto(v) : v;
