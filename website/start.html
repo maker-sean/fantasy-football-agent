@@ -271,31 +271,60 @@ $('find').addEventListener('click', findLeagues);
 $('username').addEventListener('keydown', e => { if (e.key === 'Enter') findLeagues(); });
 $('back').addEventListener('click', () => show('step-user'));
 $('restart').addEventListener('click', () => {
-  if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+  stopPolling();
   $('username').value = '';
   say($('user-msg'), '');
   show('step-user');
 });
 
 /**
- * Poll until the text lands.
+ * Poll until the text lands, backing off as it goes.
  *
  * Gives up after ten minutes rather than polling a forgotten tab forever — by
  * then the person has either sent it or walked away, and the reply they get by
  * text is the real confirmation regardless.
+ *
+ * The rate is not flat, because the WAIT is not flat. Almost everyone texts in
+ * the first minute or two, while the phone is already in their hand and the
+ * code is on screen; past that they have been interrupted, and a visitor who
+ * comes back after five minutes does not care whether the tick was four seconds
+ * or fifteen. So the fast rate is spent where it is actually felt.
+ *
+ * 150 requests per session becomes 66, for the same worst-case experience:
+ * someone texting inside two minutes still sees it flip within four seconds.
+ *
+ * setTimeout chained rather than setInterval, since the gap changes between
+ * ticks. It also means a slow response can never queue up behind itself, which
+ * an interval will happily do on a bad connection.
  */
+const POLL_SCHEDULE = [
+  { untilMs:  2 * 60 * 1000, everyMs:  4000 },   // 0–2 min   — the common case
+  { untilMs:  4 * 60 * 1000, everyMs: 10000 },   // 2–4 min   — distracted
+  { untilMs: 10 * 60 * 1000, everyMs: 15000 },   // 4–10 min  — probably gone
+];
+
+/** How long to wait before the next check, or null once we give up. */
+function pollDelay(elapsedMs) {
+  for (const step of POLL_SCHEDULE) if (elapsedMs < step.untilMs) return step.everyMs;
+  return null;
+}
+
 let pollTimer = null;
+function stopPolling() {
+  if (pollTimer) clearTimeout(pollTimer);
+  pollTimer = null;
+}
+
 function watchForText(code) {
-  if (pollTimer) clearInterval(pollTimer);
+  stopPolling();
   const started = Date.now();
 
   const check = async () => {
-    if (Date.now() - started > 10 * 60 * 1000) { clearInterval(pollTimer); pollTimer = null; return; }
     try {
       const r = await fetch(`/api/signup-intent/${encodeURIComponent(code)}/status`);
       const d = await r.json();
-      if (!d.used) return;
-      clearInterval(pollTimer); pollTimer = null;
+      if (!d.used) return schedule();
+      stopPolling();
       $('sms-card').classList.remove('pending');
       $('sms-card').classList.add('done');
       $('waiting').classList.add('done');
@@ -303,10 +332,19 @@ function watchForText(code) {
       $('pulse').classList.add('check');
       $('wait-title').textContent = "Got it. You're in the queue.";
       $('wait-note').textContent = "We'll text you when it's your league's turn. Nothing else to do.";
-    } catch { /* transient; the next tick retries */ }
+    } catch {
+      schedule();          // transient; the next tick retries
+    }
   };
 
-  pollTimer = setInterval(check, 4000);
+  const schedule = () => {
+    const delay = pollDelay(Date.now() - started);
+    // Past the last step: stop. The text itself is the real confirmation, and
+    // this tab has been open for ten minutes without one.
+    if (delay === null) return stopPolling();
+    pollTimer = setTimeout(check, delay);
+  };
+
   check();
 }
 
