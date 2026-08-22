@@ -52,6 +52,71 @@ class Responder {
    * Acting means the message WAS a claim, so falling through afterwards would
    * hand the same text to decide() and risk a second, unrelated reply to it.
    */
+  /**
+   * Answer a request to change who owns a team by sending the commissioner a
+   * link, and never by doing it.
+   *
+   * The request is legitimate and common. The authority to grant it is what is
+   * missing, and only the league's owner has that — so the link is minted for
+   * them and texted to them, never to the person who asked. Anybody in a group
+   * chat can type "somebody took my account"; acting on that would be the
+   * takeover 0004 exists to prevent, and it would be exploitable by simply
+   * asking.
+   */
+  async handleHelp(chatId, burst, league) {
+    const claims = require('./claims');
+    const botNames = (league.config?.botNames || []).map(String);
+
+    // Only ever on a message that named the bot. Two people discussing
+    // co-owning a team are having a conversation, not filing a request.
+    const asker = burst.find(m => mentionsBot(m.text, botNames));
+    if (!asker) return null;
+    const intent = claims.helpIntent(asker.text);
+    if (!intent) return null;
+
+    const { rows: [owner] } = await db.query(
+      `select a.* from accounts a join leagues l on l.account_id = a.id where l.id = $1`,
+      [league.id]
+    );
+
+    let text = intent.reply();
+    let sentLink = false;
+
+    if (owner?.phone && !(await claims.recentlyLinked(league.id))) {
+      const url = require('./onboardlink').rosterLinkFor(league.id);
+      try {
+        await this.provider.send(owner.phone,
+          `Someone in ${league.name} asked to be added or moved. Open the roster and fix it:\n${url}\n\n` +
+          `Only you can change this. The link expires in 3 days.`);
+        sentLink = true;
+      } catch (err) {
+        console.error('[help] could not text the commissioner:', err.message);
+      }
+    } else if (!owner?.phone) {
+      // Nobody to text. Saying "your commissioner is getting a link" would be
+      // a promise nothing keeps, which is worse than pointing at the website.
+      text = intent.reply().replace(/is getting a link[^.]*\./,
+        'can fix that on the website.');
+    }
+
+    if (!this.dryRun) {
+      await this.provider.send(chatId, text).catch(err => {
+        console.error('[help] reply failed:', err.message);
+      });
+    }
+    if (sentLink) {
+      await db.recordClaim({
+        leagueId: league.id, phone: asker.senderId, claimedText: asker.text,
+        outcome: 'prompted', detail: { kind: 'roster_link', intent: intent.key },
+      }).catch(() => {});
+    }
+
+    const verdict = { layer: 'help', reply: true, reason: intent.key,
+      detail: { sentLink }, messageCount: burst.length, triggerMessageId: asker.messageId };
+    await this.log(chatId, league, verdict, text).catch(() => {});
+    return { verdict, replied: text };
+  }
+
   async handleClaims(chatId, burst, league) {
     const claims = require('./claims');
     const rosters = await claims.unclaimed(league.id);
@@ -218,6 +283,19 @@ class Responder {
       if (bound) {
         for (const m of burst) m.bound = bound.has(db.normalizePhone(m.senderId));
       }
+    }
+
+    /*
+     * "I co-own this" and "somebody took my team".
+     *
+     * Checked for EVERYONE, bound or not — the person whose team was taken is
+     * usually already bound, so putting this inside the unbound-only branch
+     * below would miss the case it exists for.
+     */
+    if (db && league) {
+      const helped = await this.handleHelp(chatId, burst, league)
+        .catch(err => { console.error('[help] failed:', err.message); return null; });
+      if (helped) return helped;
     }
 
     /*

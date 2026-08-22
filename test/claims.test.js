@@ -161,5 +161,40 @@ const P = (text, opts = {}) => claims.parseClaim(text, {
     assert.ok(/commissioner can add you/.test(msg), 'says how to become a co-owner');
   });
 
+  console.log('\nasking for a team to be changed');
+
+  await it('recognises a co-owner request', () => {
+    for (const t of ['bot I am a co-owner of this team',
+                     'bot me and my brother share this team',
+                     'bot can I be a second owner',
+                     'bot we co-manage that roster'])
+      assert.strictEqual(claims.helpIntent(t)?.key, 'co_owner', t);
+  });
+
+  await it('recognises a takeover or reassignment request', () => {
+    for (const t of ['bot someone took my account',
+                     "bot that's not my team",
+                     'bot I need to reassign people',
+                     'bot wrong team is showing for me'])
+      assert.strictEqual(claims.helpIntent(t)?.key, 'reassign', t);
+  });
+
+  await it('ordinary questions are not requests', () => {
+    for (const t of ['bot who should I start', 'bot what is my record',
+                     'I own the best team in this league', 'bot how many points did I score'])
+      assert.strictEqual(claims.helpIntent(t), null, t);
+  });
+
+  await it('the answer is never "done" — it names the commissioner and says why', () => {
+    // Acting on this from the chat is the takeover 0004 exists to prevent, and
+    // it would be exploitable by simply asking.
+    for (const i of claims.HELP_INTENTS) {
+      const r = i.reply();
+      assert.ok(/commissioner/i.test(r), i.key + ' names who can do it');
+      assert.ok(/cannot|not be/i.test(r), i.key + ' says the chat cannot');
+      assert.ok(/taking over|take over/i.test(r), i.key + ' says why that is the point');
+    }
+  });
+
   console.log(`\n${pass} passing`);
 })();

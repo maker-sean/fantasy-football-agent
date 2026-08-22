@@ -245,8 +245,66 @@ async function recentlyPrompted(leagueId, phone) {
   return rows.length > 0;
 }
 
+/*
+ * Two things people ask for that the chat must never do.
+ *
+ * "I co-own this team" and "somebody took my account" are both requests to
+ * change who a roster belongs to, and both are refused for the same reason:
+ * anybody in a group chat can type them. Reassigning a team on the strength of
+ * a text message is the identity takeover 0004_identity_binding.sql exists to
+ * prevent, and it would be trivially exploitable — you would only have to ask.
+ *
+ * So the answer is never "done", it is "your commissioner has a link". The
+ * request is legitimate and common; only the authority to grant it is missing,
+ * and the commissioner has that.
+ *
+ * Both patterns are only ever tested against messages that ADDRESSED the bot,
+ * which is what keeps them from firing on people talking to each other about
+ * co-owning a team.
+ */
+const HELP_INTENTS = [
+  {
+    key: 'co_owner',
+    // "co-owner", "co own", "share this team", "we split", "joint team"
+    test: /\bco[\s-]?own(?:er|ers|s|ed|ing)?\b|\b(?:we|us|i) (?:share|split|co[\s-]?manage)\b|\bshare (?:this|the|my|a) team\b|\bjoint(?:ly)? (?:own|manage|team)\b|\bsecond owner\b/i,
+    reply: (name) =>
+      `Your commissioner is getting a link to add you to that team directly. ` +
+      `I cannot do it from here — nobody can be added to a team by asking in the chat, ` +
+      `which is exactly what stops somebody taking over yours.`,
+  },
+  {
+    key: 'reassign',
+    // "took my account", "not my team", "wrong team", "reassign", "stole"
+    test: /\b(?:took|stole|has|got|hijacked|claimed) my (?:account|team|roster|spot)\b|\bthat ?'?s not my (?:team|roster|account)\b|\bwrong (?:team|roster)\b|\breassign\b|\bswap (?:me|us|teams)\b|\bmixed up\b|\bi am not\b.{0,20}\bteam\b/i,
+    reply: () =>
+      `Your commissioner is getting a link to fix that. ` +
+      `Teams cannot be reassigned from the chat — that is deliberate, and it is what keeps ` +
+      `anyone from taking over yours by asking.`,
+  },
+];
+
+/** Has the commissioner already been sent a link for this recently? */
+async function recentlyLinked(leagueId, hours = 1) {
+  const { rows } = await db.query(
+    `select 1 from identity_claims
+      where league_id = $1 and outcome = 'prompted'
+        and detail->>'kind' = 'roster_link'
+        and created_at > now() - ($2 || ' hours')::interval limit 1`,
+    [leagueId, String(hours)]
+  );
+  return rows.length > 0;
+}
+
+/** Which of the two, if either. Only meaningful on a message that named the bot. */
+function helpIntent(text) {
+  const s = String(text || '');
+  if (!s.trim()) return null;
+  for (const intent of HELP_INTENTS) if (intent.test.test(s)) return intent;
+  return null;
+}
+
 module.exports = {
   unclaimed, menuText, askText, parseClaim, cleanName, apply, replyFor,
-  withinWindow, markAsked, recentlyPrompted,
+  withinWindow, markAsked, recentlyPrompted, recentlyLinked, helpIntent, HELP_INTENTS,
   CLAIM_WINDOW_MINUTES, PROMPT_GAP_HOURS,
 };

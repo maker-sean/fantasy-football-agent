@@ -160,6 +160,22 @@ async function boot() {
  * starting over.
  */
 function route() {
+  /*
+   * A roster link opens one screen and nothing else.
+   *
+   * The commissioner tapping this asked for one specific thing — fix who is
+   * who — usually from a text, usually on a phone, usually while the group
+   * chat is still arguing about it. Dropping them into a four step onboarding
+   * flow for a league that is already live would be answering a different
+   * question than the one they asked.
+   */
+  if (ME.manage) {
+    CURRENT = (ME.leagues || []).find(l => l.id === ME.manage.leagueId)
+              || { id: ME.manage.leagueId, name: ME.manage.leagueName };
+    MANAGE_ONLY = true;
+    return showRoster();
+  }
+
   const leagues = ME.leagues || [];
   const unfinished = leagues.find(l => l.onboarding_state !== 'live');
 
@@ -440,6 +456,17 @@ async function saveNames() {
  */
 async function showRoster() {
   view('v-roster');
+
+  // Same screen, different framing. In the flow it is step 2 of 4 and leads
+  // somewhere; on a roster link it is the whole errand and leads back to the
+  // dashboard.
+  $('roster-eyebrow').textContent = MANAGE_ONLY ? 'Who is who' : 'Step 2 of 4';
+  $('roster-lede').textContent = MANAGE_ONLY
+    ? 'Edit a name or number, or add a second owner to a team. Changes take effect immediately.'
+    : "Put a name and mobile number against each team. This is how the agent knows who it's talking to — and who to blame.";
+  $('save-roster').textContent = MANAGE_ONLY ? 'Save changes' : 'Save and continue';
+  $('skip-roster').hidden = MANAGE_ONLY;
+  $('back-roster').hidden = MANAGE_ONLY;
   const rows = $('roster-rows');
   rows.innerHTML = '<p class="muted small">Loading rosters…</p>';
   REMOVED_MEMBER_IDS = [];
@@ -454,6 +481,9 @@ async function showRoster() {
 
 /** Ids of co-owner rows the commissioner removed, sent on save. */
 let REMOVED_MEMBER_IDS = [];
+
+/** True when we arrived on a roster link: one screen, no flow. */
+let MANAGE_ONLY = false;
 
 function ownerRow({ id, humanName, hasPhone, isPrimary }) {
   const el = document.createElement('div');
@@ -558,6 +588,10 @@ async function saveRoster(skip) {
     }
     await refreshMe();
     CURRENT = ME.leagues.find(l => l.id === CURRENT.id) || CURRENT;
+    if (MANAGE_ONLY) {
+      say($('roster-msg'), 'Saved. The agent already knows.', 'ok');
+      return;
+    }
     showNames();
   } catch {
     say($('roster-msg'), 'Could not save. Try again.', 'err');

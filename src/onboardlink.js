@@ -49,6 +49,22 @@ const DEFAULT_TTL_DAYS = Number(process.env.ONBOARD_LINK_DAYS || 7);
  */
 const KIND_ONBOARD = 0x01;
 
+/*
+ * A second kind: "open my roster and let me fix it".
+ *
+ * Same signing, same fragment, same expiry mechanics — a different first byte
+ * and a LEAGUE id in the body instead of a signup id. It exists because the
+ * answer to "somebody took my team" and "I co-own this one" has to be a link
+ * the commissioner can tap, not an instruction to go and find a website.
+ *
+ * It authorises exactly one thing: editing that league's roster. It is minted
+ * for the commissioner and texted to the commissioner, never to the person who
+ * asked — which is the entire security property. Anybody in a group chat can
+ * ask for a team to be reassigned; only the person who owns the league can do
+ * it.
+ */
+const KIND_ROSTER = 0x02;
+
 function secret() {
   const s = process.env.BALLOT_SECRET;
   if (!s || s.length < 32) {
@@ -72,16 +88,31 @@ function bytesUuid(buf) {
   return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
 }
 
-/** Sign an invite for one signup. */
-function mint(signupId, { days = DEFAULT_TTL_DAYS } = {}) {
+function pack(kind, id, days) {
   const expires = Math.floor(Date.now() / 1000) + Math.round(days * 86400);
   const body = Buffer.alloc(21);
-  body[0] = KIND_ONBOARD;
-  uuidBytes(signupId).copy(body, 1);
+  body[0] = kind;
+  uuidBytes(id).copy(body, 1);
   body.writeUInt32BE(expires, 17);
-
   const sig = crypto.createHmac('sha256', secret()).update(body).digest().subarray(0, SIG_BYTES);
   return Buffer.concat([body, sig]).toString('base64url');
+}
+
+/** Sign an invite for one signup. */
+function mint(signupId, { days = DEFAULT_TTL_DAYS } = {}) {
+  return pack(KIND_ONBOARD, signupId, days);
+}
+
+/**
+ * Sign a roster-editing link for one league.
+ *
+ * Shorter lived than an invite. An invite has to survive a weekend and somebody
+ * getting round to it; this is sent in response to a request that was made
+ * seconds ago, and it grants write access to who is who — so three days, not
+ * seven.
+ */
+function mintRoster(leagueId, { days = 3 } = {}) {
+  return pack(KIND_ROSTER, leagueId, days);
 }
 
 /**
@@ -95,17 +126,23 @@ function read(token, { now = Date.now() } = {}) {
   try {
     const raw = Buffer.from(String(token || ''), 'base64url');
     if (raw.length !== 21 + SIG_BYTES) return null;
-    if (raw[0] !== KIND_ONBOARD) return null;
+    const kind = raw[0];
+    if (kind !== KIND_ONBOARD && kind !== KIND_ROSTER) return null;
 
     const body = raw.subarray(0, 21);
     const given = raw.subarray(21);
     const want = crypto.createHmac('sha256', secret()).update(body).digest().subarray(0, SIG_BYTES);
     if (!crypto.timingSafeEqual(given, want)) return null;
 
-    const expires = body.readUInt32BE(17);
-    if (expires * 1000 <= now) return { expired: true, signupId: bytesUuid(body.subarray(1, 17)) };
+    const id = bytesUuid(body.subarray(1, 17));
+    // The kind is INSIDE the signed body, so a roster link cannot be edited
+    // into an invite or the other way round.
+    const field = kind === KIND_ROSTER ? 'leagueId' : 'signupId';
 
-    return { signupId: bytesUuid(body.subarray(1, 17)), expiresAt: new Date(expires * 1000) };
+    const expires = body.readUInt32BE(17);
+    if (expires * 1000 <= now) return { expired: true, kind, [field]: id };
+
+    return { kind, [field]: id, expiresAt: new Date(expires * 1000) };
   } catch {
     return null;
   }
@@ -123,4 +160,10 @@ function linkFor(signupId, opts) {
   return `${baseUrl()}/app/#setup=${mint(signupId, opts)}`;
 }
 
-module.exports = { mint, read, linkFor, baseUrl, DEFAULT_TTL_DAYS, KIND_ONBOARD };
+/** Same fragment key — the server decides what the token authorises, not the URL. */
+function rosterLinkFor(leagueId, opts) {
+  return `${baseUrl()}/app/#setup=${mintRoster(leagueId, opts)}`;
+}
+
+module.exports = { mint, mintRoster, read, linkFor, rosterLinkFor, baseUrl,
+  DEFAULT_TTL_DAYS, KIND_ONBOARD, KIND_ROSTER };

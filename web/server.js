@@ -357,6 +357,30 @@ async function requireAccount(req, res, next) {
       // new one" is actionable; "invalid" sends people hunting for a bug.
       if (invite.expired) return res.status(401).json({ error: 'link_expired' });
 
+      /*
+       * A roster link authorises the league's OWNER, not whoever asked for it.
+       *
+       * That is the whole security property. Anybody in a group chat can say
+       * "somebody took my team"; only the person who owns the league can
+       * reassign one, and the link is minted for them and texted to them. If
+       * the league has no owning account there is nobody to be, so it fails
+       * rather than falling back to anything.
+       */
+      if (invite.kind === onboardlink.KIND_ROSTER) {
+        const { rows: [lg] } = await db.query(
+          'select id, name, account_id from leagues where id = $1', [invite.leagueId]);
+        if (!lg || !lg.account_id) return res.status(401).json({ error: 'invalid_token' });
+        const { rows: [acct] } = await db.query(
+          'select * from accounts where id = $1', [lg.account_id]);
+        if (!acct) return res.status(401).json({ error: 'invalid_token' });
+
+        req.account = acct;
+        // Narrow on purpose: this token opens one league's roster and says so,
+        // so the app can show that screen alone rather than the whole flow.
+        req.manage = { leagueId: lg.id, leagueName: lg.name, expiresAt: invite.expiresAt };
+        return next();
+      }
+
       const resolved = await accountForInvite(invite);
       if (!resolved) return res.status(401).json({ error: 'invalid_token' });
 
@@ -428,6 +452,9 @@ app.get('/api/me', requireAccount, wrap(async (req, res) => {
     // which Sleeper league they picked on the site, so making them search for
     // it again would be asking a question we have the answer to.
     invite: req.invite || null,
+    // Present only for a roster link. The app shows the roster editor alone
+    // when this is set — no steps, no "and continue".
+    manage: req.manage || null,
   });
 }));
 
