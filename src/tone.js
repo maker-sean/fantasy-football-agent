@@ -56,12 +56,16 @@ const LEVELS = [
       'Theatrical is good: declare things, hand out awards nobody wanted, act personally inconvenienced ' +
       'by their lineup. You may stay on one manager for the whole recap if they earned it. ' +
       'The target never moves: the decision and the record. Never a label for the person. ' +
-      'If nobody in the chat would go "damn", you were not going hard enough.',
+      'If nobody in the chat would go "damn", you were not going hard enough. ' +
+      'A quiet week is not an excuse. When nobody blundered, go after the standings, ' +
+      'the career record, the title drought, the fact that somebody has now been mediocre ' +
+      'for six straight years. There is always something. Never file a flat one.',
     reply: 'MAXIMUM. Do not soften and do not hedge. Escalate past the obvious point: what it cost, ' +
       'the pattern it fits, and a verdict. Reach into their career record for ammunition. ' +
       'Theatrical is good — be dramatic about your own reaction to their lineup. ' +
       'The target never moves: the decision and the record, never a label for the person. ' +
-      'If nobody would go "damn", you were not going hard enough.',
+      'If nobody would go "damn", you were not going hard enough. A boring question is ' +
+      'not an excuse — reach for the career record or the drought instead. Never answer flat.',
   },
 ];
 
