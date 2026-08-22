@@ -139,5 +139,27 @@ const P = (text, opts = {}) => claims.parseClaim(text, {
     assert.ok(/Commish/.test(t), 'says how to claim after the window closes');
   });
 
+  console.log('\nco-owned teams');
+
+  await it('a claimed team is off the menu, so a co-owner cannot be claimed over', () => {
+    // The form supports several owners per roster; chat claims support one.
+    // That asymmetry is deliberate — see replyFor — and the menu is what
+    // enforces it, because unclaimed() only offers rosters with no phone.
+    const claimed = ROSTERS.filter(r => r.roster !== 3);
+    assert.strictEqual(claims.parseClaim('3', {
+      rosters: claimed, addressed: true, withinWindow: true, botNames: ['bot'],
+    }), null, 'a roster nobody is offering is not claimable');
+  });
+
+  await it('refusing a taken team names the way forward', () => {
+    // "Tank for Tyler is already Tyler." on its own is a dead end for somebody
+    // who genuinely shares that team.
+    const msg = claims.replyFor(
+      { outcome: 'rejected_team_taken', existing: { team_name: 'Tank for Tyler', display_name: 'Tyler' } },
+      { roster: 1 });
+    assert.ok(/already Tyler/.test(msg));
+    assert.ok(/commissioner can add you/.test(msg), 'says how to become a co-owner');
+  });
+
   console.log(`\n${pass} passing`);
 })();

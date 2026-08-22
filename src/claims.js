@@ -205,7 +205,18 @@ function replyFor(result, claim) {
     case 'unchanged':
       return `Already had you as ${result.member.display_name || team(result.member)}.`;
     case 'rejected_team_taken':
-      return `${team(result.existing)} is already ${result.existing.display_name || 'taken'}.`;
+      /*
+       * A dead end otherwise.
+       *
+       * Somebody who genuinely co-manages this team is told no and given
+       * nothing, and co-managed teams are ordinary. The restriction itself
+       * stays — self-service co-ownership is the identity takeover 0004 was
+       * written against, since claiming a team somebody already holds would
+       * attach your messages to their roster with no confirmation from anyone.
+       * But refusing is not a reason to be unhelpful about it.
+       */
+      return `${team(result.existing)} is already ${result.existing.display_name || 'taken'}. ` +
+             `If you share that team, your commissioner can add you on the website.`;
     case 'rejected_phone_taken':
       return `You are already down as ${result.existing.display_name || team(result.existing)}. ` +
              `Your commissioner can move that on the website.`;
