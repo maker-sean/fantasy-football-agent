@@ -93,11 +93,37 @@
 /* --- hourly page views ----------------------------------------------------
    Divs, not a charting library. Twenty-five bars do not justify a dependency
    on the one page that must keep working when everything else is on fire. */
+/* The wrapper owns the tooltip's positioning context and the peak label, so
+   the bars themselves stay a plain flex row. */
+.spark-wrap { position: relative; margin-bottom: 6px; }
 .spark {
   display: flex; align-items: flex-end; gap: 2px;
-  height: 72px; padding: 0 2px; margin-bottom: 6px;
+  height: 72px; padding: 0 2px;
   background: var(--surface); border: 1px solid var(--line); border-radius: 6px;
 }
+/* The y scale, in the one spot that costs no vertical space. Without it a tall
+   bar could equally be three views or three hundred. */
+.spark-peak {
+  position: absolute; top: 3px; left: 7px; z-index: 1;
+  font-family: var(--mono); font-size: .65rem; color: var(--muted);
+  pointer-events: none;
+}
+.spark-axis {
+  display: flex; justify-content: space-between;
+  font-family: var(--mono); font-size: .64rem; color: var(--muted);
+  padding: 3px 4px 0;
+}
+.spark-tip {
+  position: absolute; bottom: 78px; z-index: 5;
+  padding: 5px 9px; border-radius: 6px; white-space: nowrap;
+  font-size: .75rem; background: #0d0f11; color: var(--text);
+  border: 1px solid var(--line); pointer-events: none;
+  box-shadow: 0 4px 14px rgba(0,0,0,.5);
+}
+/* A hovered bar lights up, so it is obvious WHICH hour the tooltip describes
+   when two bars are three pixels apart. */
+.spark .bar { transition: filter .1s; }
+.spark .bar.on { filter: brightness(1.5); }
 .spark .bar { flex: 1; min-width: 3px; min-height: 3px; background: var(--turf); border-radius: 2px 2px 0 0; }
 /* min-height in PIXELS, not a percentage floor. A 2% floor is 1px in a 72px
    box, which rounds to invisible and reintroduces the exact ambiguity the

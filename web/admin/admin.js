@@ -267,6 +267,82 @@ function renderDrafts(list) {
 }
 
 // --- boot -------------------------------------------------------------------
+// --------------------------------------------------------------- spark ----
+
+/**
+ * An hourly bar chart with a readable scale and an instant tooltip.
+ *
+ * Both charts had bars and nothing else: no axis, so you could not tell what
+ * span they covered, and no y scale, so a tall bar could equally have been
+ * three views or three hundred. The values were on the native title attribute,
+ * which is the worst of both worlds — a second of delay before it appears, no
+ * indication that hovering does anything, and invisible on a touch screen.
+ *
+ * The tooltip is a div positioned on mouseover. It follows the bar rather than
+ * the cursor so it cannot cover the thing being read, and it is clamped inside
+ * the chart so the first and last hours are not cut off by the edge.
+ */
+function renderSpark(host, points, { label, bad = false, fmtLabel } = {}) {
+  host.classList.add('spark-wrap');
+  host.innerHTML = '';
+  const peak = Math.max(1, ...points.map(p => p.count));
+
+  const peakTag = el2('div', 'spark-peak', String(peak));
+  const chart = el2('div', 'spark');
+  const tip = el2('div', 'spark-tip');
+  tip.hidden = true;
+
+  for (const p of points) {
+    const bar = el2('div', 'bar' + (p.count === 0 ? ' empty' : (bad ? ' bad' : '')));
+    bar.style.height = Math.max(3, Math.round((p.count / peak) * 100)) + '%';
+
+    const at = new Date(p.hour);
+    /*
+     * Weekday AND hour, always.
+     *
+     * The hour alone is ambiguous over any window longer than a day, and both
+     * of these are: 25 hours and 48 hours. The first and last bars of the
+     * traffic chart both read "11 AM", which is precisely the question a
+     * tooltip exists to answer. Matches the axis labels underneath, so the two
+     * can be read against each other.
+     */
+    const text = `${fmtLabel ? fmtLabel(at) : at.toLocaleString([], { weekday: 'short', hour: 'numeric' })} · ` +
+                 `${p.count} ${label}${p.count === 1 ? '' : 's'}`;
+
+    const show = () => {
+      tip.textContent = text;
+      tip.hidden = false;
+      // Measured after it is visible, because an element that is display:none
+      // has no width and would clamp to zero every time.
+      const w = tip.offsetWidth;
+      const centre = bar.offsetLeft + bar.offsetWidth / 2 - w / 2;
+      tip.style.left = Math.max(0, Math.min(centre, chart.offsetWidth - w)) + 'px';
+      bar.classList.add('on');
+    };
+    bar.onmouseenter = show;
+    bar.onmouseleave = () => { tip.hidden = true; bar.classList.remove('on'); };
+    // Tap works too. A touch screen has no hover at all, and this board gets
+    // opened on a phone precisely when something has gone wrong.
+    bar.onclick = show;
+    chart.appendChild(bar);
+  }
+
+  const first = new Date(points[0].hour);
+  const mid = new Date(points[Math.floor(points.length / 2)].hour);
+  const axis = el2('div', 'spark-axis');
+  const stamp = d => d.toLocaleString([], { weekday: 'short', hour: 'numeric' });
+  axis.append(el2('span', '', stamp(first)), el2('span', '', stamp(mid)), el2('span', '', 'now'));
+
+  host.append(peakTag, chart, tip, axis);
+}
+
+function el2(tag, cls, text) {
+  const n = document.createElement(tag);
+  if (cls) n.className = cls;
+  if (text != null) n.textContent = text;
+  return n;
+}
+
 // ------------------------------------------------------------- signups ----
 
 function renderTiles(tiles) {
@@ -288,20 +364,10 @@ function renderTiles(tiles) {
  * chart exists to stop you asking.
  */
 function renderVisits(visits) {
-  const box = $('visits');
-  box.innerHTML = '';
-  const peak = Math.max(1, ...visits.map(v => v.views));
-  for (const v of visits) {
-    const bar = document.createElement('div');
-    bar.className = 'bar' + (v.views === 0 ? ' empty' : '');
-    bar.style.height = Math.max(2, Math.round((v.views / peak) * 100)) + '%';
-    const hr = new Date(v.hour);
-    bar.title = `${hr.toLocaleTimeString([], { hour: 'numeric' })} — ${v.views} view${v.views === 1 ? '' : 's'}`;
-    box.appendChild(bar);
-  }
+  renderSpark($('visits'), visits, { label: 'view' });
   const total = visits.reduce((n, v) => n + v.views, 0);
   $('visits-sub').textContent = total
-    ? `${total} views over ${visits.length} hours · busiest hour ${peak}`
+    ? `${total} views over ${visits.length} hours`
     : 'No page views recorded yet — counting started when this was deployed.';
 }
 
@@ -598,18 +664,9 @@ function renderErrors(e) {
     tiles.appendChild(el);
   }
 
-  const box = $('err-spark');
-  box.innerHTML = '';
-  const peak = Math.max(1, ...e.series.map(p => p.count));
-  for (const p of e.series) {
-    const bar = document.createElement('div');
-    bar.className = 'bar' + (p.count === 0 ? ' empty' : ' bad');
-    bar.style.height = Math.max(2, Math.round((p.count / peak) * 100)) + '%';
-    bar.title = `${new Date(p.hour).toLocaleString()} — ${p.count}`;
-    box.appendChild(bar);
-  }
+  renderSpark($('err-spark'), e.series, { label: 'error', bad: true });
   $('err-spark-sub').textContent = e.total
-    ? `${e.total} in ${e.days} days · worst hour ${peak}`
+    ? `${e.total} in ${e.days} days`
     : 'Nothing has failed since this started recording.';
 
   const ops = $('err-ops').querySelector('tbody');
@@ -661,7 +718,7 @@ async function load() {
   renderDrafts(drafts);
 
   renderTiles(funnel.tiles);
-  renderVisits(funnel.visits);
+  renderVisits(funnel.visits.map(v => ({ hour: v.hour, count: v.views, views: v.views })));
   renderFunnel(funnel.funnel);
   renderTextFlow(funnel.textFlow);
   renderConvos(conversations);
