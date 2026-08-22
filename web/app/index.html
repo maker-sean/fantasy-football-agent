@@ -56,7 +56,7 @@
 
     <!-- Step 4: pick a league ---------------------------------------------->
     <div id="v-league" class="view" hidden>
-      <p class="eyebrow">Step 1 of 3</p>
+      <p class="eyebrow">Step 1 of 4</p>
       <h1 style="font-size:clamp(1.6rem,4vw,2.2rem)">Which league?</h1>
       <p class="lede">Your Sleeper username — we'll pull up your leagues.</p>
       <div class="step">
@@ -73,7 +73,7 @@
 
     <!-- Step 5: roster binding --------------------------------------------->
     <div id="v-roster" class="view" hidden>
-      <p class="eyebrow">Step 2 of 3</p>
+      <p class="eyebrow">Step 2 of 4</p>
       <h1 style="font-size:clamp(1.6rem,4vw,2.2rem)">Who's who.</h1>
       <p class="lede">Put a name and mobile number against each team. This is how the agent knows
       who it's talking to — and who to blame.</p>
@@ -92,12 +92,37 @@
       <p id="roster-msg" class="msg-line" role="status" aria-live="polite"></p>
     </div>
 
+    <!-- Step 3: what it answers to ------------------------------------------>
+    <div id="v-names" class="view" hidden>
+      <p class="eyebrow">Step 3 of 4</p>
+      <h1 style="font-size:clamp(1.6rem,4vw,2.2rem)">What should it answer to?</h1>
+      <p class="lede">It stays quiet in your group chat unless someone says its name. Pick
+      whatever your league will actually type.</p>
+
+      <div class="name-chips" id="name-chips"></div>
+
+      <div class="name-add">
+        <input id="name-custom" type="text" placeholder="Add your own — Jeeves, Coach, Karen…"
+               maxlength="24" autocomplete="off">
+        <button id="name-add" class="btn ghost" type="button">Add</button>
+      </div>
+
+      <p class="small" id="name-caution" style="margin-top:14px;color:var(--warn,#c9a227)" hidden></p>
+      <p class="small muted" id="name-preview" style="margin-top:14px"></p>
+      <p id="names-msg" class="msg-line" role="status" aria-live="polite"></p>
+
+      <p style="margin-top:18px">
+        <button id="save-names" class="btn" type="button">Save and continue</button>
+      </p>
+    </div>
     <!-- Step 6: prove the chat ---------------------------------------------->
     <div id="v-chat" class="view" hidden>
-      <p class="eyebrow">Step 3 of 3</p>
+      <p class="eyebrow">Step 4 of 4</p>
       <h1 style="font-size:clamp(1.6rem,4vw,2.2rem)">Add it to your group chat.</h1>
       <p class="lede">Last step. Add this number to your league's group text, then send any message
-      in that chat — a "hey" will do.</p>
+      in that chat — a "hey" will do. It only needs to hear from the chat once to know it is in
+      the right place.</p>
+      <p class="small muted" id="chat-names-note" style="margin:-6px 0 16px"></p>
 
       <div class="sms-card">
         <div class="sms-to"><span class="small muted">Add</span><strong id="bot-number">—</strong></div>

@@ -181,6 +181,10 @@ function route() {
   if (unfinished) {
     CURRENT = unfinished;
     if (unfinished.onboarding_state === 'awaiting_chat') return showChat();
+    // members_bound sits between the roster and the chat, which is exactly
+    // where choosing a name belongs — so the new step needed no new state and
+    // no migration. Quitting midway still resumes in the right place.
+    if (unfinished.onboarding_state === 'members_bound') return showNames();
     return showRoster();
   }
   return showDashboard();
@@ -256,6 +260,124 @@ async function linkInvitedLeague() {
   say($('league-msg'), `Opening ${ME.invite.leagueName || 'your league'}…`);
   if (!await linkLeague(ME.invite.sleeperLeagueId)) {
     say($('league-msg'), 'Could not open that league automatically — find it below.', 'err');
+  }
+}
+
+
+// ------------------------------------------------ step 3: what it answers to ----
+
+/*
+ * A league's bot only speaks when spoken to, and until now nothing in
+ * onboarding said so or asked what to call it. The name lived in a
+ * comma-separated text box on the settings screen, behind the dashboard, which
+ * a commissioner reaches after the group chat is already live.
+ *
+ * That is not a cosmetic gap. The default was 'bot' while the introduction the
+ * group receives advertised "Commish", so the first person to type "Hi Commish"
+ * in a real league was ignored — no error, no reply, nothing to explain it.
+ * Asking here, before the bot is ever in the chat, is what makes the
+ * introduction and the reply gate agree by construction.
+ */
+const SUGGESTED_NAMES = ['commish', 'bot', 'jarvis'];
+
+/*
+ * 'commish' is offered but never pre-ticked.
+ *
+ * In most leagues that word is a HUMAN — "commish can you fix the waiver
+ * order", "commish is asleep at the wheel again" — and a bot that answers to it
+ * interrupts both. The commissioner knows whether their league talks that way
+ * and is entitled to choose; they are just told first. src/decide.js keeps it
+ * out of the default for the same reason.
+ */
+const NAME_CAUTION = {
+  commish: 'Heads up: most leagues use "commish" for you, the actual person. Tick this and the bot answers when someone means you.',
+};
+let CHOSEN_NAMES = [];
+
+const prettyName = n => n.charAt(0).toUpperCase() + n.slice(1);
+
+function renderNameChips() {
+  const box = $('name-chips');
+  box.innerHTML = '';
+
+  // Suggestions first, in a stable order, then anything typed — so the chips
+  // do not reshuffle under a thumb as they are tapped.
+  const all = [...SUGGESTED_NAMES, ...CHOSEN_NAMES.filter(n => !SUGGESTED_NAMES.includes(n))];
+
+  for (const name of all) {
+    const on = CHOSEN_NAMES.includes(name);
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    chip.className = 'chip' + (on ? ' on' : '');
+    chip.setAttribute('aria-pressed', String(on));
+    chip.textContent = prettyName(name);
+    chip.onclick = () => {
+      CHOSEN_NAMES = on ? CHOSEN_NAMES.filter(n => n !== name) : [...CHOSEN_NAMES, name];
+      renderNameChips();
+    };
+    box.appendChild(chip);
+  }
+
+  // Say the awkward thing at the moment it becomes true, not in advance.
+  const caution = CHOSEN_NAMES.map(n => NAME_CAUTION[n]).filter(Boolean);
+  $('name-caution').textContent = caution.join(' ');
+  $('name-caution').hidden = !caution.length;
+
+  const preview = $('name-preview');
+  if (!CHOSEN_NAMES.length) {
+    preview.textContent = 'Pick at least one, or it will never answer anybody.';
+  } else {
+    const pretty = CHOSEN_NAMES.map(prettyName);
+    const list = pretty.length === 1 ? pretty[0]
+      : pretty.slice(0, -1).join(', ') + ' or ' + pretty[pretty.length - 1];
+    // "Commish or Bot all work" reads as a typo. One works, two both work,
+    // three or more all work.
+    const verb = pretty.length === 1 ? 'works' : pretty.length === 2 ? 'both work' : 'all work';
+    preview.textContent = `Your league says "Hey ${pretty[0]}, who should I start?" — ${list} ${verb}.`;
+  }
+}
+
+function addCustomName() {
+  const raw = $('name-custom').value.trim().toLowerCase();
+  $('name-custom').value = '';
+  if (!raw) return;
+
+  // A trigger is matched on a word boundary, so a name with spaces or
+  // punctuation in it can never fire. Better to say that than to store
+  // something that silently never works.
+  if (!/^[a-z0-9]{2,24}$/.test(raw)) {
+    return say($('names-msg'), 'One word, letters and numbers only — that is what it can match on.', 'err');
+  }
+  say($('names-msg'), '');
+  if (!CHOSEN_NAMES.includes(raw)) CHOSEN_NAMES.push(raw);
+  renderNameChips();
+}
+
+async function showNames() {
+  view('v-names');
+  say($('names-msg'), '');
+  const configured = (CURRENT && CURRENT.config && CURRENT.config.botNames) || [];
+  CHOSEN_NAMES = configured.length
+    ? configured.map(n => String(n).toLowerCase())
+    : ['bot'];
+  renderNameChips();
+}
+
+async function saveNames() {
+  if (!CHOSEN_NAMES.length) {
+    return say($('names-msg'), 'Pick at least one name, or nobody can get its attention.', 'err');
+  }
+  $('save-names').disabled = true;
+  say($('names-msg'), 'Saving…');
+  try {
+    await api('PATCH', `/api/leagues/${CURRENT.id}/config`, { config: { botNames: CHOSEN_NAMES } });
+    await refreshMe();
+    CURRENT = ME.leagues.find(l => l.id === CURRENT.id) || CURRENT;
+    showChat();
+  } catch {
+    say($('names-msg'), 'Could not save. Try again.', 'err');
+  } finally {
+    $('save-names').disabled = false;
   }
 }
 
@@ -395,10 +517,9 @@ async function saveRoster(skip) {
       }
       REMOVED_MEMBER_IDS = [];
     }
-    await api('POST', `/api/leagues/${CURRENT.id}/await-chat`);
     await refreshMe();
     CURRENT = ME.leagues.find(l => l.id === CURRENT.id) || CURRENT;
-    showChat();
+    showNames();
   } catch {
     say($('roster-msg'), 'Could not save. Try again.', 'err');
   } finally {
@@ -411,6 +532,20 @@ async function saveRoster(skip) {
 async function showChat() {
   view('v-chat');
   say($('copy-msg'), '');
+
+  /*
+   * Say what it will and will not do once it is in there.
+   *
+   * "Send any message" is literally true for LINKING — the chat is matched on
+   * the sender's number, not on anything they type. But the next thing anybody
+   * does is try to talk to it, and it answers only when addressed. Leaving that
+   * to be discovered is how a working bot reads as a broken one.
+   */
+  const names = ((CURRENT && CURRENT.config && CURRENT.config.botNames) || CHOSEN_NAMES || [])
+    .map(prettyName);
+  $('chat-names-note').textContent = names.length
+    ? `After that it stays quiet until someone says its name — ${names.join(', ')}. It introduces itself and explains that on arrival.`
+    : '';
   try {
     const info = await api('POST', `/api/leagues/${CURRENT.id}/await-chat`);
     $('bot-number').textContent = info.number || '(number not configured)';
@@ -507,6 +642,9 @@ $('accept-terms').onclick = async () => {
 $('find-leagues').onclick = findLeagues;
 $('sleeper-user').onkeydown = e => { if (e.key === 'Enter') findLeagues(); };
 $('save-roster').onclick = () => saveRoster(false);
+$('save-names').onclick = saveNames;
+$('name-add').onclick = addCustomName;
+$('name-custom').onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); addCustomName(); } };
 $('skip-roster').onclick = () => saveRoster(true);
 $('to-dashboard-1').onclick = showDashboard;
 $('to-dashboard-2').onclick = showDashboard;

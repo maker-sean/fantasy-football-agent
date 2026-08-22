@@ -13,6 +13,21 @@
  * Currently enabled: Layer 0 (hard suppression) and Layer 1 (direct address).
  */
 
+/**
+ * What a league answers to before anybody chooses.
+ *
+ * 'commish' is deliberately NOT in here, and it is worth writing down why since
+ * it looks like an obvious omission: in every league that word is a HUMAN.
+ * "commish can you fix the waiver order" and "commish is asleep at the wheel
+ * again" are people talking to and about a real person, and a bot that answers
+ * to it barges into both. There is a test.
+ *
+ * Onboarding OFFERS it, because a commissioner knows whether their league uses
+ * the word that way and is entitled to choose. It is offered unticked. The
+ * difference between offering and defaulting is the whole point.
+ */
+const DEFAULT_BOT_NAMES = ['bot'];
+
 const DEFAULTS = {
   // Names that count as addressing the bot. Word-boundary matched, so "robot"
   // and "botched" do not trigger it.
@@ -22,7 +37,12 @@ const DEFAULTS = {
   // human and would have made the bot interrupt every message aimed at them.
   // Any trigger word that doubles as a league role or a common noun will do the
   // same — pick a distinctive name per league via leagues.config.botNames.
-  botNames: ['bot'],
+  //
+  // Shared with welcome.js. The two used to disagree — the introduction
+  // advertised "Commish" while this gate listened only for "bot" — so the first
+  // real "Hi Commish" in a live league was received, matched nothing, and was
+  // silently ignored. One list, exported, so they cannot drift again.
+  botNames: DEFAULT_BOT_NAMES,
 
   // Only answer people bound to a roster in this league.
   //
@@ -267,4 +287,5 @@ function decide({ burst, state, league = {}, overrides = {} }) {
   };
 }
 
-module.exports = { decide, mentionsBot, config, DEFAULTS, LAYERS };
+module.exports = {
+  DEFAULT_BOT_NAMES, decide, mentionsBot, config, DEFAULTS, LAYERS };

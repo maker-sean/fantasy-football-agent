@@ -19,9 +19,24 @@
 
 const db = require('./db');
 
-/** Whatever the league configured, falling back to what the site advertises. */
+const capitalise = n => String(n).charAt(0).toUpperCase() + String(n).slice(1);
+
+/**
+ * The NAME it introduces itself by — not the same thing as a trigger.
+ *
+ * These were the same value and should not have been. A trigger is matched
+ * (case-insensitively, so its stored case is irrelevant); a name is read, and
+ * "Alright. I am bot" looks like a bug. So the first configured trigger is
+ * capitalised for this one sentence, and an unconfigured league introduces
+ * itself as Commish — which is a name, and is separate from the question of
+ * whether it ANSWERS to "commish". It does not by default, because in most
+ * leagues that word means a person. See DEFAULT_BOT_NAMES in decide.js.
+ */
 function botName(league) {
-  return botNames(league)[0];
+  const raw = league?.config?.botNames;
+  const list = (Array.isArray(raw) ? raw : [raw])
+    .map(n => (n == null ? '' : String(n).trim())).filter(Boolean);
+  return list.length ? capitalise(list[0]) : 'Commish';
 }
 
 /**
@@ -37,7 +52,9 @@ function botNames(league) {
   const list = (Array.isArray(raw) ? raw : [raw])
     .map(n => (n == null ? '' : String(n).trim()))
     .filter(Boolean);
-  return list.length ? list : ['Commish'];
+  // The same list the reply gate falls back to. A hardcoded 'Commish' here
+  // is what let the introduction advertise a trigger the gate ignored.
+  return list.length ? list : require('./decide').DEFAULT_BOT_NAMES;
 }
 
 /** a  |  a or b  |  a, b or c */
