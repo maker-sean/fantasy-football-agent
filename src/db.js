@@ -107,7 +107,12 @@ async function upsertAccount({ email, authUserId = null, displayName = null }) {
   const { rows } = await query(
     `insert into accounts (email, auth_user_id, display_name)
      values ($1,$2,$3)
-     on conflict (lower(email)) do update
+     -- The predicate is required, not decorative: accounts_email_idx became
+     -- PARTIAL when phone-anchored accounts arrived (0016), and Postgres cannot
+     -- infer a partial index without being told its WHERE. Omit it and every
+     -- email sign-in fails at runtime with "no unique or exclusion constraint
+     -- matching the ON CONFLICT specification".
+     on conflict (lower(email)) where email is not null do update
        set auth_user_id = coalesce(excluded.auth_user_id, accounts.auth_user_id),
            display_name = coalesce(excluded.display_name, accounts.display_name),
            updated_at = now()
@@ -120,6 +125,44 @@ async function upsertAccount({ email, authUserId = null, displayName = null }) {
 async function accountByEmail(email) {
   const { rows } = await query('select * from accounts where lower(email) = lower($1)', [email]);
   return rows[0] || null;
+}
+
+/**
+ * The account behind a texted signup.
+ *
+ * Phone-anchored rather than email-anchored, because the phone is what the
+ * signup funnel actually verified — see 0016_account_phone.sql. Normalised on
+ * the way in for the same reason every other phone in this codebase is: the
+ * same human writes their number four different ways.
+ */
+async function accountByPhone(phone) {
+  const p = normalizePhone(phone);
+  if (!p) return null;
+  const { rows } = await query('select * from accounts where phone = $1', [p]);
+  return rows[0] || null;
+}
+
+/**
+ * Create-or-return the account for a phone.
+ *
+ * The conflict target names the index predicate because accounts_phone_idx is
+ * PARTIAL. Without the `where`, Postgres cannot infer which index to arbitrate
+ * on and the insert fails at runtime rather than at deploy — the kind of thing
+ * that only shows up the second time somebody signs up.
+ */
+async function upsertAccountByPhone({ phone, displayName = null }) {
+  const p = normalizePhone(phone);
+  if (!p) throw new Error('a phone-anchored account needs a phone');
+  const { rows } = await query(
+    `insert into accounts (phone, display_name)
+     values ($1,$2)
+     on conflict (phone) where phone is not null do update
+       set display_name = coalesce(excluded.display_name, accounts.display_name),
+           updated_at = now()
+     returning *`,
+    [p, displayName]
+  );
+  return rows[0];
 }
 
 async function accountByAuthId(authUserId) {
@@ -509,7 +552,8 @@ module.exports = {
   leagueByChat, leagueById, activeLeagues, upsertLeague,
   upsertMember, bindMember, renameMember, recordClaim, boundPhones,
   suppress, unsuppress, isSuppressed,
-  upsertAccount, accountByEmail, accountByAuthId, acceptTerms,
+  upsertAccount, accountByEmail, accountByAuthId, accountByPhone,
+  upsertAccountByPhone, acceptTerms,
   leaguesForAccount, leagueForAccount, setOnboardingState, leaguesAwaitingChat,
   upsertSubscription,
   recordMessage,

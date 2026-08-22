@@ -212,6 +212,29 @@ const DEV_AUTH = process.env.NODE_ENV !== 'production'
   && process.env.DEV_AUTH === 'true'
   && process.env.DEV_AUTH_EMAIL;
 
+const onboardlink = require('../src/onboardlink');
+
+/**
+ * Exchange a texted invite for an account.
+ *
+ * The signup row is the authority, not the token: the token only says WHICH
+ * signup, and if that row has been deleted the invite is dead. That is the
+ * revocation mechanism, and it is worth knowing it is the only one.
+ *
+ * The account is keyed on the phone rather than created fresh each time, so a
+ * commissioner who opens the link on their phone and again on a laptop lands in
+ * the same account instead of two half-onboarded ones.
+ */
+async function accountForInvite(invite) {
+  const { rows: [signup] } = await db.query('select * from signups where id = $1', [invite.signupId]);
+  if (!signup || !signup.phone) return null;
+  return {
+    account: await db.accountByPhone(signup.phone)
+             || await db.upsertAccountByPhone({ phone: signup.phone }),
+    signup,
+  };
+}
+
 async function requireAccount(req, res, next) {
   try {
     if (DEV_AUTH) {
@@ -219,13 +242,42 @@ async function requireAccount(req, res, next) {
       return next();
     }
 
-    if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
-      return res.status(503).json({ error: 'auth_not_configured' });
-    }
-
     const header = req.get('authorization') || '';
     const token = header.startsWith('Bearer ') ? header.slice(7) : null;
     if (!token) return res.status(401).json({ error: 'missing_token' });
+
+    /*
+     * A texted invite, before anything Supabase.
+     *
+     * Two reasons for the order. It must not send our own token to Supabase's
+     * introspection endpoint — that is somebody else's server and this is a
+     * credential. And an invite has to work on a deployment where Supabase is
+     * not configured at all, which is the entire point: the email path being
+     * broken is why this exists, so it cannot depend on the email path being
+     * set up.
+     */
+    const invite = onboardlink.read(token);
+    if (invite) {
+      // Distinct from invalid_token on purpose. "Your link expired, ask for a
+      // new one" is actionable; "invalid" sends people hunting for a bug.
+      if (invite.expired) return res.status(401).json({ error: 'link_expired' });
+
+      const resolved = await accountForInvite(invite);
+      if (!resolved) return res.status(401).json({ error: 'invalid_token' });
+
+      req.account = resolved.account;
+      req.invite = {
+        signupId: invite.signupId,
+        expiresAt: invite.expiresAt,
+        sleeperLeagueId: resolved.signup.sleeper_league_id || null,
+        leagueName: resolved.signup.league_name || null,
+      };
+      return next();
+    }
+
+    if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
+      return res.status(503).json({ error: 'auth_not_configured' });
+    }
 
     const user = await verifyToken(token);
     if (!user) return res.status(401).json({ error: 'invalid_token' });
@@ -277,6 +329,10 @@ app.get('/api/me', requireAccount, wrap(async (req, res) => {
     },
     leagues: await db.leaguesForAccount(req.account.id),
     termsVersion: TERMS_VERSION,
+    // Present only when signed in by a texted invite. The signup already knows
+    // which Sleeper league they picked on the site, so making them search for
+    // it again would be asking a question we have the answer to.
+    invite: req.invite || null,
   });
 }));
 

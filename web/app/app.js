@@ -46,7 +46,18 @@ async function api(method, path, body) {
   const res = await fetch(path, { method, headers, body: body ? JSON.stringify(body) : undefined });
 
   // An expired session should return you to sign-in, not to a broken screen.
-  if (res.status === 401) { localStorage.removeItem(TOKEN_KEY); view('v-signin'); throw new Error('signed out'); }
+  //
+  // The REASON survives the throw. This used to raise a bare 'signed out',
+  // which was fine while every 401 meant the same thing — but a texted setup
+  // link can expire, and "that link has expired, text for a new one" is only
+  // sayable if the code the server sent is still in hand here.
+  if (res.status === 401) {
+    let why = null;
+    try { why = (await res.json())?.error; } catch { /* empty body is fine */ }
+    localStorage.removeItem(TOKEN_KEY);
+    view('v-signin');
+    throw Object.assign(new Error(why || 'signed out'), { status: 401, code: why });
+  }
 
   let json = null;
   try { json = await res.json(); } catch { /* empty body is fine */ }
@@ -83,15 +94,30 @@ async function sendMagicLink() {
   }
 }
 
-/** Supabase returns tokens in the URL fragment when the emailed link is opened. */
+/**
+ * Two kinds of credential arrive the same way, in the URL fragment.
+ *
+ *   access_token=…   Supabase, from an emailed magic link.
+ *   setup=…          ours, from a link texted to a verified phone.
+ *
+ * Both are bearer tokens and both go in the fragment rather than the query
+ * string, because a fragment is never sent to a server — it cannot land in an
+ * access log, a proxy, or a Referer header on the way to a third party.
+ *
+ * Downstream nothing changes: api() sends whatever is in storage as a Bearer
+ * header and the server decides which kind it is. That is deliberate. A second
+ * parallel auth path in the client is how the two drift apart and one of them
+ * quietly stops carrying the header on some routes.
+ */
 function captureTokenFromHash() {
-  if (!location.hash.includes('access_token')) return false;
+  if (!location.hash) return false;
   const params = new URLSearchParams(location.hash.slice(1));
-  const t = params.get('access_token');
+  const t = params.get('access_token') || params.get('setup');
   if (!t) return false;
   localStorage.setItem(TOKEN_KEY, t);
-  // Strip it immediately: an access token sitting in the address bar gets
-  // pasted into bug reports and copied into chat messages.
+  // Strip it immediately: a token sitting in the address bar gets pasted into
+  // bug reports and copied into chat messages. A texted one is worse than an
+  // emailed one for this — people screenshot texts.
   history.replaceState(null, '', location.pathname);
   return true;
 }
@@ -107,7 +133,15 @@ async function boot() {
 
   try {
     ME = await api('GET', '/api/me');
-  } catch {
+  } catch (err) {
+    // An expired invite has to SAY so. Bouncing to the sign-in screen would ask
+    // for an email address the person never gave us and cannot use, and the
+    // failure would read as "the link is broken" rather than "ask for another".
+    if (/link_expired/.test(String(err && err.message))) {
+      view('v-signin');
+      say($('signin-msg'), 'That setup link has expired. Text the number again and we will send a fresh one.', 'err');
+      return;
+    }
     return view('v-signin');
   }
 
@@ -129,7 +163,19 @@ function route() {
   const leagues = ME.leagues || [];
   const unfinished = leagues.find(l => l.onboarding_state !== 'live');
 
-  if (!leagues.length) { $('have-leagues').hidden = true; return view('v-league'); }
+  if (!leagues.length) {
+    $('have-leagues').hidden = true;
+    /*
+     * Somebody who arrived by texted invite already picked their league — that
+     * is precisely what the code they texted MEANT. Asking them for a Sleeper
+     * username to find it again is asking a question we are holding the answer
+     * to, and it is the likeliest step to lose them: the field wants the name
+     * they LOG IN with, not their team name, and people do not reliably know
+     * the difference.
+     */
+    if (ME.invite && ME.invite.sleeperLeagueId) return linkInvitedLeague();
+    return view('v-league');
+  }
   $('have-leagues').hidden = false;
 
   if (unfinished) {
@@ -174,17 +220,42 @@ async function findLeagues() {
   }
 }
 
+/**
+ * Link a league and move on.
+ *
+ * Returns whether it worked rather than throwing, and takes an OPTIONAL button:
+ * the invite path has no button to disable, and rethrowing would leave the
+ * existing click handler with an unhandled rejection.
+ */
 async function linkLeague(sleeperLeagueId, btn) {
-  btn.disabled = true;
+  if (btn) btn.disabled = true;
   say($('league-msg'), 'Linking…');
   try {
     const { league } = await api('POST', '/api/leagues', { sleeperLeagueId });
     CURRENT = league;
     await refreshMe();
     showRoster();
+    return true;
   } catch (err) {
     say($('league-msg'), 'Could not link that league.', 'err');
-    btn.disabled = false;
+    if (btn) btn.disabled = false;
+    return false;
+  }
+}
+
+/**
+ * Open the league the invite already named, skipping the picker.
+ *
+ * Falls back to the manual search rather than stranding them — a league that
+ * has since been deleted on Sleeper, or an id that no longer resolves, should
+ * cost one extra step and not the whole session.
+ */
+async function linkInvitedLeague() {
+  view('v-league');
+  $('have-leagues').hidden = true;
+  say($('league-msg'), `Opening ${ME.invite.leagueName || 'your league'}…`);
+  if (!await linkLeague(ME.invite.sleeperLeagueId)) {
+    say($('league-msg'), 'Could not open that league automatically — find it below.', 'err');
   }
 }
 

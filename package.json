@@ -43,7 +43,8 @@
     "gameday": "node scripts/gameday.js",
     "web": "node web/server.js",
     "linq-preflight": "node scripts/linq-preflight.js",
-    "ballot": "node scripts/ballot.js"
+    "ballot": "node scripts/ballot.js",
+    "invite": "node scripts/invite.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.117.1",
