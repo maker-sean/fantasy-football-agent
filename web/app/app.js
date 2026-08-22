@@ -692,10 +692,41 @@ $('copy-number').onclick = async () => {
   }
 };
 
+/*
+ * Exit leaves for the marketing site, not the sign-in screen.
+ *
+ * It used to bounce back to /app/, which boots with no token and lands on
+ * "Sign in. We'll email you a link." For an invited commissioner that screen is
+ * a dead end dressed as the way back: it asks for an email they never gave us,
+ * and the magic-link delivery behind it has never completed for anybody in
+ * production. Their real route back in is the link in their texts, which that
+ * screen does not mention.
+ *
+ * The session is still cleared — that is what Exit means. The sign-in screen is
+ * still reachable by opening /app/ directly, and still does its one genuinely
+ * useful job: telling somebody with an expired setup link to text for another.
+ */
 $('signout').onclick = e => {
   e.preventDefault();
   localStorage.removeItem(TOKEN_KEY);
-  location.href = '/app/';
+  location.href = '/';
 };
+
+/*
+ * A link arriving while this page is already open.
+ *
+ * Tapping a setup link normally means a fresh page load, and boot() reads the
+ * fragment on the way up. But if /app/ is ALREADY open — sitting on the
+ * sign-in screen, say — then tapping the link only changes the fragment. Same
+ * origin, same path: the browser treats it as an in-page jump, no script
+ * re-runs, and absolutely nothing happens. The person is looking at a page that
+ * ignored their link.
+ *
+ * Guarded on captureTokenFromHash() returning true so an ordinary anchor jump
+ * cannot restart the app.
+ */
+window.addEventListener('hashchange', () => {
+  if (captureTokenFromHash()) boot();
+});
 
 boot();
