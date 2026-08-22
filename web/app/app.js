@@ -261,46 +261,114 @@ async function linkInvitedLeague() {
 
 // ------------------------------------------------ step 5: roster binding ----
 
+/**
+ * One card per TEAM, one row per person on it.
+ *
+ * Two changes from the flat list this replaces.
+ *
+ * The heading leads with the Sleeper USERNAME, not the team name. Team names
+ * are jokes, they change mid-season, and in this league they are things like
+ * "Punt Intended" and "Ruiz's Onside Bandits" — which tell a commissioner
+ * nothing about who they belong to. The username is stable and is what people
+ * actually recognise each other by. The team name stays underneath, because it
+ * is the thing they will see in the Sleeper app while filling this in.
+ *
+ * And a roster can hold more than one person. Co-managed teams are ordinary,
+ * and a co-owner whose number is not here is invisible to the bot: their texts
+ * fall outside the reply gate and go unanswered, with nothing to explain why.
+ */
 async function showRoster() {
   view('v-roster');
   const rows = $('roster-rows');
   rows.innerHTML = '<p class="muted small">Loading rosters…</p>';
+  REMOVED_MEMBER_IDS = [];
   try {
     const data = await api('GET', `/api/leagues/${CURRENT.id}/roster`);
     rows.innerHTML = '';
-    for (const r of data.rosters) {
-      const row = document.createElement('div');
-      row.className = 'roster-row';
-      row.innerHTML =
-        `<div class="rr-team"><strong></strong><span class="lg-meta"></span></div>` +
-        `<input class="rr-name" type="text" placeholder="Their name">` +
-        `<input class="rr-phone" type="tel" inputmode="tel" placeholder="Mobile number">`;
-      row.querySelector('strong').textContent = r.teamName || `Roster ${r.sleeperRosterId}`;
-      row.querySelector('.lg-meta').textContent = r.hasPhone ? 'number on file' : '';
-      row.querySelector('.rr-name').value = r.humanName || '';
-      if (r.hasPhone) row.querySelector('.rr-phone').placeholder = '•••• on file — type to replace';
-      row.dataset.userId = r.sleeperUserId;
-      row.dataset.rosterId = r.sleeperRosterId;
-      rows.appendChild(row);
-    }
+    for (const r of data.rosters) rows.appendChild(teamCard(r));
   } catch {
     rows.innerHTML = '<p class="msg-line err">Could not load rosters.</p>';
   }
 }
 
+/** Ids of co-owner rows the commissioner removed, sent on save. */
+let REMOVED_MEMBER_IDS = [];
+
+function ownerRow({ id, humanName, hasPhone, isPrimary }) {
+  const el = document.createElement('div');
+  el.className = 'rr-owner';
+  el.innerHTML =
+    `<input class="rr-name" type="text" placeholder="Their name">` +
+    `<input class="rr-phone" type="tel" inputmode="tel" placeholder="Mobile number">` +
+    `<button class="rr-remove" type="button" title="Remove this owner" aria-label="Remove this owner">×</button>`;
+
+  el.querySelector('.rr-name').value = humanName || '';
+  if (hasPhone) el.querySelector('.rr-phone').placeholder = '•••• on file — type to replace';
+  if (id) el.dataset.memberId = id;
+
+  // The primary is Sleeper's own owner of the roster. Removing it here would
+  // mean nothing — the next members:sync puts it straight back — so the control
+  // is not offered rather than offered and quietly ignored.
+  el.dataset.primary = isPrimary ? 'true' : 'false';
+  const remove = el.querySelector('.rr-remove');
+  if (isPrimary) remove.remove();
+  else remove.onclick = () => {
+    if (el.dataset.memberId) REMOVED_MEMBER_IDS.push(el.dataset.memberId);
+    el.remove();
+  };
+  return el;
+}
+
+function teamCard(r) {
+  const card = document.createElement('div');
+  card.className = 'roster-team';
+  card.dataset.userId = r.sleeperUserId || '';
+  card.dataset.rosterId = r.sleeperRosterId;
+  card.innerHTML =
+    `<div class="rt-head"><strong></strong><span class="lg-meta"></span></div>` +
+    `<div class="rt-owners"></div>` +
+    `<button class="rt-add" type="button">+ Add another owner</button>`;
+
+  // An unclaimed roster has neither label — roster 5 in this league has no
+  // owner on Sleeper at all. "Roster 5" is at least true.
+  card.querySelector('strong').textContent =
+    r.username || r.teamName || `Roster ${r.sleeperRosterId}`;
+  card.querySelector('.lg-meta').textContent =
+    r.username && r.teamName ? r.teamName : '';
+
+  const owners = card.querySelector('.rt-owners');
+  const existing = (r.owners && r.owners.length)
+    ? r.owners
+    : [{ isPrimary: Boolean(r.sleeperUserId), humanName: null, hasPhone: false }];
+  for (const o of existing) owners.appendChild(ownerRow(o));
+
+  card.querySelector('.rt-add').onclick = () => {
+    owners.appendChild(ownerRow({ isPrimary: false }));
+    owners.lastChild.querySelector('.rr-name').focus();
+  };
+  return card;
+}
+
 async function saveRoster(skip) {
   const members = [];
   if (!skip) {
-    for (const row of document.querySelectorAll('.roster-row')) {
-      const name = row.querySelector('.rr-name').value.trim();
-      const phone = row.querySelector('.rr-phone').value.trim();
-      if (!name && !phone) continue;   // untouched rows stay untouched
-      members.push({
-        sleeperUserId: row.dataset.userId,
-        sleeperRosterId: Number(row.dataset.rosterId),
-        humanName: name || null,
-        phone: phone || null,
-      });
+    for (const card of document.querySelectorAll('.roster-team')) {
+      const rosterId = Number(card.dataset.rosterId);
+      for (const row of card.querySelectorAll('.rr-owner')) {
+        const name = row.querySelector('.rr-name').value.trim();
+        const phone = row.querySelector('.rr-phone').value.trim();
+        if (!name && !phone) continue;   // untouched rows stay untouched
+
+        const isPrimary = row.dataset.primary === 'true';
+        members.push({
+          // Only the primary carries a Sleeper account. A co-owner has none,
+          // which is exactly why the server keys this on the roster.
+          sleeperUserId: isPrimary ? (card.dataset.userId || null) : null,
+          sleeperRosterId: rosterId,
+          humanName: name || null,
+          phone: phone || null,
+        });
+      }
     }
   }
 
@@ -308,13 +376,24 @@ async function saveRoster(skip) {
   say($('roster-msg'), 'Saving…');
   try {
     if (members.length) {
-      const { results } = await api('POST', `/api/leagues/${CURRENT.id}/members`, { members });
+      const { results } = await api('POST', `/api/leagues/${CURRENT.id}/members`,
+        { members, removedMemberIds: REMOVED_MEMBER_IDS });
       const bad = results.filter(r => r.outcome === 'bad_phone').length;
       if (bad) {
         say($('roster-msg'), `${bad} number${bad === 1 ? " wasn't" : "s weren't"} a valid mobile number — check and try again.`, 'err');
         $('save-roster').disabled = false;
         return;
       }
+      // A co-owner with a name and no number cannot be stored, and saying so
+      // beats dropping them silently — which is what the old code did to every
+      // co-owner, since it skipped anything without a Sleeper account.
+      const needPhone = results.filter(r => r.outcome === 'phone_required').length;
+      if (needPhone) {
+        say($('roster-msg'), `${needPhone} extra owner${needPhone === 1 ? ' needs a' : 's need'} mobile number — the bot recognises people by their number.`, 'err');
+        $('save-roster').disabled = false;
+        return;
+      }
+      REMOVED_MEMBER_IDS = [];
     }
     await api('POST', `/api/leagues/${CURRENT.id}/await-chat`);
     await refreshMe();

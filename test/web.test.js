@@ -100,7 +100,11 @@ const server = app.listen(0, async () => {
       const r = await call('GET', `/api/leagues/${leagueId}/roster`);
       rosters = r.body.rosters;
       assert.ok(rosters.length >= 2, rosters.length + ' rosters');
-      assert.ok(rosters.every(x => 'hasPhone' in x));
+      // Each roster now carries an owners LIST — a team can be co-managed, and
+      // the second person on it has no Sleeper account to key on.
+      assert.ok(rosters.every(x => Array.isArray(x.owners)), 'owners is a list');
+      assert.ok(rosters.every(x => 'username' in x && 'teamName' in x),
+        'the username and the team name are separate facts');
     });
 
     await it('binding two members advances the state', async () => {
@@ -111,7 +115,8 @@ const server = app.listen(0, async () => {
       const r = await call('POST', `/api/leagues/${leagueId}/members`, { members });
       assert.strictEqual(r.status, 200);
       const after = await call('GET', `/api/leagues/${leagueId}/roster`);
-      assert.strictEqual(after.body.rosters.filter(x => x.hasPhone).length, 2);
+      const withPhone = after.body.rosters.filter(x => x.owners.some(o => o.hasPhone));
+      assert.strictEqual(withPhone.length, 2);
       assert.strictEqual(after.body.league.state, 'members_bound');
     });
 

@@ -293,8 +293,22 @@ async function upsertLeague({ name, sleeperLeagueId, provider = 'sendblue', chat
  * @returns { member, outcome, existing }
  *   outcome: 'bound' | 'unchanged' | 'rejected_phone_taken' | 'rejected_team_taken'
  */
-async function bindMember(leagueId, { phone, sleeperUserId, sleeperRosterId, displayName, boundBy = 'cli', boundVia = 'manual', force = false }) {
+async function bindMember(leagueId, { phone, sleeperUserId, sleeperRosterId, displayName,
+                                      username = null, teamName = null,
+                                      boundBy = 'cli', boundVia = 'manual', force = false }) {
   const normalized = normalizePhone(phone);
+
+  /*
+   * Automation may refresh Sleeper's labels. It may never touch the human name.
+   *
+   * members:sync used to call this once a night with the TEAM name as
+   * displayName, so a commissioner typed "Marcus" and woke up to a bot calling
+   * him "Big Yardage" in every recap. The guard lives here rather than at the call
+   * site because there is more than one caller and only one of them is a
+   * person.
+   */
+  const fromAutomation = boundVia === 'legacy' || boundVia === 'sync';
+  if (fromAutomation) displayName = null;
 
   const { rows: existingRows } = await query(
     `select * from members where league_id = $1 and (phone = $2 or sleeper_user_id = $3)`,
@@ -304,16 +318,27 @@ async function bindMember(leagueId, { phone, sleeperUserId, sleeperRosterId, dis
   const byPhone = existingRows.find(r => r.phone === normalized);
   const byUser = existingRows.find(r => r.sleeper_user_id && r.sleeper_user_id === sleeperUserId);
 
-  // Already exactly this pairing — a name update is fine.
+  /*
+   * Already exactly this pairing — refresh the labels and leave the binding be.
+   *
+   * The Sleeper columns have to be updated HERE and not only in the insert
+   * below. This branch returns early, and the nightly sync hits it on every run
+   * for every member who has not changed teams — which is nearly all of them.
+   * Updating them only in the insert meant sleeper_username and team_name were
+   * written exactly once, at first bind, and then never refreshed again.
+   */
   if (byPhone && byPhone.sleeper_user_id === sleeperUserId) {
-    if (displayName && displayName !== byPhone.display_name) {
-      const { rows } = await query(
-        'update members set display_name = $2 where id = $1 returning *',
-        [byPhone.id, displayName]
-      );
-      return { member: rows[0], outcome: 'unchanged', existing: byPhone };
-    }
-    return { member: byPhone, outcome: 'unchanged', existing: byPhone };
+    const nextName = (displayName && displayName !== byPhone.display_name)
+      ? displayName : byPhone.display_name;
+    const { rows } = await query(
+      `update members
+          set display_name     = $2,
+              sleeper_username = coalesce($3, sleeper_username),
+              team_name        = coalesce($4, team_name)
+        where id = $1 returning *`,
+      [byPhone.id, nextName, username, teamName]
+    );
+    return { member: rows[0], outcome: 'unchanged', existing: byPhone };
   }
 
   if (!force) {
@@ -336,16 +361,19 @@ async function bindMember(leagueId, { phone, sleeperUserId, sleeperRosterId, dis
 
   const { rows } = await query(
     `insert into members (league_id, phone, sleeper_user_id, sleeper_roster_id, display_name,
-                          bound_at, bound_by, bound_via)
-     values ($1,$2,$3,$4,$5, now(), $6, $7)
+                          sleeper_username, team_name, bound_at, bound_by, bound_via)
+     values ($1,$2,$3,$4,$5,$6,$7, now(), $8, $9)
      on conflict (league_id, phone) where phone is not null
      do update set sleeper_user_id   = excluded.sleeper_user_id,
                    sleeper_roster_id = excluded.sleeper_roster_id,
                    display_name      = coalesce(excluded.display_name, members.display_name),
+                   -- Sleeper owns these two, so the freshest value wins.
+                   sleeper_username  = coalesce(excluded.sleeper_username, members.sleeper_username),
+                   team_name         = coalesce(excluded.team_name, members.team_name),
                    bound_at = now(), bound_by = excluded.bound_by, bound_via = excluded.bound_via
      returning *`,
     [leagueId, normalized, sleeperUserId || null, sleeperRosterId ?? null,
-     displayName || null, boundBy, boundVia]
+     displayName || null, username, teamName, boundBy, boundVia]
   );
   return { member: rows[0], outcome: force && byPhone ? 'rebound' : 'bound', existing: byPhone || byUser || null };
 }
@@ -371,7 +399,7 @@ async function recordClaim({ leagueId, phone, claimedText, matchedUser, matchedT
 async function boundPhones(leagueId) {
   const { rows } = await query(
     `select phone from members
-     where league_id = $1 and phone is not null and sleeper_user_id is not null`,
+     where league_id = $1 and phone is not null and sleeper_roster_id is not null`,
     [leagueId]
   );
   return new Set(rows.map(r => r.phone));

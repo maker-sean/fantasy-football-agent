@@ -150,6 +150,13 @@ function rosterOwners(snapshotPayload) {
     return {
       sleeperUserId: r.owner_id,
       sleeperRosterId: r.roster_id,
+      // Two separate facts, kept separate. Collapsing them into one label is
+      // what let the nightly sync overwrite people's real names with their team
+      // names — see 0017_member_labels.sql.
+      username: u?.display_name || u?.username || null,
+      teamName: u?.metadata?.team_name || null,
+      // Retained for callers that just want something printable. It is NOT a
+      // person's name and must never be written to members.display_name.
       displayName: u?.metadata?.team_name || u?.display_name || u?.username || null,
     };
   });

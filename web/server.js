@@ -496,21 +496,44 @@ app.get('/api/leagues/:leagueId/roster', requireAccount, loadLeague, wrap(async 
   const { rows: members } = await db.query(
     'select * from members where league_id = $1', [req.league.id]
   );
-  const byUser = new Map(members.map(m => [m.sleeper_user_id, m]));
+
+  /*
+   * Grouped by ROSTER, not by Sleeper user.
+   *
+   * A roster can hold more than one person — co-managed teams are ordinary in
+   * real leagues — and a co-owner has no Sleeper account of their own to key
+   * on, so keying this map by sleeper_user_id could only ever find the primary.
+   */
+  const byRoster = new Map();
+  for (const m of members) {
+    if (m.sleeper_roster_id == null) continue;
+    if (!byRoster.has(m.sleeper_roster_id)) byRoster.set(m.sleeper_roster_id, []);
+    byRoster.get(m.sleeper_roster_id).push(m);
+  }
 
   res.json({
     league: { id: req.league.id, name: req.league.name, state: req.league.onboarding_state },
     rosters: owners.map(o => {
-      const m = byUser.get(o.sleeperUserId);
+      const rows = (byRoster.get(o.sleeperRosterId) || [])
+        // Primary first — the one Sleeper says owns the roster.
+        .sort((a, b) => (a.sleeper_user_id ? 0 : 1) - (b.sleeper_user_id ? 0 : 1));
+
       return {
         sleeperUserId: o.sleeperUserId,
         sleeperRosterId: o.sleeperRosterId,
-        teamName: o.displayName,
-        humanName: m?.display_name || null,
-        // Never return the stored number. The commissioner typed it; echoing it
-        // back to any future session is a needless way to leak it.
-        hasPhone: Boolean(m?.phone),
-        locked: Boolean(m?.locked),
+        // Both labels, separately. The team name is a joke that changes
+        // mid-season; the username is how you actually tell rosters apart.
+        username: o.username,
+        teamName: o.teamName,
+        owners: rows.map(m => ({
+          id: m.id,
+          humanName: m.display_name || null,
+          // Never return the stored number. The commissioner typed it; echoing
+          // it back to any future session is a needless way to leak it.
+          hasPhone: Boolean(m.phone),
+          locked: Boolean(m.locked),
+          isPrimary: Boolean(m.sleeper_user_id),
+        })),
       };
     }),
   });
@@ -518,34 +541,118 @@ app.get('/api/leagues/:leagueId/roster', requireAccount, loadLeague, wrap(async 
 
 app.post('/api/leagues/:leagueId/members', requireAccount, loadLeague, wrap(async (req, res) => {
   const entries = Array.isArray(req.body?.members) ? req.body.members : [];
-  if (!entries.length) return res.status(400).json({ error: 'no_members' });
+  const removalsAsked = Array.isArray(req.body?.removedMemberIds) ? req.body.removedMemberIds : [];
+  // A save can be nothing BUT removals — dropping the only co-owner on a team
+  // whose name and number are already correct submits no member entries at all,
+  // because untouched rows are deliberately skipped by the form.
+  if (!entries.length && !removalsAsked.length) return res.status(400).json({ error: 'no_members' });
+
+  /*
+   * Sleeper's labels for each roster, fetched once for the whole save.
+   *
+   * Without this the columns stay null until members:sync runs overnight, and
+   * everything that identifies a person in the meantime — the roll call, the
+   * first recap — has only what the commissioner typed. One call per save is a
+   * fair price for the league being legible on day one rather than day two.
+   *
+   * A Sleeper outage must not block onboarding, so a failure here leaves the
+   * labels null and the save proceeds. The nightly sync fills them in later.
+   */
+  const labels = new Map();
+  const rosterOfUser = new Map();
+  try {
+    const snap = await sleeper.weekSnapshot(req.league.sleeper_league_id, 1);
+    for (const o of sleeper.rosterOwners(snap)) {
+      labels.set(o.sleeperRosterId, { username: o.username, teamName: o.teamName });
+      if (o.sleeperUserId) rosterOfUser.set(o.sleeperUserId, o.sleeperRosterId);
+    }
+  } catch (err) {
+    console.warn('[roster] could not read Sleeper labels, saving without them:', err.message);
+  }
 
   const results = [];
+
   for (const e of entries) {
-    if (!e.sleeperUserId) continue;
-    const phone = e.phone ? db.normalizePhone(e.phone) : null;
-    if (e.phone && !/^\+\d{10,15}$/.test(phone || '')) {
-      results.push({ sleeperUserId: e.sleeperUserId, outcome: 'bad_phone' });
+    // Keyed on the ROSTER now. A co-owner has no Sleeper account, so the old
+    // `if (!e.sleeperUserId) continue` skipped them in silence — they would
+    // vanish on save with the form still showing them.
+    /*
+     * The roster is the key, but a caller that names only a Sleeper user still
+     * works — Sleeper already knows which roster that account owns, so deriving
+     * it beats rejecting a request we have the answer to. Only a co-owner, who
+     * has no Sleeper account at all, genuinely has to supply the roster id.
+     */
+    const rosterId = e.sleeperRosterId ?? rosterOfUser.get(e.sleeperUserId) ?? null;
+    if (rosterId == null) {
+      results.push({ sleeperUserId: e.sleeperUserId || null, outcome: 'no_roster' });
       continue;
     }
+
+    const isPrimary = Boolean(e.sleeperUserId);
+    const phone = e.phone ? db.normalizePhone(e.phone) : null;
+
+    if (e.phone && !/^\+\d{10,15}$/.test(phone || '')) {
+      results.push({ sleeperRosterId: rosterId, outcome: 'bad_phone' });
+      continue;
+    }
+
+    /*
+     * A co-owner without a number cannot exist, and the reason is structural
+     * rather than a rule we chose: members are keyed on (league_id, phone), so
+     * a phoneless second row on a roster has nothing to conflict on and would
+     * be inserted afresh on every save. It would also be pointless — the entire
+     * purpose of a co-owner row is so the bot recognises that person's texts.
+     */
+    if (!isPrimary && !phone) {
+      results.push({ sleeperRosterId: rosterId, outcome: 'phone_required' });
+      continue;
+    }
+
     const out = await db.bindMember(req.league.id, {
       phone,
-      sleeperUserId: e.sleeperUserId,
-      sleeperRosterId: e.sleeperRosterId,
+      sleeperUserId: e.sleeperUserId || null,
+      sleeperRosterId: rosterId,
       displayName: e.humanName || null,
+      // Both owners of a co-managed team carry the same Sleeper labels — the
+      // labels describe the ROSTER, not the person.
+      username: labels.get(rosterId)?.username || null,
+      teamName: labels.get(rosterId)?.teamName || null,
       boundBy: `account:${req.account.id}`,
       boundVia: 'onboarding',
       // The commissioner is the authority for their own league — this is the
       // override path that exists precisely so a mistyped number is fixable.
       force: true,
     });
-    results.push({ sleeperUserId: e.sleeperUserId, outcome: out.outcome });
+    results.push({ sleeperRosterId: rosterId, isPrimary, outcome: out.outcome });
+  }
+
+  /*
+   * Co-owners removed in the form, removed here — by id, not by omission.
+   *
+   * Reconciling by omission was the first attempt and it is subtly wrong: a
+   * team whose name and number are already correct submits no entry at all
+   * (untouched rows are skipped), so its roster never appears in the payload
+   * and a removal on that team would silently do nothing.
+   *
+   * Scoped hard to sleeper_user_id IS NULL and to this league, so this can only
+   * delete rows it created. A bad id must never be able to unbind the person
+   * Sleeper says owns the roster.
+   */
+  const removedIds = removalsAsked.filter(id => /^[0-9a-f-]{36}$/i.test(String(id)));
+  let removed = 0;
+  if (removedIds.length) {
+    const { rowCount } = await db.query(
+      `delete from members
+        where league_id = $1 and sleeper_user_id is null and id = any($2::uuid[])`,
+      [req.league.id, removedIds]
+    );
+    removed = rowCount;
   }
 
   if (req.league.onboarding_state === 'league_linked') {
     await db.setOnboardingState(req.league.id, 'members_bound');
   }
-  res.json({ results });
+  res.json({ results, removed });
 }));
 
 // --- onboarding step 6: prove the bot is in the group chat ------------------
