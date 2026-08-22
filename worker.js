@@ -130,7 +130,10 @@ async function generateReply({ burst, league }) {
   try {
     const { leagueContext } = require('./src/context');
     const { generateAnswer } = require('./src/answer');
-    const ctx = await leagueContext(league.id);
+    // Whose roster to pull projections for. The asker's — see context.js on
+    // why it is not everybody's.
+    const asker = burst.map(m => m.senderId).filter(Boolean)[0] || null;
+    const ctx = await leagueContext(league.id, { forPhone: asker });
 
     const { rows: recent } = await db.query(
       `select sender_phone, direction, body from messages

@@ -15,6 +15,7 @@
 
 const db = require('./db');
 const { selfFacts } = require('./selfknowledge');
+const sleeper = require('./sleeper');
 
 const round = n => Math.round(Number(n || 0) * 100) / 100;
 
@@ -158,6 +159,46 @@ async function leagueContext(leagueId, opts = {}) {
     });
   }
 
+  /*
+   * Sleeper's projections for the person who asked.
+   *
+   * THEIRS, not the league's. The full slate is 3,297 rows and two megabytes,
+   * and the archetypal question — "who should I start" — is about one roster.
+   * Fifteen players is a few hundred characters; everybody's is a prompt nobody
+   * can afford and a model nobody can steer.
+   *
+   * The consequence is worth stating in the block itself: asked about somebody
+   * else's player the bot has no number, and must say so rather than reach for
+   * one.
+   */
+  if (opts.forPhone && latest?.payload?.rosters) {
+    try {
+      const me = members.find(m => m.phone === db.normalizePhone(opts.forPhone));
+      const roster = me && (latest.payload.rosters || [])
+        .find(r => r.roster_id === me.sleeper_roster_id);
+
+      if (roster?.players?.length) {
+        const state = await sleeper.state();
+        const proj = await sleeper.projections(state.season, state.week);
+        const starters = new Set(roster.starters || []);
+        ctx.projections = {
+          season: state.season,
+          week: state.week,
+          rows: roster.players
+            .map(id => {
+              const p = proj.get(String(id));
+              return p ? { ...p, starting: starters.has(id) } : null;
+            })
+            .filter(Boolean)
+            .sort((a, b) => b.points - a.points),
+        };
+      }
+    } catch (err) {
+      // Projections are a bonus. Losing them must not cost the answer.
+      console.error('[context] projections failed:', err.message);
+    }
+  }
+
   return ctx;
 }
 
@@ -224,6 +265,18 @@ function contextBlock(ctx) {
     );
     L.push('');
     L.push(require('./history').careerBlock(ctx.career, names));
+  }
+
+  if (ctx.projections?.rows?.length) {
+    L.push('');
+    L.push(`SLEEPER PROJECTIONS for the person asking, week ${ctx.projections.week} ` +
+           `(${ctx.projections.season}). These are SLEEPER'S numbers — quote them as Sleeper's, ` +
+           `never as your own, and never adjust them:`);
+    for (const p of ctx.projections.rows) {
+      L.push(`  ${p.starting ? '*' : ' '} ${p.name} (${p.position}, ${p.team}` +
+             `${p.opponent ? ' vs ' + p.opponent : ''}) ${p.points}`);
+    }
+    L.push('  * = currently in their starting lineup. You have projections for NOBODY ELSE\'S roster.');
   }
 
   if (ctx.unknowns.length) {

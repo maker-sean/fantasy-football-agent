@@ -170,7 +170,55 @@ function rosterOwners(snapshotPayload) {
   });
 }
 
+/*
+ * Sleeper's projections. Undocumented, live, and NOT under /v1 — so this cannot
+ * go through get(), which prepends the versioned base.
+ *
+ * Cached in process for half an hour. The full slate is 3,297 rows and two
+ * megabytes; fetching that per question would be absurd, and the numbers move
+ * a few times a week rather than a few times a minute. A long-lived worker
+ * pays for it once.
+ */
+const PROJ_TTL_MS = Number(process.env.PROJECTIONS_TTL_MS || 30 * 60 * 1000);
+const projCache = new Map();
+
+async function projections(season, week) {
+  const key = `${season}:${week}`;
+  const hit = projCache.get(key);
+  if (hit && Date.now() - hit.at < PROJ_TTL_MS) return hit.byPlayer;
+
+  const pos = ['QB', 'RB', 'WR', 'TE', 'K', 'DEF'].map(p => `position[]=${p}`).join('&');
+  const url = `https://api.sleeper.app/projections/nfl/${season}/${week}`
+            + `?season_type=regular&${pos}&order_by=pts_ppr`;
+
+  const res = await fetch(url, { headers: { accept: 'application/json' } });
+  if (!res.ok) {
+    const err = new Error(`Sleeper projections ${season}/${week} -> ${res.status}`);
+    err.status = res.status;
+    require('./errorlog').record({
+      system: 'sleeper', operation: 'projections', status: res.status, message: err.message,
+    });
+    throw err;
+  }
+
+  const byPlayer = new Map();
+  for (const row of await res.json()) {
+    const pts = row?.stats?.pts_ppr;
+    if (!row.player_id || pts == null) continue;
+    byPlayer.set(String(row.player_id), {
+      name: [row.player?.first_name, row.player?.last_name].filter(Boolean).join(' '),
+      position: row.player?.position || null,
+      team: row.team || null,
+      opponent: row.opponent || null,
+      points: Math.round(pts * 10) / 10,
+    });
+  }
+  projCache.set(key, { at: Date.now(), byPlayer });
+  return byPlayer;
+}
+
 module.exports = {
+  projections,
   BASE, get, state, league, rosters, users, matchups, transactions,
   allPlayers, weekSnapshot, rosterOwners, draft,
 };
