@@ -560,6 +560,17 @@ async function startJob(job) {
 }
 
 async function finishJob(id, status, detail = {}) {
+  // A scheduled job that failed is the class of error nobody is watching when
+  // it happens — it runs at 9am on a Tuesday and the only trace was a row in
+  // job_runs nobody queries.
+  if (status === 'error') {
+    require('./errorlog').record({
+      system: 'worker',
+      operation: detail.job || 'job',
+      message: detail.error || 'job failed',
+      detail,
+    });
+  }
   await query(
     `update job_runs set status = $2, detail = $3, finished_at = now() where id = $1`,
     [id, status, detail]

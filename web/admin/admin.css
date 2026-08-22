@@ -191,3 +191,19 @@
 .tbl td.sortable { cursor: pointer; user-select: none; white-space: nowrap; }
 .tbl td.sortable:hover { color: var(--text); }
 .tbl td.sorted { color: var(--turf); }
+
+/* --- alerts ---------------------------------------------------------------
+   Shown only when there is something to do. A standing "all green" panel is
+   wallpaper within a week, and it occupies the exact spot your eye checks for
+   trouble while reporting none. */
+.alerts { display: flex; flex-direction: column; gap: 8px; margin-bottom: 18px; }
+.alert {
+  padding: 10px 14px; border-radius: 7px; font-size: .88rem;
+  border: 1px solid; line-height: 1.4;
+}
+.alert.bad  { background: rgba(210,112,95,.10); border-color: rgba(210,112,95,.45); color: #e8a396; }
+.alert.warn { background: rgba(201,162,39,.09);  border-color: rgba(201,162,39,.40);  color: #d8bd63; }
+
+/* Error bars are red, traffic bars are green. Same shape, opposite meaning —
+   they must never be mistaken for each other at a glance. */
+.spark .bar.bad { background: #d2705f; }

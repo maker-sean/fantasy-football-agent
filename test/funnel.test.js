@@ -27,6 +27,7 @@ const it = async (n, f) => {
 
 const P1 = '+15558800001';   // came through the website with a code
 const P2 = '+15558800002';   // texted the number cold
+let LEAGUE_ID = null;
 
 (async () => {
   // A tiny known world, torn down at the end. Counts are compared as DELTAS
@@ -132,10 +133,89 @@ const P2 = '+15558800002';   // texted the number cold
         'no ip, cookie, user agent or session id may appear here');
     });
 
+    console.log('\nthe five that change a decision');
+
+    await it('a failed send is counted — messages only ever holds ones that worked', async () => {
+      const { rows: [lg] } = await db.query(
+        `insert into leagues (name, provider, onboarding_state) values ('Ops Test','sendblue','live') returning *`);
+      LEAGUE_ID = lg.id;
+      await db.query(`insert into send_log (league_id, chat_id, ok, status) values ($1,'c',true,'QUEUED')`, [lg.id]);
+      await db.query(`insert into send_log (league_id, chat_id, ok, error) values ($1,'c',false,'ERROR 403 not authorized')`, [lg.id]);
+      const m = await observe.opsMetrics({ days: 7 });
+      assert.ok(m.delivery.failed >= 1, 'the failure is visible');
+      assert.ok(m.delivery.lastError.includes('403'), 'and says why');
+      assert.ok(m.delivery.failureRate > 0, 'as a rate, not just a count');
+    });
+
+    await it('opt-out is a RATE against reachable people, not a bare count', async () => {
+      // Two STOPs is nothing across a thousand and a catastrophe across twenty.
+      // Carriers act on the rate.
+      const m = await observe.opsMetrics({ days: 7 });
+      assert.ok('rate' in m.optOut && 'reachable' in m.optOut);
+      if (m.optOut.reachable === 0) assert.strictEqual(m.optOut.rate, null, 'no divide by zero');
+    });
+
+    await it('adoption counts distinct PEOPLE, not messages', async () => {
+      // One enthusiast sending six texts is not six people, and the difference
+      // is the whole signal.
+      for (let i = 0; i < 4; i++) {
+        await db.query(
+          `insert into messages (league_id, provider, direction, chat_id, sender_phone, is_group, body)
+           values ($1,'sendblue','inbound','c','+15557770001',true,'again')`, [LEAGUE_ID]);
+      }
+      await db.query(
+        `insert into messages (league_id, provider, direction, chat_id, sender_phone, is_group, body)
+         values ($1,'sendblue','inbound','c','+15557770002',true,'me too')`, [LEAGUE_ID]);
+      const m = await observe.opsMetrics({ days: 7 });
+      const lg = m.leagues.find(l => l.id === LEAGUE_ID);
+      assert.strictEqual(lg.humans, 2, 'five messages from two people is two');
+    });
+
+    await it('a league nobody has ever spoken to reads as never, not as zero days', async () => {
+      const { rows: [quiet] } = await db.query(
+        `insert into leagues (name, provider, onboarding_state) values ('Never Spoken','sendblue','live') returning *`);
+      const m = await observe.opsMetrics({ days: 7 });
+      const lg = m.leagues.find(l => l.id === quiet.id);
+      assert.strictEqual(lg.daysQuiet, null, 'never is not the same as today');
+      assert.strictEqual(lg.humans, 0);
+      await db.query('delete from leagues where id = $1', [quiet.id]);
+    });
+
+    await it('cost accumulates tokens and survives having no calls', async () => {
+      // Deltas, not absolutes. Asserting perLeague === null only holds on an
+      // empty table, so the first version of this passed alone and failed in a
+      // full run — a test that depends on global state is worse than no test,
+      // because it fails for a reason unrelated to what it claims to check.
+      const before = await observe.opsMetrics({ days: 7 });
+      await db.query(
+        `insert into model_usage (league_id, kind, model, input_tokens, output_tokens)
+         values ($1,'reply','m',1000,200)`, [LEAGUE_ID]);
+      const after = await observe.opsMetrics({ days: 7 });
+      assert.strictEqual(after.cost.inputTokens - before.cost.inputTokens, 1000);
+      assert.strictEqual(after.cost.outputTokens - before.cost.outputTokens, 200);
+      assert.strictEqual(after.cost.calls - before.cost.calls, 1);
+    });
+
+    await it('no model calls at all reports no average rather than zero', async () => {
+      // A brand new league must not sort as the cheapest one.
+      const empty = await observe.opsMetrics({ days: 0 });
+      assert.strictEqual(empty.cost.perLeague, null);
+    });
+
   } catch (e) {
     console.error('ERR', e.message);
     process.exitCode = 1;
   } finally {
+    if (LEAGUE_ID) {
+      // league_id is ON DELETE SET NULL on all three, so dropping the league
+      // orphans these rows rather than removing them — and an orphan still
+      // counts in every total on the operator board.
+      await db.query('delete from messages where league_id = $1', [LEAGUE_ID]);
+      await db.query('delete from model_usage where league_id = $1', [LEAGUE_ID]);
+      await db.query('delete from send_log where league_id = $1', [LEAGUE_ID]);
+      await db.query('delete from leagues where id = $1', [LEAGUE_ID]);
+    }
+    await db.query(`delete from send_log where chat_id = 'c'`);
     await db.query('delete from signups where phone in ($1,$2)', [P1, P2]);
     await db.query(`delete from signup_codes where code in ('TST1','TST2')`);
     console.log(`\n${pass} passing`);

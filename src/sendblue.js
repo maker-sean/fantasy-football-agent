@@ -122,7 +122,54 @@ class SendblueProvider extends MessagingProvider {
     if (this.fromNumber) body.from_number = this.fromNumber;
     if (opts.statusCallback) body.status_callback = opts.statusCallback;
     if (opts.sendStyle) body.send_style = opts.sendStyle;
-    return this.request('POST', path, body);
+    return this.recorded(chatId, isGroup, opts, () => this.request('POST', path, body));
+  }
+
+  /*
+   * Run a send and record what happened, either way.
+   *
+   * Here rather than at the call sites because sendUnchecked is the single
+   * funnel every send passes through, and the call sites are the problem: each
+   * one catches failure differently and the signup path threw its reason away
+   * entirely. One place, one row per attempt.
+   *
+   * The recording never changes the outcome. It is awaited so the row exists
+   * before the caller reacts, but a failure to write it is swallowed — losing
+   * a metric must not turn a working send into a failed one, and it must not
+   * turn a failed send into a different error than the one that happened.
+   */
+  async recorded(chatId, isGroup, opts, run) {
+    const row = { chatId, isGroup, leagueId: opts.leagueId || null };
+    try {
+      const res = await run();
+      // Sendblue can answer HTTP 200 with {"status":"ERROR"}; request() already
+      // throws on that, so anything arriving here succeeded.
+      await this.logSend({ ...row, ok: true, status: res?.status || 'accepted' });
+      return res;
+    } catch (err) {
+      await this.logSend({ ...row, ok: false, status: null, error: err.message });
+      // send_log answers "how many sends failed"; error_log answers "what is
+      // failing across the whole system right now". Same event, two questions.
+      require('./errorlog').record({
+        system: 'sendblue', operation: isGroup ? 'send-group' : 'send',
+        message: err.message, leagueId: row.leagueId,
+      });
+      throw err;
+    }
+  }
+
+  async logSend({ chatId, isGroup, leagueId, ok, status, error }) {
+    try {
+      const db = require('./db');
+      await db.query(
+        `insert into send_log (league_id, chat_id, is_group, ok, status, error)
+         values ($1,$2,$3,$4,$5,$6)`,
+        [leagueId, chatId || null, Boolean(isGroup), ok, status || null,
+         error ? String(error).slice(0, 500) : null]
+      );
+    } catch (err) {
+      console.error('[sendblue] could not record send outcome:', err.message);
+    }
   }
 
   /** Create a group by sending its first message to a list of numbers. */
@@ -131,7 +178,10 @@ class SendblueProvider extends MessagingProvider {
     const body = { numbers, content: text };
     if (this.fromNumber) body.from_number = this.fromNumber;
     if (opts.statusCallback) body.status_callback = opts.statusCallback;
-    return this.request('POST', '/api/send-group-message', body);
+    // Creating a group is a send too, and it is the one most likely to fail in
+    // a way nobody notices — there is no thread yet to look at.
+    return this.recorded(numbers.join(','), true, opts,
+      () => this.request('POST', '/api/send-group-message', body));
   }
 
   /** Free tier caps at 10 verified contacts; these manage that list. */

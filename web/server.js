@@ -23,6 +23,7 @@ const db = require('../src/db');
 const observe = require('../src/observe');
 const flags = require('../src/flags');
 const sleeper = require('../src/sleeper');
+const errorlog = require('../src/errorlog');
 
 const app = express();
 const PORT = Number(process.env.PORT || 3000);
@@ -36,6 +37,32 @@ app.use(express.json({
   verify: (req, _res, buf) => { req.rawBody = buf.toString('utf8'); },
 }));
 app.disable('x-powered-by');
+
+/*
+ * Record every 4xx and 5xx this API returns.
+ *
+ * On the response FINISHING rather than by wrapping res.json, so it catches
+ * every path — handlers that return early, express's own 404, the error
+ * handler at the bottom — without any of them having to remember.
+ *
+ * 401 on /api/me is excluded: an expired session hitting a page refresh is the
+ * single most common 401 in the system and it is not a failure of anything. It
+ * would bury the 400s that are.
+ */
+app.use((req, res, next) => {
+  res.on('finish', () => {
+    if (res.statusCode < 400) return;
+    if (res.statusCode === 401 && req.path === '/api/me') return;
+    if (!req.path.startsWith('/api/') && !req.path.startsWith('/webhooks/')) return;
+    errorlog.record({
+      system: 'web',
+      operation: `${req.method} ${req.route?.path || req.path}`,
+      status: res.statusCode,
+      message: res.locals.errorMessage || `${res.statusCode} on ${req.method} ${req.path}`,
+    });
+  });
+  next();
+});
 
 /*
  * Render terminates TLS and forwards to this process over plain HTTP, so
@@ -1051,6 +1078,18 @@ app.get('/api/admin/thread', admin, wrap(async (req, res) => {
   res.json({ chatId, messages: await observe.conversation(chatId, { limit: 300 }) });
 }));
 
+/** Delivery, opt-outs, adoption, staleness, cost. The five that change a decision. */
+app.get('/api/admin/ops', admin, wrap(async (req, res) => {
+  const days = Math.min(Math.max(Number(req.query.days) || 7, 1), 90);
+  res.json(await observe.opsMetrics({ days }));
+}));
+
+/** Errors by system, by operation, and over time. */
+app.get('/api/admin/errors', admin, wrap(async (req, res) => {
+  const days = Math.min(Math.max(Number(req.query.days) || 7, 1), 90);
+  res.json(await observe.errors({ days }));
+}));
+
 app.get('/api/admin/leagues', admin, wrap(async (_req, res) => {
   res.json({ leagues: await observe.leagueList({ scope: null }) });
 }));
@@ -1103,8 +1142,18 @@ app.post('/webhooks/linq', wrap(async (req, res) => {
 
 // ---------------------------------------------------------------- errors ----
 
-app.use((err, _req, res, _next) => {
+app.use((err, req, res, _next) => {
   console.error('[web] unhandled:', err.message);
+  // Stashed rather than recorded here, so the finish handler above writes ONE
+  // row with the real message instead of two rows saying different things.
+  res.locals.errorMessage = err.message;
+  errorlog.record({
+    system: 'web',
+    operation: `${req.method} ${req.path}`,
+    status: 500,
+    message: err.message,
+    detail: { stack: String(err.stack || '').split('\n').slice(0, 4).join('\n') },
+  });
   res.status(500).json({ error: 'server_error' });
 });
 

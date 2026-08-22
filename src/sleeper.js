@@ -17,6 +17,14 @@ async function get(path) {
   if (!res.ok) {
     const err = new Error(`Sleeper GET ${path} -> ${res.status}`);
     err.status = res.status;
+    // Recorded at the single funnel every Sleeper call goes through. Many
+    // callers catch and continue by design — a missing snapshot is degraded,
+    // not broken — which is exactly why the failure has to be written down
+    // somewhere before it is swallowed.
+    require('./errorlog').record({
+      system: 'sleeper', operation: `GET ${path.split('/').slice(0, 3).join('/')}`,
+      status: res.status, message: err.message,
+    });
     throw err;
   }
   return res.json();

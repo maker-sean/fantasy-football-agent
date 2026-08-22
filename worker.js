@@ -144,9 +144,31 @@ async function generateReply({ burst, league }) {
 
     const out = await generateAnswer(asked, ctx, { recentChat });
     console.log(`[reply] generated ${out.text.split(/\s+/).length} words`);
+
+    /*
+     * Record what the answer cost.
+     *
+     * generateAnswer returns usage in meta and this function used to return
+     * out.text alone, so every conversational reply's tokens were discarded at
+     * exactly the point they were in hand. Recap tokens survived in
+     * recap_drafts.usage; replies left no trace at all, and cost per league
+     * cannot be reconstructed after the fact.
+     */
+    const u = out.meta?.usage;
+    if (u) {
+      db.query(
+        `insert into model_usage (league_id, kind, model, input_tokens, output_tokens)
+         values ($1,'reply',$2,$3,$4)`,
+        [league.id, out.meta.model || null, u.input_tokens || 0, u.output_tokens || 0]
+      ).catch(err => console.error('[reply] could not record usage:', err.message));
+    }
     return out.text;
   } catch (err) {
     console.error('[reply] answer failed:', err.message);
+    require('./src/errorlog').record({
+      system: 'anthropic', operation: 'generateAnswer',
+      message: err.message, leagueId: league?.id || null,
+    });
     return null;   // silence beats a broken reply in a live group
   }
 }

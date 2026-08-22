@@ -417,5 +417,209 @@ async function conversation(chatId, { limit = 300 } = {}) {
   return rows;
 }
 
+/**
+ * The five numbers that either kill this or predict it.
+ *
+ * Chosen because each one would change a decision. Total message counts and
+ * cumulative signups are deliberately absent: they rise whether or not the
+ * product works, and they crowd out the numbers that say it does not.
+ */
+async function opsMetrics({ days = 7 } = {}) {
+  const [deliver, optOut, engagement, cost] = await Promise.all([
+    /*
+     * 1. Delivery. The only place a FAILED send exists — messages holds sends
+     * that worked, so a failure rate computed from it is always zero.
+     */
+    db.query(
+      `select count(*) filter (where ok)::int        as ok,
+              count(*) filter (where not ok)::int    as failed,
+              (array_agg(error order by at desc) filter (where not ok))[1] as last_error,
+              max(at) filter (where not ok)          as last_failed_at
+         from send_log where at > now() - ($1 || ' days')::interval`,
+      [String(days)]
+    ),
+
+    /*
+     * 2. Opt-outs, as a RATE against people we can actually message. The
+     * absolute count is meaningless — two STOPs is nothing across a thousand
+     * and a catastrophe across twenty. Carriers act on the rate, without
+     * warning, so this has to be visible before they reach it.
+     */
+    db.query(
+      `select (select count(*) from suppressions where opted_out_at is not null
+                 and opted_in_at is null)::int                              as opted_out,
+              (select count(distinct phone) from members
+                where phone is not null and sleeper_roster_id is not null)::int as reachable`
+    ),
+
+    /*
+     * 3 & 4. Adoption and staleness, per league.
+     *
+     * DISTINCT humans, not message count. Message count is vanity and one
+     * enthusiastic person produces plenty of it; three different people
+     * addressing the bot in week three is a league that adopted it, and one is
+     * a novelty about to stop. days_quiet is the same fact from the other end
+     * and is the one that says who to call.
+     */
+    db.query(
+      `select l.id, l.name,
+              count(distinct m.sender_phone) filter (
+                where m.direction = 'inbound'
+                  and m.occurred_at > now() - ($1 || ' days')::interval)::int as humans,
+              max(m.occurred_at) filter (where m.direction = 'inbound')       as last_human_at
+         from leagues l
+         left join messages m on m.league_id = l.id
+        where l.onboarding_state = 'live'
+        group by l.id, l.name
+        order by last_human_at asc nulls first`,
+      [String(days)]
+    ),
+
+    // 5. Cost. Tokens, not dollars — the price per model changes and a stale
+    // multiplier baked in here would be worse than no number at all.
+    db.query(
+      `select coalesce(sum(input_tokens),0)::int  as input,
+              coalesce(sum(output_tokens),0)::int as output,
+              count(*)::int                       as calls,
+              count(distinct league_id)::int      as leagues
+         from model_usage where at > now() - ($1 || ' days')::interval`,
+      [String(days)]
+    ),
+  ]);
+
+  const d = deliver.rows[0];
+  const o = optOut.rows[0];
+  const c = cost.rows[0];
+  const attempts = d.ok + d.failed;
+
+  return {
+    days,
+    delivery: {
+      ok: d.ok,
+      failed: d.failed,
+      failureRate: attempts ? Math.round((d.failed / attempts) * 1000) / 10 : null,
+      lastError: d.last_error,
+      lastFailedAt: d.last_failed_at,
+    },
+    optOut: {
+      count: Number(o.opted_out),
+      reachable: Number(o.reachable),
+      // One decimal. Rounding 1.4% to 1% hides the difference between fine and
+      // a conversation with a carrier.
+      rate: Number(o.reachable)
+        ? Math.round((Number(o.opted_out) / Number(o.reachable)) * 1000) / 10
+        : null,
+    },
+    leagues: engagement.rows.map(r => ({
+      id: r.id,
+      name: r.name,
+      humans: r.humans,
+      daysQuiet: r.last_human_at
+        ? Math.floor((Date.now() - new Date(r.last_human_at)) / 86400000)
+        : null,
+    })),
+    cost: {
+      calls: c.calls,
+      leagues: c.leagues,
+      inputTokens: c.input,
+      outputTokens: c.output,
+      perLeague: c.leagues ? Math.round((c.input + c.output) / c.leagues) : null,
+    },
+  };
+}
+
+/**
+ * Errors, broken down by the thing that broke.
+ *
+ * By SYSTEM first, because the systems fail independently and need entirely
+ * different fixes: our own API returning 400s is a code problem, Sendblue
+ * failing is a configuration or account problem, Anthropic failing is a quota
+ * or outage, Sleeper failing is somebody else's outage that we ride out. A
+ * single "error count" mixes four unrelated situations into one number that
+ * cannot be acted on.
+ */
+async function errors({ days = 7 } = {}) {
+  const [bySystem, byOperation, series, recent, windows] = await Promise.all([
+    db.query(
+      `select system, status, count(*)::int as n, max(at) as last_at
+         from error_log where at > now() - ($1 || ' days')::interval
+        group by system, status order by n desc`,
+      [String(days)]
+    ),
+    db.query(
+      `select system, operation, status, count(*)::int as n,
+              (array_agg(message order by at desc))[1] as last_message,
+              max(at) as last_at
+         from error_log where at > now() - ($1 || ' days')::interval
+        group by system, operation, status order by n desc limit 25`,
+      [String(days)]
+    ),
+    // Bucketed by hour with the hours generated on the left, so a clean period
+    // is a run of zeros rather than a gap. A gap and a quiet spell look
+    // identical once they are drawn.
+    db.query(
+      `select date_trunc('hour', g) as hour,
+              count(e.id)::int as n
+         from generate_series(date_trunc('hour', now()) - interval '47 hours',
+                              date_trunc('hour', now()), interval '1 hour') g
+         left join error_log e on date_trunc('hour', e.at) = g
+        group by 1 order by 1`
+    ),
+    db.query(
+      `select at, system, operation, status, message
+         from error_log order by at desc limit 40`
+    ),
+
+    /*
+     * Client errors over short windows, and server errors kept apart.
+     *
+     * 4xx and 5xx are not the same event with different digits. A 400 is
+     * usually somebody sending us something malformed — often expected, often
+     * a client bug; a 500 is us falling over and is always ours. Summed
+     * together, one 500 hides in forty 400s on the day it matters.
+     *
+     * One query for all six numbers so the windows are read at a single
+     * instant and cannot disagree with each other.
+     */
+    db.query(
+      `select
+         count(*) filter (where status >= 400 and status < 500 and at > now() - interval '4 hours')::int  as c4h,
+         count(*) filter (where status >= 400 and status < 500 and at > now() - interval '12 hours')::int as c12h,
+         count(*) filter (where status >= 400 and status < 500 and at > now() - interval '24 hours')::int as c24h,
+         count(*) filter (where status >= 500 and at > now() - interval '4 hours')::int  as s4h,
+         count(*) filter (where status >= 500 and at > now() - interval '12 hours')::int as s12h,
+         count(*) filter (where status >= 500 and at > now() - interval '24 hours')::int as s24h
+       from error_log`
+    ),
+  ]);
+
+  const total = bySystem.rows.reduce((n, r) => n + r.n, 0);
+  return {
+    days,
+    total,
+    bySystem: bySystem.rows.map(r => ({
+      system: r.system, status: r.status, count: r.n, lastAt: r.last_at,
+    })),
+    byOperation: byOperation.rows.map(r => ({
+      system: r.system, operation: r.operation, status: r.status,
+      count: r.n, lastMessage: r.last_message, lastAt: r.last_at,
+    })),
+    series: series.rows.map(r => ({ hour: r.hour, count: r.n })),
+    recent: recent.rows,
+    windows: {
+      client: [
+        { hours: 4,  count: windows.rows[0].c4h },
+        { hours: 12, count: windows.rows[0].c12h },
+        { hours: 24, count: windows.rows[0].c24h },
+      ],
+      server: [
+        { hours: 4,  count: windows.rows[0].s4h },
+        { hours: 12, count: windows.rows[0].s12h },
+        { hours: 24, count: windows.rows[0].s24h },
+      ],
+    },
+  };
+}
+
 module.exports = { replyRate, decisionBreakdown, leagueList, thread, draftHistory, scoped,
-  signupTiles, visitsByHour, funnel, textFlow, conversations, conversation };
+  signupTiles, visitsByHour, funnel, textFlow, conversations, conversation, opsMetrics, errors };

@@ -362,7 +362,7 @@ function renderTextFlow(t) {
 
 /** Tabs. Nothing refetches — load() already has both halves in hand. */
 function selectTab(name) {
-  for (const t of ['signups', 'leagues', 'messages']) {
+  for (const t of ['signups', 'leagues', 'messages', 'errors']) {
     const on = t === name;
     $('tab-' + t).hidden = !on;
     const btn = $('tab-btn-' + t);
@@ -454,13 +454,207 @@ async function openConvo(chatId) {
   pane.scrollTop = pane.scrollHeight;
 }
 
+// ----------------------------------------------------------------- ops ----
+
+/*
+ * The alert strip.
+ *
+ * Rendered only when something needs doing. A permanent "all systems green"
+ * panel becomes wallpaper inside a week and stops being read, which makes it
+ * worse than nothing — it occupies the place your eye goes looking for trouble
+ * and reports none.
+ */
+const OPT_OUT_WARN = 1.0;   // percent. Carriers act somewhere above this.
+
+function renderOps(ops) {
+  const alerts = [];
+
+  if (ops.delivery.failed > 0) {
+    // First, always. A send that did not arrive is the failure that makes every
+    // other number on this page a lie.
+    alerts.push({
+      level: 'bad',
+      text: `${ops.delivery.failed} send${ops.delivery.failed === 1 ? '' : 's'} failed in the last ${ops.days} days` +
+            (ops.delivery.lastError ? ` — latest: ${ops.delivery.lastError}` : ''),
+    });
+  }
+  if (ops.optOut.rate !== null && ops.optOut.rate >= OPT_OUT_WARN) {
+    alerts.push({
+      level: 'bad',
+      text: `Opt-out rate is ${ops.optOut.rate}% (${ops.optOut.count} of ${ops.optOut.reachable}). Carriers act on this.`,
+    });
+  }
+  const stale = ops.leagues.filter(l => l.daysQuiet !== null && l.daysQuiet >= 14);
+  if (stale.length) {
+    alerts.push({
+      level: 'warn',
+      text: `${stale.length} live league${stale.length === 1 ? '' : 's'} ` +
+            `${stale.length === 1 ? 'has' : 'have'} not addressed the bot in two weeks.`,
+    });
+  }
+
+  const box = $('alerts');
+  box.hidden = !alerts.length;
+  box.innerHTML = '';
+  for (const a of alerts) {
+    const el = document.createElement('div');
+    el.className = 'alert ' + a.level;
+    el.textContent = a.text;
+    box.appendChild(el);
+  }
+
+  const cards = [
+    ['Failed sends', ops.delivery.failed,
+      ops.delivery.failureRate === null ? 'nothing sent yet' : ops.delivery.failureRate + '% of attempts'],
+    ['Opt-out rate', ops.optOut.rate === null ? '—' : ops.optOut.rate + '%',
+      `${ops.optOut.count} of ${ops.optOut.reachable} reachable`],
+    ['Tokens', (ops.cost.inputTokens + ops.cost.outputTokens).toLocaleString(),
+      ops.cost.perLeague === null ? 'no model calls yet' : ops.cost.perLeague.toLocaleString() + ' per league'],
+  ];
+  const health = $('ops-health');
+  health.innerHTML = '';
+  for (const [label, value, sub] of cards) {
+    const el = document.createElement('div');
+    el.className = 'stat';
+    el.innerHTML = '<span class="stat-label"></span><span class="stat-value"></span><span class="stat-sub"></span>';
+    el.querySelector('.stat-label').textContent = label;
+    el.querySelector('.stat-value').textContent = value;
+    el.querySelector('.stat-sub').textContent = sub;
+    health.appendChild(el);
+  }
+
+  const body = $('quiet').querySelector('tbody');
+  if (!ops.leagues.length) {
+    body.innerHTML = '<tr><td class="dim">No live leagues yet.</td></tr>';
+    return;
+  }
+  const rows = [`<tr class="head"><td>League</td><td class="num">People talking</td><td class="num">Days quiet</td></tr>`];
+  for (const l of ops.leagues) {
+    // Never spoken to at all is worse than quiet for a fortnight, and sorts
+    // first from the query — it is a league that was set up and abandoned.
+    const never = l.daysQuiet === null;
+    const bad = never || l.daysQuiet >= 14;
+    rows.push(`<tr>
+      <td>${esc(l.name)}</td>
+      <td class="num ${l.humans ? '' : 'warn'}">${l.humans}</td>
+      <td class="num ${bad ? 'warn' : 'dim'}">${never ? 'never' : l.daysQuiet}</td>
+    </tr>`);
+  }
+  body.innerHTML = rows.join('');
+}
+
+// -------------------------------------------------------------- errors ----
+
+const SYSTEM_LABEL = {
+  web: 'Our API', sendblue: 'Sendblue', anthropic: 'Model',
+  sleeper: 'Sleeper', worker: 'Scheduled jobs', db: 'Database',
+};
+
+function renderErrors(e) {
+  // Short windows first — the question on opening this tab is "is something
+  // wrong right NOW", and a seven day total cannot answer it.
+  const w = $('err-windows');
+  w.innerHTML = '';
+  const cards = e.windows.client.map(c => [
+    `4xx, last ${c.hours}h`, c.count,
+    c.hours === 4 ? 'client errors' : 'rolling window',
+  ]);
+  const server24 = e.windows.server.find(x => x.hours === 24);
+  cards.push(['5xx, last 24h', server24.count, server24.count ? 'ours — look at these' : 'nothing fell over']);
+
+  for (const [label, value, sub] of cards) {
+    const el = document.createElement('div');
+    el.className = 'stat';
+    el.innerHTML = '<span class="stat-label"></span><span class="stat-value"></span><span class="stat-sub"></span>';
+    el.querySelector('.stat-label').textContent = label;
+    el.querySelector('.stat-value').textContent = value;
+    // A 5xx is categorically worse than a 4xx and should not have to be
+    // noticed by reading the label.
+    if (label.startsWith('5xx') && value > 0) el.querySelector('.stat-value').classList.add('warn');
+    el.querySelector('.stat-sub').textContent = sub;
+    w.appendChild(el);
+  }
+
+  // Grouped by system for the tiles. A status breakdown belongs in the table
+  // below — four tiles that all say "web" would be four ways of saying one
+  // thing.
+  const bySystem = {};
+  for (const r of e.bySystem) bySystem[r.system] = (bySystem[r.system] || 0) + r.count;
+
+  const tiles = $('err-tiles');
+  tiles.innerHTML = '';
+  const systems = Object.entries(bySystem).sort((a, b) => b[1] - a[1]);
+  if (!systems.length) {
+    tiles.innerHTML = `<div class="stat"><span class="stat-label">Errors</span>` +
+      `<span class="stat-value">0</span><span class="stat-sub">last ${e.days} days</span></div>`;
+  }
+  for (const [sys, n] of systems) {
+    const el = document.createElement('div');
+    el.className = 'stat';
+    el.innerHTML = '<span class="stat-label"></span><span class="stat-value"></span><span class="stat-sub"></span>';
+    el.querySelector('.stat-label').textContent = SYSTEM_LABEL[sys] || sys;
+    el.querySelector('.stat-value').textContent = n;
+    el.querySelector('.stat-sub').textContent = `last ${e.days} days`;
+    tiles.appendChild(el);
+  }
+
+  const box = $('err-spark');
+  box.innerHTML = '';
+  const peak = Math.max(1, ...e.series.map(p => p.count));
+  for (const p of e.series) {
+    const bar = document.createElement('div');
+    bar.className = 'bar' + (p.count === 0 ? ' empty' : ' bad');
+    bar.style.height = Math.max(2, Math.round((p.count / peak) * 100)) + '%';
+    bar.title = `${new Date(p.hour).toLocaleString()} — ${p.count}`;
+    box.appendChild(bar);
+  }
+  $('err-spark-sub').textContent = e.total
+    ? `${e.total} in ${e.days} days · worst hour ${peak}`
+    : 'Nothing has failed since this started recording.';
+
+  const ops = $('err-ops').querySelector('tbody');
+  if (!e.byOperation.length) {
+    ops.innerHTML = '<tr><td class="dim">Nothing to report.</td></tr>';
+  } else {
+    const rows = ['<tr class="head"><td>System</td><td>Operation</td><td class="num">Status</td><td class="num">Count</td><td>Latest message</td></tr>'];
+    for (const r of e.byOperation) {
+      rows.push(`<tr>
+        <td class="mono">${esc(SYSTEM_LABEL[r.system] || r.system)}</td>
+        <td class="mono dim">${esc(r.operation || '—')}</td>
+        <td class="num ${r.status >= 500 ? 'warn' : ''}">${r.status ?? '—'}</td>
+        <td class="num">${r.count}</td>
+        <td class="dim" style="max-width:380px">${esc(String(r.lastMessage || '').slice(0, 140))}</td>
+      </tr>`);
+    }
+    ops.innerHTML = rows.join('');
+  }
+
+  const recent = $('err-recent').querySelector('tbody');
+  if (!e.recent.length) {
+    recent.innerHTML = '<tr><td class="dim">Nothing yet.</td></tr>';
+    return;
+  }
+  const rows = ['<tr class="head"><td>When</td><td>System</td><td class="num">Status</td><td>Message</td></tr>'];
+  for (const r of e.recent) {
+    rows.push(`<tr>
+      <td class="dim">${fmtTime(r.at)}</td>
+      <td class="mono">${esc(SYSTEM_LABEL[r.system] || r.system)}</td>
+      <td class="num ${r.status >= 500 ? 'warn' : ''}">${r.status ?? '—'}</td>
+      <td>${esc(String(r.message || '').slice(0, 180))}</td>
+    </tr>`);
+  }
+  recent.innerHTML = rows.join('');
+}
+
 async function load() {
-  const [overview, { leagues }, { drafts }, funnel, { conversations }] = await Promise.all([
+  const [overview, { leagues }, { drafts }, funnel, { conversations }, ops, errs] = await Promise.all([
     api('GET', '/api/admin/overview?days=30'),
     api('GET', '/api/admin/leagues'),
     api('GET', '/api/admin/drafts?limit=25'),
     api('GET', '/api/admin/funnel?hours=24'),
     api('GET', '/api/admin/threads'),
+    api('GET', '/api/admin/ops?days=7'),
+    api('GET', '/api/admin/errors?days=7'),
   ]);
   renderOverview(overview);
   renderLeagues(leagues);
@@ -471,6 +665,8 @@ async function load() {
   renderFunnel(funnel.funnel);
   renderTextFlow(funnel.textFlow);
   renderConvos(conversations);
+  renderOps(ops);
+  renderErrors(errs);
 }
 
 async function boot() {
@@ -495,6 +691,7 @@ $('send-link').onclick = sendLink;
 $('tab-btn-signups').onclick = () => selectTab('signups');
 $('tab-btn-leagues').onclick = () => selectTab('leagues');
 $('tab-btn-messages').onclick = () => selectTab('messages');
+$('tab-btn-errors').onclick = () => selectTab('errors');
 $('lg-filter').oninput = () => renderLeagues();
 $('lg-state').onchange = () => renderLeagues();
 boot();

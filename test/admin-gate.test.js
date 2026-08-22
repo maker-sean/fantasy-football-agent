@@ -210,6 +210,14 @@ const server = app.listen(0, async () => {
     global.fetch = realFetch;
   }
 
+  // DEV_AUTH creates this account on the first request, and leaving it behind
+  // puts a fabricated row in the table that is supposed to hold real people —
+  // where it then shows up on the operator board after every test run.
+  try {
+    const db = require('../src/db');
+    await db.query(`delete from accounts where email like '%@example.invalid'`);
+  } catch { /* no database configured is fine; nothing was created either */ }
+
   console.log(`\n${pass} passing`);
   server.close();
   process.exit(process.exitCode || 0);

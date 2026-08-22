@@ -57,10 +57,16 @@
     <!-- Two jobs, two tabs. Getting people IN is a different question from
          whether the bot is behaving once they are, and the numbers that answer
          one are noise while you are asking the other. -->
+    <!-- Silent when healthy, loud when not. A permanent green "all good" panel
+         is wallpaper within a week and stops being read; this appears only when
+         there is something to do about it. -->
+    <div id="alerts" class="alerts" hidden></div>
+
     <nav class="tabs" role="tablist" aria-label="Operator views">
       <button class="tab on" id="tab-btn-signups" role="tab" aria-selected="true" type="button">Signups</button>
       <button class="tab" id="tab-btn-leagues" role="tab" aria-selected="false" type="button">Active leagues</button>
       <button class="tab" id="tab-btn-messages" role="tab" aria-selected="false" type="button">Messages</button>
+      <button class="tab" id="tab-btn-errors" role="tab" aria-selected="false" type="button">Errors</button>
     </nav>
 
     <div id="tab-signups" role="tabpanel">
@@ -119,6 +125,13 @@
       </div>
     </div>
 
+    <h3 class="ops-h">Health</h3>
+    <div class="ops-grid" id="ops-health"></div>
+
+    <h3 class="ops-h">Quietest leagues</h3>
+    <p class="stat-sub" style="margin:-6px 0 10px">Distinct people who addressed the bot, not messages sent. One enthusiast is not a league.</p>
+    <div class="tbl-wrap"><table class="tbl" id="quiet"><tbody></tbody></table></div>
+
     <h3 class="ops-h">Why it spoke, and why it didn't</h3>
     <div class="tbl-wrap"><table class="tbl" id="decisions"><tbody></tbody></table></div>
 
@@ -157,6 +170,30 @@
           </div>
         </div>
       </div>
+    </div>
+
+    <!-- By SYSTEM first. They fail independently and need different fixes: our
+         own 400s are a code problem, Sendblue is configuration, Anthropic is
+         quota, Sleeper is somebody else's outage. One "error count" mixes four
+         unrelated situations into a number nobody can act on. -->
+    <div id="tab-errors" role="tabpanel" hidden>
+      <!-- 4xx and 5xx kept apart on purpose. A 400 is usually somebody sending
+           us something malformed; a 500 is us falling over. Summed together,
+           one 500 hides inside forty 400s on the day it matters. -->
+      <div class="ops-grid" id="err-windows"></div>
+
+      <h3 class="ops-h">By system</h3>
+      <div class="ops-grid" id="err-tiles"></div>
+
+      <h3 class="ops-h">Last 48 hours</h3>
+      <div class="spark" id="err-spark" aria-hidden="true"></div>
+      <p class="stat-sub" id="err-spark-sub"></p>
+
+      <h3 class="ops-h">What is failing</h3>
+      <div class="tbl-wrap"><table class="tbl" id="err-ops"><tbody></tbody></table></div>
+
+      <h3 class="ops-h">Most recent</h3>
+      <div class="tbl-wrap lg-scroll"><table class="tbl" id="err-recent"><tbody></tbody></table></div>
     </div>
   </section>
 </main>

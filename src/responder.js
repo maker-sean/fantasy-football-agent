@@ -89,7 +89,28 @@ class Responder {
           return { verdict, replied: res.reply };
         }
       } catch (err) {
+        /*
+         * Record WHY, not just that it happened.
+         *
+         * This used to log to the console and fall through, so the message
+         * landed in the ordinary reply gate and was written down as
+         * layer:'default', reason:'not_addressed' — a perfectly plausible row
+         * describing something that never happened. The real cause, a 403 on a
+         * retired from_number, existed only in Sendblue's API and in a console
+         * line nobody was reading.
+         */
         console.error('[signup] failed:', err.message);
+        if (db) {
+          await this.log(chatId, null, {
+            layer: 'signup',
+            reply: false,
+            reason: 'signup_failed',
+            detail: { error: err.message },
+            messageCount: burst.length,
+            triggerMessageId: burst[0].messageId,
+          }, null).catch(() => { /* logging a failure must not fail louder */ });
+        }
+        return { verdict: { layer: 'signup', reply: false, reason: 'signup_failed' }, replied: null };
       }
     }
 
