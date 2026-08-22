@@ -83,7 +83,7 @@ function andList(items) {
  *                      the ones with a phone number attached
  * @param opts.unknown  how many rosters have nobody attached yet
  */
-function welcomeText(league, { needsBinding = false, known = [], unknown = 0 } = {}) {
+function welcomeText(league, { needsBinding = false, known = [], unknown = 0, menu = '' } = {}) {
   const name = botName(league);
   const triggers = orList(botNames(league));
 
@@ -109,12 +109,19 @@ function welcomeText(league, { needsBinding = false, known = [], unknown = 0 } =
         (unknown ? ` ${unknown} more ${unknown === 1 ? 'roster is' : 'rosters are'} still just a team name to me.` : '') +
         ` Your commissioner can fix any of that on the website.\n\n`
       : '') +
-    // No "reply with your name" line, though an earlier version had one.
-    // db.renameMember exists and NOTHING calls it: there is no code path that
-    // reads a name out of a group chat and binds it to a roster. The roll call
-    // above replaces it, and points at the commissioner, who is the only one
-    // who can actually change anything.
-    ''  +
+    /*
+     * The ask, which an earlier version made and then withdrew.
+     *
+     * That comment used to say there was no code path reading a name out of a
+     * group chat, so the line was removed rather than left as a promise nothing
+     * kept. src/claims.js is that path, so the line is back — but it asks for a
+     * TEAM NUMBER, not a name. Sleeper has never heard of Marcus; the join this
+     * needs is phone to roster, and a name on its own cannot supply it.
+     */
+    (menu
+      ? `Which of you is which? Reply with your team's number and I will remember ` +
+        `— add your name and I will use that too:\n\n${menu}\n\n`
+      : '') +
     // STOP only. An earlier draft promised "HELP brings this back", which is
     // not true and could not be made true: src/signup.js deliberately never
     // replies to a reserved keyword, because the provider suppresses outbound
@@ -150,7 +157,26 @@ async function ensureWelcomed(league, { send, needsBinding = false, known, unkno
     roll = await roster(league.id).catch(() => ({ known: [], unknown: 0 }));
   }
 
-  const text = welcomeText(league, { needsBinding, known: roll.known, unknown: roll.unknown });
+  /*
+   * The menu of unclaimed rosters, if there are any.
+   *
+   * Built here rather than inside welcomeText so that function stays pure and
+   * testable without a database — it is the most-tested string in the codebase
+   * and it should stay that way.
+   */
+  let menu = '';
+  try {
+    const claims = require('./claims');
+    const rows = await claims.unclaimed(league.id);
+    if (rows.length) menu = claims.menuText(rows);
+  } catch (err) {
+    // A missing menu costs the group one convenience. A failed introduction
+    // costs them the whole product, so this must never be the thing that
+    // stops it going out.
+    console.error('[welcome] could not build the roster menu:', err.message);
+  }
+
+  const text = welcomeText(league, { needsBinding, known: roll.known, unknown: roll.unknown, menu });
 
   if (dryRun) {
     console.log(`[welcome] DRY RUN, would introduce to ${league.name}`);
@@ -165,6 +191,9 @@ async function ensureWelcomed(league, { send, needsBinding = false, known, unkno
   }
 
   await db.query('update leagues set welcomed_at = now() where id = $1 and welcomed_at is null', [league.id]);
+  // Start the clock the moment the menu is actually in front of them, so a
+  // bare "3" is read as an answer to a question they can still see.
+  if (menu) await db.query('update leagues set claims_asked_at = now() where id = $1', [league.id]).catch(() => {});
   console.log(`[welcome] introduced to ${league.name}`);
   return { welcomed: true, sent: true, text };
 }

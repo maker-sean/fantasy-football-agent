@@ -9,7 +9,7 @@
 
 const { BurstCollector } = require('./burst');
 const { conversationState } = require('./convo');
-const { decide } = require('./decide');
+const { decide, mentionsBot } = require('./decide');
 const flags = require('./flags');
 const welcome = require('./welcome');
 const drafts = require('./drafts');
@@ -42,6 +42,90 @@ class Responder {
   observe(msg) {
     if (!msg || msg.direction === 'outbound') return;   // never react to ourselves
     this.collector.add(msg);
+  }
+
+  /**
+   * Bind whoever just said which team is theirs, and nudge whoever tried to
+   * talk to the bot without ever having done so.
+   *
+   * Returns a verdict when it acted, null to let the ordinary path continue.
+   * Acting means the message WAS a claim, so falling through afterwards would
+   * hand the same text to decide() and risk a second, unrelated reply to it.
+   */
+  async handleClaims(chatId, burst, league) {
+    const claims = require('./claims');
+    const rosters = await claims.unclaimed(league.id);
+    if (!rosters.length) return null;          // everyone is bound; nothing to claim
+
+    const botNames = (league.config?.botNames || []).map(String);
+    const fresh = claims.withinWindow(league);
+    const acted = [];
+
+    for (const m of burst) {
+      if (m.bound) continue;                   // already somebody
+      const claim = claims.parseClaim(m.text, {
+        rosters, addressed: false, withinWindow: fresh, botNames,
+      });
+      if (!claim) continue;
+
+      const result = await claims.apply(league.id, m.senderId, claim);
+      await db.recordClaim({
+        leagueId: league.id, phone: m.senderId, claimedText: m.text,
+        matchedUser: result.member?.sleeper_username || null,
+        matchedTeam: result.member?.team_name || result.existing?.team_name || null,
+        outcome: result.outcome === 'unchanged' ? 'bound' : result.outcome,
+        detail: { how: claim.how, roster: claim.roster },
+      }).catch(() => {});
+
+      const reply = claims.replyFor(result, claim);
+      if (reply) acted.push(reply);
+      // A successful claim removes that roster from the menu for the rest of
+      // this burst, so two people cannot both claim it in the same flurry.
+      if (result.outcome === 'bound') {
+        const i = rosters.findIndex(r => r.roster === claim.roster);
+        if (i !== -1) rosters.splice(i, 1);
+      }
+    }
+
+    if (acted.length) {
+      const text = acted.join('\n');
+      if (!this.dryRun) {
+        await this.provider.send(chatId, text).catch(err => {
+          console.error('[claims] send failed:', err.message);
+        });
+      }
+      const verdict = { layer: 'claim', reply: true, reason: 'roster_claimed',
+        detail: { count: acted.length }, messageCount: burst.length,
+        triggerMessageId: burst[0].messageId };
+      await this.log(chatId, league, verdict, text).catch(() => {});
+      return { verdict, replied: text };
+    }
+
+    /*
+     * Nobody claimed anything. If an unbound person ADDRESSED the bot, they
+     * just got ignored by the gate — which is the exact moment to explain why,
+     * and the only moment they will care.
+     */
+    const asker = burst.find(m => !m.bound && mentionsBot(m.text, botNames));
+    if (!asker) return null;
+    if (await claims.recentlyPrompted(league.id, asker.senderId)) return null;
+
+    const text = claims.askText(rosters, botNames[0] || 'bot');
+    if (!this.dryRun) {
+      await this.provider.send(chatId, text).catch(err => {
+        console.error('[claims] prompt failed:', err.message);
+      });
+    }
+    await claims.markAsked(league.id).catch(() => {});
+    await db.recordClaim({
+      leagueId: league.id, phone: asker.senderId, claimedText: asker.text,
+      outcome: 'prompted', detail: { reason: 'unbound_addressed_the_bot' },
+    }).catch(() => {});
+
+    const verdict = { layer: 'claim', reply: true, reason: 'asked_who_they_are',
+      messageCount: burst.length, triggerMessageId: asker.messageId };
+    await this.log(chatId, league, verdict, text).catch(() => {});
+    return { verdict, replied: text };
   }
 
   async handleBurst(chatId, burst, meta = {}) {
@@ -134,6 +218,24 @@ class Responder {
       if (bound) {
         for (const m of burst) m.bound = bound.has(db.normalizePhone(m.senderId));
       }
+    }
+
+    /*
+     * Roster claims, before the gate.
+     *
+     * Same reason the signup branch sits above it: boundPhones silences unbound
+     * senders by design, and somebody saying which team is theirs is precisely
+     * the unbound sender it silences. Unlike signup this must run on GROUP
+     * messages, because the group chat is where the twelve people are.
+     *
+     * It runs on every message from an unbound person, so parseClaim has to
+     * return null for anything that is not unmistakably a claim. Silence is the
+     * right answer to ordinary chat.
+     */
+    if (db && league && burst.some(m => !m.bound)) {
+      const handled = await this.handleClaims(chatId, burst, league)
+        .catch(err => { console.error('[claims] failed:', err.message); return null; });
+      if (handled) return handled;
     }
 
     const verdict = decide({ burst, state, league: league || {} });
