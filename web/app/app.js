@@ -278,20 +278,20 @@ async function linkInvitedLeague() {
  * Asking here, before the bot is ever in the chat, is what makes the
  * introduction and the reply gate agree by construction.
  */
-const SUGGESTED_NAMES = ['commish', 'bot', 'jarvis'];
-
 /*
- * 'commish' is offered but never pre-ticked.
+ * 'commish' is offered but never pre-ticked, and that unticked default is the
+ * whole guardrail.
  *
- * In most leagues that word is a HUMAN — "commish can you fix the waiver
- * order", "commish is asleep at the wheel again" — and a bot that answers to it
- * interrupts both. The commissioner knows whether their league talks that way
- * and is entitled to choose; they are just told first. src/decide.js keeps it
- * out of the default for the same reason.
+ * It carried a warning underneath it for a while. That was too much: ticking it
+ * is a deliberate act, the commissioner knows their own league's vocabulary
+ * better than we do, and the worst case — the bot answering when somebody meant
+ * the human — is mildly annoying and undone in settings. Warning text on the
+ * one chip that has it makes an ordinary option look dangerous.
+ *
+ * src/decide.js keeps it out of DEFAULT_BOT_NAMES for the real reason, which is
+ * that a league that never opens this screen must not inherit it silently.
  */
-const NAME_CAUTION = {
-  commish: 'Heads up: most leagues use "commish" for you, the actual person. Tick this and the bot answers when someone means you.',
-};
+const SUGGESTED_NAMES = ['commish', 'bot', 'jarvis'];
 let CHOSEN_NAMES = [];
 
 const prettyName = n => n.charAt(0).toUpperCase() + n.slice(1);
@@ -317,11 +317,6 @@ function renderNameChips() {
     };
     box.appendChild(chip);
   }
-
-  // Say the awkward thing at the moment it becomes true, not in advance.
-  const caution = CHOSEN_NAMES.map(n => NAME_CAUTION[n]).filter(Boolean);
-  $('name-caution').textContent = caution.join(' ');
-  $('name-caution').hidden = !caution.length;
 
   const preview = $('name-preview');
   if (!CHOSEN_NAMES.length) {
