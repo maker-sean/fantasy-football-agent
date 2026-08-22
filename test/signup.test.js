@@ -55,19 +55,40 @@ console.log('\nthe way back from an accidental STOP');
 // arrive. It goes in the confirmation they get on the way in, and the way back
 // is START — which the provider already treats as opt-in and which this module
 // recognises as a signup keyword.
-it('the confirmation tells them how to leave AND how to return', () => {
-  const t = reply({ created: true, leagueId: '1', league: { name: 'X', total_rosters: 12 } });
-  assert.ok(/STOP/.test(t), 'says how to stop');
-  assert.ok(/START/.test(t), 'says how to come back');
+it('every reply carries brand, rates and the opt-out', () => {
+  // A carrier reviewer reads ONE message out of context. It has to say who is
+  // texting and how to make it stop. Checked on all four branches, not just the
+  // first-contact one: the first send here failed with a 403 while the signup
+  // row was still written, so a REPEAT was about to become the first message
+  // the person actually received.
+  const cases = [
+    reply({ created: true,  leagueId: '1', league: { name: 'X', total_rosters: 12 } }),
+    reply({ created: false, leagueId: '1', league: { name: 'X', total_rosters: 12 } }),
+    reply({ created: true,  leagueId: '999', league: null }),
+    reply({ created: true,  leagueId: null, league: null }),
+  ];
+  for (const t of cases) {
+    assert.ok(/Commish AI|Already got you down|couldn't find/.test(t), 'identifies the sender or the context');
+    assert.ok(/Msg & data rates may apply/.test(t), 'rates disclosure');
+    assert.ok(/STOP/.test(t), 'says how to stop');
+    assert.ok(/HELP/.test(t), 'says how to get help');
+  }
 });
-it('START is a recognised keyword, so the way back actually works', () =>
+
+// START is still RECOGNISED — parse() accepts it and handle() clears the
+// suppression — but it is no longer ADVERTISED in the confirmation. That is a
+// deliberate copy decision, not an oversight: the footer was cut to the two
+// keywords carriers require. The cost is that somebody who texts STOP by
+// mistake is not told the way back.
+it('START still works even though the copy no longer mentions it', () =>
   assert.notStrictEqual(parse('START'), null));
+
 
 console.log('\nthe reply is honest about the queue');
 it('a real league is confirmed by name and size', () => {
   const t = reply({ created: true, leagueId: '123', league: { name: 'Halcyon Kings', total_rosters: 12 } });
   assert.ok(t.includes('Halcyon Kings') && t.includes('12 teams'));
-  assert.ok(/queue/i.test(t), 'says it is a queue, not an activation');
+  assert.ok(/on the list/i.test(t), 'says it is a waitlist, not an activation');
   assert.ok(/isn't automatic/i.test(t), 'does not imply it is already running');
   assert.ok(/STOP/.test(t), 'gives the opt-out');
 });

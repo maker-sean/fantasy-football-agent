@@ -18,8 +18,8 @@
       "runtimeExecutable": "env",
       "runtimeArgs": [
         "DEV_AUTH=true",
-        "DEV_AUTH_EMAIL=operator@example.invalid",
-        "ADMIN_EMAILS=operator@example.invalid",
+        "DEV_AUTH_EMAIL=seanmihm@gmail.com",
+        "ADMIN_EMAILS=seanmihm@gmail.com",
         "PORT=4322",
         "node",
         "/Users/seanmihm/fantasy-agent/web/server.js"

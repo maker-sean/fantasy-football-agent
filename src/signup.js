@@ -141,22 +141,40 @@ async function record({ phone, email = null, leagueId, rawText, source = 'sms' }
   return { signup: existing[0] || null, created: false, league };
 }
 
-/** What to text back. Honest about the queue — see the note at the top. */
+/**
+ * What to text back. Honest about the queue — see the note at the top.
+ *
+ * BRAND, PURPOSE, RATES, OPT-OUT. A carrier reviewer reading a single message
+ * out of context has to be able to tell who is texting and how to make it stop,
+ * and the old confirmation identified nobody. That is the first thing an A2P
+ * review looks for and it was simply missing.
+ *
+ * The compliance footer is on the REPEAT branch too, not only the first-time
+ * one. That is not belt and braces: the first send to this number failed with a
+ * 403 (wrong from_number, retired line) while the signup row was still written,
+ * so the next text that person sends resolves as a REPEAT — and the repeat was
+ * about to become the first message they ever actually received. Whichever one
+ * lands first has to carry the disclosure.
+ */
+const FOOTER = 'Msg & data rates may apply. Reply STOP to opt out, HELP for help.';
+
 function reply({ created, league, leagueId }) {
   if (!leagueId) {
-    return `You're on the list. To attach your league, grab your code from the site `
-         + `and text ${KEYWORD} plus that code.`;
+    return `Welcome to Commish AI — you're on the list. To attach your league, grab your code `
+         + `from the site and text ${KEYWORD} plus that code.\n\n${FOOTER}`;
   }
   if (!league) {
     return `I couldn't find a Sleeper league with that ID, so I've noted your number but not the `
-         + `league. Double-check the ID and text it again.`;
+         + `league. Double-check the ID and text it again.\n\n${FOOTER}`;
   }
   if (!created) {
-    return `Already got you down for ${league.name}. You're in the queue, I'll text when it's ready.`;
+    return `Already got you down for ${league.name}. You're on the list, we'll text you here `
+         + `when we're ready to set it up.\n\n${FOOTER}`;
   }
-  return `Got it. ${league.name}, ${league.total_rosters} teams. You're in the queue.\n\n`
-       + `Onboarding isn't automatic yet, so I'll text you to set it up rather than leave you `
-       + `guessing. Nothing's charged.\n\nReply STOP to drop off, START to come back.`;
+  return `Welcome to Commish AI — you're on the list. ${league.name}, ${league.total_rosters} teams.\n\n`
+       + `Onboarding isn't automatic yet, so we'll text you here when we are ready to set it up `
+       + `rather than leave you guessing. We are excited to be able to bring you this experience `
+       + `soon!\n\n${FOOTER}`;
 }
 
 // ------------------------------------------------------- conversation ----
