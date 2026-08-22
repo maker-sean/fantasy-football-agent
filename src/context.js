@@ -139,6 +139,23 @@ async function leagueContext(leagueId, opts = {}) {
         standings: standingsFrom(a.payload).slice(0, 12),
       };
     }
+
+    /*
+     * Every season, summarised per manager.
+     *
+     * Cheap enough to do on every reply: one query over the final-week
+     * snapshots, twelve rows out. Raising the limit above and handing the model
+     * six seasons of tables would cost far more and read worse — a model given
+     * 1,200 weekly scores writes worse jokes than one given "Marcus: 41-61,
+     * never made a final".
+     *
+     * A failure here loses the colour and nothing else, so it must not take the
+     * rest of the context down with it.
+     */
+    ctx.career = await require('./history').career(league.sleeper_league_id).catch(err => {
+      console.error('[context] career lookup failed:', err.message);
+      return [];
+    });
   }
 
   return ctx;
@@ -187,6 +204,26 @@ function contextBlock(ctx) {
     for (const s of ctx.lastSeason.standings) {
       L.push(`  ${String(s.rank).padStart(2)}. ${s.team} — ${s.wins}-${s.losses}, ${s.pointsFor} points for`);
     }
+  }
+
+  /*
+   * Career facts, after the current standings and clearly subordinate to them.
+   *
+   * Order is the weighting. "What is happening now" comes first because that is
+   * what most questions are about; six years of history sits underneath as
+   * colour, and the block says so in its own header so the model does not
+   * answer "who is winning" with somebody's 2021 record.
+   */
+  if (ctx.career?.length) {
+    // The join. Without it the model cannot connect "Sean" in KNOWN PEOPLE to
+    // "smeadows" in here, and it will correctly refuse to guess.
+    const names = new Map(
+      (ctx.members || [])
+        .filter(m => m.sleeperUserId && m.name)
+        .map(m => [m.sleeperUserId, m.name])
+    );
+    L.push('');
+    L.push(require('./history').careerBlock(ctx.career, names));
   }
 
   if (ctx.unknowns.length) {

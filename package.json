@@ -44,7 +44,8 @@
     "web": "node web/server.js",
     "linq-preflight": "node scripts/linq-preflight.js",
     "ballot": "node scripts/ballot.js",
-    "invite": "node scripts/invite.js"
+    "invite": "node scripts/invite.js",
+    "history": "node scripts/history.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.117.1",
