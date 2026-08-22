@@ -88,6 +88,7 @@
       <p class="row">
         <button id="save-roster" class="btn" type="button">Save and continue</button>
         <button id="skip-roster" class="btn ghost" type="button">Skip for now</button>
+        <button id="back-roster" class="btn ghost" type="button">← Back</button>
       </p>
       <p id="roster-msg" class="msg-line" role="status" aria-live="polite"></p>
     </div>
@@ -110,8 +111,9 @@
       <p class="small muted" id="name-preview" style="margin-top:14px"></p>
       <p id="names-msg" class="msg-line" role="status" aria-live="polite"></p>
 
-      <p style="margin-top:18px">
+      <p class="row" style="margin-top:18px">
         <button id="save-names" class="btn" type="button">Save and continue</button>
+        <button id="back-names" class="btn ghost" type="button">← Back</button>
       </p>
     </div>
     <!-- Step 6: prove the chat ---------------------------------------------->
@@ -139,7 +141,10 @@
           </p>
         </div>
       </div>
-      <p><button class="btn ghost" id="to-dashboard-2" type="button">Finish later</button></p>
+      <p class="row">
+        <button class="btn ghost" id="back-chat" type="button">← Back</button>
+        <button class="btn ghost" id="to-dashboard-2" type="button">Finish later</button>
+      </p>
     </div>
 
     <!-- Dashboard ----------------------------------------------------------->

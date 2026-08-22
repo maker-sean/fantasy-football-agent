@@ -341,7 +341,19 @@ function addCustomName() {
   // punctuation in it can never fire. Better to say that than to store
   // something that silently never works.
   if (!/^[a-z0-9]{2,24}$/.test(raw)) {
-    return say($('names-msg'), 'One word, letters and numbers only — that is what it can match on.', 'err');
+    /*
+     * A multi-word trigger is matched as one exact literal, punctuation and
+     * spacing included — "isaac m. jordan" fires on that precise string and not
+     * on "isaac jordan" or "isaac m jordan", let alone "isaac". So it works
+     * almost never and fails silently when it does, which is the worst pair of
+     * properties available. Two separate one-word names do what people expect.
+     */
+    const parts = raw.split(/[^a-z0-9]+/).filter(w => w.length >= 2).slice(0, 2);
+    const hint = parts.length > 1
+      ? ` Add "${parts[0]}" and "${parts[1]}" separately and either one works.`
+      : '';
+    return say($('names-msg'),
+      `One word, letters and numbers only.${hint}`, 'err');
   }
   say($('names-msg'), '');
   if (!CHOSEN_NAMES.includes(raw)) CHOSEN_NAMES.push(raw);
@@ -638,6 +650,31 @@ $('find-leagues').onclick = findLeagues;
 $('sleeper-user').onkeydown = e => { if (e.key === 'Enter') findLeagues(); };
 $('save-roster').onclick = () => saveRoster(false);
 $('save-names').onclick = saveNames;
+
+/*
+ * Going backwards.
+ *
+ * Every step was one-way, which is fine right up until somebody mistypes a
+ * number on step 2 and reaches step 4 before noticing. The only way back was to
+ * finish the whole flow or abandon it.
+ *
+ * Nothing here re-saves. Each step already persisted on the way forward, so
+ * these are pure navigation — showRoster() and showNames() re-read from the
+ * server, so what comes back is what was actually stored rather than whatever
+ * happened to be left in the DOM.
+ *
+ * view() clears the chat poll when it leaves v-chat, so stepping back from the
+ * last screen cannot leave a timer running that would jump the person forward
+ * again underneath them.
+ */
+$('back-roster').onclick = () => {
+  // The league is already linked by this point, so the picker is shown with the
+  // "back to my leagues" affordance visible rather than as a fresh choice.
+  $('have-leagues').hidden = false;
+  view('v-league');
+};
+$('back-names').onclick = () => showRoster();
+$('back-chat').onclick = () => showNames();
 $('name-add').onclick = addCustomName;
 $('name-custom').onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); addCustomName(); } };
 $('skip-roster').onclick = () => saveRoster(true);
