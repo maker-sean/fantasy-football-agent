@@ -110,6 +110,14 @@
       </div>
 
       <p class="small muted" id="name-preview" style="margin-top:14px"></p>
+
+      <!-- Folded into this step rather than given its own. Onboarding is
+           already four screens and "what do we call it" and "how does it talk"
+           are the same question about the same thing. -->
+      <h2 style="font-size:1.1rem;margin:26px 0 4px">And how should it talk?</h2>
+      <p class="lede" style="margin:0 0 14px">This sets the recaps and the replies.</p>
+      <div class="tone-picker" id="tone-picker"></div>
+
       <p id="names-msg" class="msg-line" role="status" aria-live="polite"></p>
 
       <p class="row" style="margin-top:18px">
@@ -166,11 +174,13 @@
         </div>
 
         <div class="step">
-          <label class="field-label" for="cfg-spice">How harsh the recap is</label>
-          <input id="cfg-spice" type="range" min="0" max="2" step="1" style="width:100%">
+          <!-- The same three cards as onboarding step 3. This was an unlabelled
+               0-2 slider, which asked people to guess what the numbers meant
+               and gave the setting a second vocabulary. It also said "recap",
+               which was true when nothing else read it and is not now. -->
+          <label class="field-label">How it talks</label>
+          <div class="tone-picker" id="cfg-tone"></div>
           <div class="row" style="justify-content:space-between">
-            <span class="small muted">Reports the facts</span>
-            <span class="small muted">Has opinions</span>
             <span class="small muted">Merciless</span>
           </div>
         </div>

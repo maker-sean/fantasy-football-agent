@@ -172,11 +172,9 @@ async function generateRecap(facts, opts = {}) {
   // Per MESSAGE, not per recap. Two short texts back to back beat one long one.
   const lengthRule = `${lo}-${hi} words PER MESSAGE. This is a group text, not a newsletter.`;
 
-  const spiceNote = [
-    'Keep it gentle this week. Observational, barely any edge.',
-    'Normal league energy. Tease the obvious blunders.',
-    'Go hard. Still never cruel, and still only about football decisions.',
-  ][Math.max(0, Math.min(2, spice))];
+  // Shared with replies. Two copies of this text is how the recap ends up
+  // gentle while the bot answering questions in the same chat is merciless.
+  const spiceNote = require('./tone').recapNote(spice);
 
   const response = await client.messages.create({
     model,

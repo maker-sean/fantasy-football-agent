@@ -142,7 +142,7 @@ async function generateReply({ burst, league }) {
       text: String(r.body || '').slice(0, 120),
     }));
 
-    const out = await generateAnswer(asked, ctx, { recentChat });
+    const out = await generateAnswer(asked, ctx, { recentChat, spice: league.config?.spice ?? 1 });
     console.log(`[reply] generated ${out.text.split(/\s+/).length} words`);
 
     /*

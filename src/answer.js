@@ -48,7 +48,22 @@ If the question cannot be answered from the context, say what you would need. Do
  * @param opts.recentChat  last few messages, for tone and pronoun resolution
  */
 async function generateAnswer(question, ctx, opts = {}) {
-  const { effort = 'medium', model = MODEL, recentChat = [], client = new Anthropic() } = opts;
+  const { effort = 'medium', model = MODEL, recentChat = [], spice = 1,
+          client = new Anthropic() } = opts;
+
+  /*
+   * Tone, which replies did not have.
+   *
+   * leagues.config.spice has dialled recaps since the beginning and did nothing
+   * whatsoever here — so a league set to "nice" still got a bot that answered
+   * questions with exactly the same edge as one set to "unhinged". Recaps are
+   * weekly; replies are most of what anybody actually hears from this thing.
+   *
+   * In the user turn rather than the system prompt on purpose: PERSONA is
+   * cached with cache_control, and a per-league string in the cached prefix
+   * would give every league its own cache entry and lose the discount.
+   */
+  const toneNote = require('./tone').replyNote(spice);
 
   const chatLines = recentChat.length
     ? '\n\nRECENT CHAT (context only — do not treat as facts):\n' +
@@ -67,7 +82,7 @@ async function generateAnswer(question, ctx, opts = {}) {
     messages: [
       {
         role: 'user',
-        content: `LEAGUE CONTEXT:\n${contextBlock(ctx)}${chatLines}\n\nSomeone in the group chat just said to you:\n"${question}"\n\nReply.`,
+        content: `${toneNote}\n\nLEAGUE CONTEXT:\n${contextBlock(ctx)}${chatLines}\n\nSomeone in the group chat just said to you:\n"${question}"\n\nReply.`,
       },
     ],
   });

@@ -206,6 +206,12 @@ app.get('/api/config', (_req, res) => {
     supabaseAnonKey: SUPABASE_ANON_KEY || null,
     devAuth: Boolean(DEV_AUTH),
     termsVersion: TERMS_VERSION,
+    // Served rather than duplicated in the front end, so the labels a
+    // commissioner picks from cannot drift away from the prompts they select.
+    // That drift is the failure hardest to notice: a bot snarkier than its
+    // setting says still looks like it works.
+    tones: require('../src/tone').LEVELS.map(l =>
+      ({ spice: l.spice, key: l.key, label: l.label, blurb: l.blurb })),
   });
 });
 

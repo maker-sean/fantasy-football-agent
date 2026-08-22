@@ -360,9 +360,40 @@ function addCustomName() {
   renderNameChips();
 }
 
+let CHOSEN_TONE = 1;
+
+/*
+ * The tone options come from the server.
+ *
+ * They are the same list src/tone.js uses to build the prompt, so the label a
+ * commissioner picks and the instruction the model receives cannot drift apart
+ * — which is the failure that would be hardest to notice, because a bot that is
+ * snarkier than its setting says still looks like it works.
+ */
+function renderTones(box = $('tone-picker')) {
+  if (!box) return;
+  box.innerHTML = '';
+  const levels = (CONFIG.tones || []);
+  for (const t of levels) {
+    const on = t.spice === CHOSEN_TONE;
+    const card = document.createElement('button');
+    card.type = 'button';
+    card.className = 'tone' + (on ? ' on' : '');
+    card.setAttribute('aria-pressed', String(on));
+    card.innerHTML = '<strong></strong><span></span>';
+    card.querySelector('strong').textContent = t.label;
+    card.querySelector('span').textContent = t.blurb;
+    card.onclick = () => { CHOSEN_TONE = t.spice; renderTones(box); };
+    box.appendChild(card);
+  }
+}
+
 async function showNames() {
   view('v-names');
   say($('names-msg'), '');
+  CHOSEN_TONE = (CURRENT && CURRENT.config && Number.isFinite(CURRENT.config.spice))
+    ? CURRENT.config.spice : 1;
+  renderTones();
   const configured = (CURRENT && CURRENT.config && CURRENT.config.botNames) || [];
   CHOSEN_NAMES = configured.length
     ? configured.map(n => String(n).toLowerCase())
@@ -377,7 +408,8 @@ async function saveNames() {
   $('save-names').disabled = true;
   say($('names-msg'), 'Saving…');
   try {
-    await api('PATCH', `/api/leagues/${CURRENT.id}/config`, { config: { botNames: CHOSEN_NAMES } });
+    await api('PATCH', `/api/leagues/${CURRENT.id}/config`,
+      { config: { botNames: CHOSEN_NAMES, spice: CHOSEN_TONE } });
     await refreshMe();
     CURRENT = ME.leagues.find(l => l.id === CURRENT.id) || CURRENT;
     showChat();
@@ -610,7 +642,8 @@ function openConfig(lg) {
   const cfg = lg.config || {};
   $('cfg-title').textContent = lg.name + ' — settings';
   $('cfg-names').value = (cfg.botNames || ['bot']).join(', ');
-  $('cfg-spice').value = cfg.spice ?? 1;
+  CHOSEN_TONE = Number.isFinite(cfg.spice) ? cfg.spice : 1;
+  renderTones($('cfg-tone'));
   $('cfg-tz').value = cfg.timezone || 'America/New_York';
   $('league-config').hidden = false;
   say($('config-msg'), '');
@@ -623,7 +656,7 @@ async function saveConfig() {
   say($('config-msg'), 'Saving…');
   try {
     await api('PATCH', `/api/leagues/${CURRENT.id}/config`, {
-      config: { botNames, spice: Number($('cfg-spice').value), timezone: $('cfg-tz').value.trim() },
+      config: { botNames, spice: CHOSEN_TONE, timezone: $('cfg-tz').value.trim() },
     });
     await refreshMe();
     CURRENT = ME.leagues.find(l => l.id === CURRENT.id) || CURRENT;

@@ -671,3 +671,25 @@ input[type="range"] { accent-color: var(--turf); }
   .name-add { flex-wrap: wrap; }
   .name-add input { flex: 1 1 100%; }
 }
+
+/* Onboarding step 3 — how hard the bot punches. Cards rather than a slider:
+   the settings screen offered an unlabelled 0-2 range, which asked people to
+   guess what the numbers meant. */
+.tone-picker { display: grid; gap: 10px; grid-template-columns: repeat(3, 1fr); }
+.tone {
+  display: flex; flex-direction: column; gap: 4px; text-align: left;
+  padding: 14px; border-radius: var(--radius); cursor: pointer;
+  background: var(--surface); border: 2px solid var(--line); color: inherit;
+  font: inherit; min-height: 92px;
+}
+.tone:hover { border-color: var(--muted); }
+.tone.on { border-color: var(--turf); }
+.tone strong { font-size: .98rem; }
+.tone span { font-size: .82rem; color: var(--muted); line-height: 1.35; }
+.tone.on span { color: var(--text); }
+
+@media (max-width: 640px) {
+  /* Stacked, so a three-line blurb does not squeeze into a 100px column. */
+  .tone-picker { grid-template-columns: 1fr; }
+  .tone { min-height: 0; }
+}
