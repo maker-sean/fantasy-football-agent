@@ -434,7 +434,22 @@ const wrap = fn => (req, res, next) => Promise.resolve(fn(req, res, next)).catch
 
 app.get('/health', wrap(async (_req, res) => {
   const { rows } = await db.query('select now() as now');
-  res.json({ ok: true, db: rows[0].now, devAuth: Boolean(DEV_AUTH) });
+  /*
+   * Which commit is answering.
+   *
+   * src/version.js has computed this since the beginning and nothing exposed
+   * it, so "is my change actually deployed?" was unanswerable from outside.
+   * That cost real time twice in one evening: a 404 that looked like a bad
+   * signing secret was an undeployed route, and a stale operator board looked
+   * like a caching bug. A short sha is not a secret — it identifies a commit,
+   * it does not reveal one.
+   */
+  res.json({
+    ok: true,
+    db: rows[0].now,
+    devAuth: Boolean(DEV_AUTH),
+    commit: (require('../src/version').commitSha() || 'unknown').slice(0, 8),
+  });
 }));
 
 app.get('/api/me', requireAccount, wrap(async (req, res) => {
