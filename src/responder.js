@@ -63,6 +63,32 @@ class Responder {
    * takeover 0004 exists to prevent, and it would be exploitable by simply
    * asking.
    */
+  /**
+   * Send, unless an operator has paused replies.
+   *
+   * The kill switch used to be applied only after decide(), and both handlers
+   * below return before reaching it — so pausing replies stopped the bot
+   * answering questions while leaving it free to announce roster claims and
+   * text commissioners. The one control an operator has must cover everything
+   * that speaks.
+   *
+   * Paused still DECIDES and still logs, matching the main path: the whole
+   * reason to pause is to watch without being posted to, and a silent hole in
+   * the trace is indistinguishable from a crashed worker.
+   */
+  async sendUnlessPaused(chatId, text, label) {
+    if (this.dryRun) return false;
+    const paused = await flags.repliesPaused().catch(() => true);
+    if (paused) {
+      console.warn(`[${label}] PAUSED — composed but not sent.`);
+      return false;
+    }
+    await this.provider.send(chatId, text).catch(err => {
+      console.error(`[${label}] send failed:`, err.message);
+    });
+    return true;
+  }
+
   async handleHelp(chatId, burst, league) {
     const claims = require('./claims');
     const botNames = (league.config?.botNames || []).map(String);
@@ -82,7 +108,8 @@ class Responder {
     let text = intent.reply();
     let sentLink = false;
 
-    if (owner?.phone && !(await claims.recentlyLinked(league.id))) {
+    const paused = this.dryRun || await flags.repliesPaused().catch(() => true);
+    if (owner?.phone && !paused && !(await claims.recentlyLinked(league.id))) {
       const url = require('./onboardlink').rosterLinkFor(league.id);
       try {
         await this.provider.send(owner.phone,
@@ -99,11 +126,7 @@ class Responder {
         'can fix that on the website.');
     }
 
-    if (!this.dryRun) {
-      await this.provider.send(chatId, text).catch(err => {
-        console.error('[help] reply failed:', err.message);
-      });
-    }
+    await this.sendUnlessPaused(chatId, text, 'help');
     if (sentLink) {
       await db.recordClaim({
         leagueId: league.id, phone: asker.senderId, claimedText: asker.text,
@@ -154,11 +177,7 @@ class Responder {
 
     if (acted.length) {
       const text = acted.join('\n');
-      if (!this.dryRun) {
-        await this.provider.send(chatId, text).catch(err => {
-          console.error('[claims] send failed:', err.message);
-        });
-      }
+      await this.sendUnlessPaused(chatId, text, 'claims');
       const verdict = { layer: 'claim', reply: true, reason: 'roster_claimed',
         detail: { count: acted.length }, messageCount: burst.length,
         triggerMessageId: burst[0].messageId };
@@ -176,12 +195,11 @@ class Responder {
     if (await claims.recentlyPrompted(league.id, asker.senderId)) return null;
 
     const text = claims.askText(rosters, botNames[0] || 'bot');
-    if (!this.dryRun) {
-      await this.provider.send(chatId, text).catch(err => {
-        console.error('[claims] prompt failed:', err.message);
-      });
-    }
-    await claims.markAsked(league.id).catch(() => {});
+    const asked = await this.sendUnlessPaused(chatId, text, 'claims');
+    // Only start the 60 minute window if the menu actually went out. Starting
+    // it on a paused send would make a bare "3" bindable against a menu nobody
+    // ever saw.
+    if (asked) await claims.markAsked(league.id).catch(() => {});
     await db.recordClaim({
       leagueId: league.id, phone: asker.senderId, claimedText: asker.text,
       outcome: 'prompted', detail: { reason: 'unbound_addressed_the_bot' },
