@@ -1,0 +1,266 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<!-- viewport-fit=cover for the notch. NOT user-scalable=no: it is an
+     accessibility failure, and iOS has ignored it since 10 anyway. -->
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<meta name="robots" content="noindex">
+<!-- A ballot link goes into a group chat, and iMessage unfurls it. Without
+     these the preview shows a blank card; with the question in them it would
+     show the question to the whole thread, which is fine, and the RESULTS,
+     which is not. So the card is deliberately contentless. -->
+<meta property="og:title" content="A league vote">
+<meta property="og:description" content="Tap to cast your vote.">
+<title>League vote</title>
+<style>
+  :root {
+    --bg:#f6f7f9; --card:#fff; --ink:#0d1117; --muted:#5b6672;
+    --line:#e4e7eb; --brand:#2f6fed; --mine:#1a9e5c; --bar:#eef2f8;
+    --minebar:#dcf1e5;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg:#0d1117; --card:#161b22; --ink:#e8edf3; --muted:#8b97a5;
+      --line:#262d36; --brand:#4d8bff; --mine:#2fbe75; --bar:#1c232c;
+      --minebar:#1b3b2b;
+    }
+  }
+  * { box-sizing:border-box; }
+  body {
+    margin:0; background:var(--bg); color:var(--ink);
+    font:16px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+    -webkit-font-smoothing:antialiased; overscroll-behavior-y:contain;
+    padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+  }
+  main { max-width:34rem; margin:0 auto; padding:1.5rem 1rem 3rem; }
+  .who { font-size:.8125rem; color:var(--muted); letter-spacing:.02em; margin-bottom:.5rem; }
+  h1 { font-size:1.5rem; line-height:1.25; margin:0 0 .5rem; letter-spacing:-.01em; }
+  .sub { color:var(--muted); font-size:.9375rem; margin:0 0 1.5rem; }
+
+  .tiles { display:grid; grid-template-columns:repeat(2,1fr); gap:.75rem; }
+  .tile {
+    /* min-height, not aspect-square: a two-line label on a 375px screen makes a
+       square tile overflow its own text, and the spec's aspect ratio is what
+       causes it. Height follows content, with a floor for the touch target. */
+    min-height:8.5rem; display:flex; flex-direction:column; align-items:center;
+    justify-content:center; gap:.625rem; padding:1rem .75rem;
+    background:var(--card); color:inherit; border:2px solid var(--line);
+    border-radius:1.125rem; font:inherit; font-weight:600; text-align:center;
+    cursor:pointer; transition:border-color .15s, transform .1s;
+    -webkit-tap-highlight-color:transparent;
+  }
+  .tile:active { transform:scale(.97); }
+  .tile[aria-pressed="true"] { border-color:var(--brand); }
+  .tile .emoji { font-size:2.75rem; line-height:1; }
+  .tile .label { font-size:1rem; }
+
+  .rows { display:flex; flex-direction:column; gap:.625rem; }
+  .row {
+    position:relative; overflow:hidden; background:var(--card);
+    border:1px solid var(--line); border-radius:.875rem; padding:.875rem 1rem;
+  }
+  .row.mine { border-color:var(--mine); }
+  /* The width is set inline when the row is built, never by a later callback.
+     requestAnimationFrame does not fire in a hidden or prerendering document,
+     and an in-app browser can open a link in exactly that state — which would
+     leave every bar at zero next to a correct percentage. The growth is a CSS
+     animation instead: decorative if it plays, harmless if it never does. */
+  .fill {
+    position:absolute; inset:0 auto 0 0; background:var(--bar);
+    transform-origin:left center; animation:grow .5s cubic-bezier(.22,1,.36,1) both;
+  }
+  .row.mine .fill { background:var(--minebar); }
+  @keyframes grow { from { transform:scaleX(0); } to { transform:scaleX(1); } }
+  @media (prefers-reduced-motion: reduce) {
+    .fill { animation:none; }
+    .tile { transition:none; }
+  }
+  .rowinner { position:relative; display:flex; align-items:center; gap:.75rem; }
+  .rowinner .label { flex:1; font-weight:600; }
+  .yours { display:block; font-size:.75rem; font-weight:600; color:var(--mine); }
+  .pct { font-variant-numeric:tabular-nums; font-weight:700; font-size:1.125rem; }
+  .count { display:block; font-size:.75rem; color:var(--muted); font-weight:400; text-align:right; }
+
+  .note {
+    margin-top:1.5rem; padding:1rem; border:1px dashed var(--line);
+    border-radius:.875rem; color:var(--muted); font-size:.9375rem; text-align:center;
+  }
+  footer { margin-top:1.75rem; text-align:center; color:var(--muted); font-size:.8125rem; }
+  .err { color:#c8382f; }
+  button[disabled] { opacity:.55; cursor:default; }
+</style>
+</head>
+<body>
+<main id="app" aria-live="polite"><p class="sub">Loading…</p></main>
+
+<script>
+/*
+ * The token is the last path segment. It is never put in a query string and
+ * never sent anywhere but this origin: it identifies a person, and query
+ * strings end up in referrer headers and server logs.
+ */
+const TOKEN = location.pathname.split('/').filter(Boolean).pop();
+const app = document.getElementById('app');
+let state = null;
+
+const el = (tag, cls, text) => {
+  const n = document.createElement(tag);
+  if (cls) n.className = cls;
+  // textContent, never innerHTML. Labels are written by a commissioner and
+  // passed through a model; neither is a reason to trust them with markup.
+  if (text != null) n.textContent = text;
+  return n;
+};
+
+const api = async (path, opts) => {
+  const r = await fetch(path, opts);
+  if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'request_failed');
+  return r.json();
+};
+
+function closesIn(iso) {
+  const ms = new Date(iso) - Date.now();
+  if (ms <= 0) return 'closed';
+  const mins = Math.round(ms / 60000);
+  if (mins < 60) return `closes in ${mins} min`;
+  const hrs = Math.round(mins / 60);
+  return hrs < 48 ? `closes in ${hrs} h` : `closes in ${Math.round(hrs / 24)} d`;
+}
+
+function render() {
+  const s = state;
+  app.replaceChildren();
+
+  if (s.you.name) app.append(el('p', 'who', s.you.name));
+  app.append(el('h1', null, s.question));
+
+  const showResults = s.results !== null && (s.you.hasVoted || s.closed);
+  const when = closesIn(s.closesAt);
+  const sub = s.closed ? 'Voting is closed.'
+    : s.maxChoices > 1 ? `Pick up to ${s.maxChoices}. It ${when}.`
+    : `Pick one. It ${when}.`;
+  app.append(el('p', 'sub', sub));
+
+  if (showResults) app.append(results(s));
+  else if (s.you.hasVoted || s.closed) app.append(waiting(s));
+  else app.append(tiles(s));
+
+  const f = el('footer', null,
+    `${s.voted} of ${s.eligible} voted` + (s.closed ? '' : ' • ' + closesIn(s.closesAt)));
+  app.append(f);
+}
+
+function tiles(s) {
+  const grid = el('div', 'tiles');
+  for (const o of s.options) {
+    const b = el('button', 'tile');
+    b.type = 'button';
+    b.setAttribute('aria-pressed', String(s.you.choices.includes(o.id)));
+    // The label, not the emoji. Without this a screen reader announces
+    // "snake face Snake" — the decoration read out as if it were content.
+    b.setAttribute('aria-label', o.label);
+    if (o.emoji) {
+      const e = el('span', 'emoji', o.emoji);
+      e.setAttribute('aria-hidden', 'true');
+      b.append(e);
+    }
+    b.append(el('span', 'label', o.label));
+    b.onclick = () => vote(o.id);
+    grid.append(b);
+  }
+  return grid;
+}
+
+function results(s) {
+  const wrap = el('div', 'rows');
+  const ranked = s.results.slice().sort((a, b) => b.votes - a.votes);
+  for (const r of ranked) {
+    const mine = s.you.choices.includes(r.id);
+    const row = el('div', 'row' + (mine ? ' mine' : ''));
+    const fill = el('div', 'fill');
+    fill.style.width = r.percentage + '%';
+    row.append(fill);
+
+    const inner = el('div', 'rowinner');
+    if (r.emoji) {
+      const e = el('span', 'emoji', r.emoji);
+      e.setAttribute('aria-hidden', 'true');
+      inner.append(e);
+    }
+    const lab = el('div', 'label', r.label);
+    if (mine) lab.append(el('span', 'yours', 'Your vote'));
+    inner.append(lab);
+
+    const right = el('div');
+    right.append(el('span', 'pct', r.percentage + '%'));
+    right.append(el('span', 'count', r.votes === 1 ? '1 vote' : r.votes + ' votes'));
+    inner.append(right);
+    row.append(inner);
+    wrap.append(row);
+  }
+  return wrap;
+}
+
+function waiting(s) {
+  const box = el('div', 'note');
+  box.append(el('p', null, s.closed
+    ? 'This vote is closed.'
+    : 'Your vote is in. Results show when voting closes.'));
+  if (!s.closed) box.append(el('p', null, `${s.eligible - s.voted} still to vote.`));
+  return box;
+}
+
+/*
+ * Optimistic, but honest.
+ *
+ * The tiles switch immediately, and the tally shown is the last REAL tally with
+ * this one vote added — not a canned set of percentages. At ten voters one vote
+ * is ten points, so a placeholder is a visible lie that the server then
+ * corrects a moment later.
+ */
+function vote(optionId) {
+  document.querySelectorAll('.tile').forEach(t => { t.disabled = true; });
+
+  if (state.results) {
+    const already = state.you.choices.length > 0;
+    state.results = state.results.map(r => ({ ...r,
+      votes: r.votes + (r.id === optionId ? 1 : 0)
+        - (already && state.you.choices.includes(r.id) ? 1 : 0) }));
+    if (!already) state.voted += 1;
+    const total = state.voted || 1;
+    state.results = state.results.map(r => ({ ...r, percentage: Math.round(r.votes / total * 100) }));
+  }
+  state.you = { ...state.you, choices: [optionId], hasVoted: true };
+  render();
+
+  api(`/api/v/${TOKEN}/vote`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ options: [optionId] }),
+  }).then(r => { state = r; render(); })
+    .catch(err => {
+      // Put the truth back on screen. A vote that silently failed is the worst
+      // outcome here: the voter believes they are counted and they are not.
+      load().then(() => {
+        const p = el('p', 'note err', err.message === 'closed'
+          ? 'Voting closed before that landed.'
+          : 'That vote did not save. Tap again.');
+        app.append(p);
+      });
+    });
+}
+
+async function load() {
+  state = await api(`/api/v/${TOKEN}`);
+  render();
+}
+
+load().catch(() => {
+  app.replaceChildren(el('h1', null, 'This link is not valid'),
+    el('p', 'sub', 'It may have been mistyped, or it belongs to a vote that was removed.'));
+});
+</script>
+</body>
+</html>

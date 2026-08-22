@@ -133,6 +133,7 @@ does not run — is the one that decides the product.
 | Reply-first + rate limit | [src/agent.js](src/agent.js) | UX *and* survival — chatty automated numbers get carrier-flagged. |
 | Identity = normalized E.164 | [src/db.js](src/db.js) `members` | NOT a provider contact id. Blooio minted two `contact_id`s for one human in one group; a roster keyed on those would double-count every league. |
 | Snapshots are insert-only | [0001_init.sql](supabase/migrations/0001_init.sql) | A kickoff lineup cannot be reconstructed later. A re-run must never overwrite the original capture. |
+| A vote is anchored to a member, not a browser | [0015_ballots.sql](supabase/migrations/0015_ballots.sql), [src/ballotlink.js](src/ballotlink.js) | The obvious design fingerprints IP + User-Agent. At ten voters that both collides (two housemates on one wifi) and duplicates (Private Relay rotates). The voting link is minted per member and signed, so the webview stays zero-auth without the vote being anonymous. |
 
 ## Deploy (Render)
 
@@ -154,6 +155,10 @@ stop the poller and every kickoff capture with it.
    league, the current NFL state, every scheduled cron, and the poll cursor.
 
 ### Things that bite
+
+- **`BALLOT_SECRET` must match on both services.** The worker mints voting
+  links, the web app verifies them. Two different values, or one unset, and
+  every `/v/` link returns 404 with nothing in either log saying why.
 
 - **`CRON_TZ=America/New_York`** — NFL slates are Eastern. The wrong timezone
   fires kickoff captures at the wrong hour and loses lineups with no error.

@@ -47,6 +47,17 @@ services:
       - key: ADMIN_EMAILS
         sync: false
 
+      # Signs the per-member voting links. MUST be byte-identical to the
+      # worker's copy: the worker mints, this verifies, and a mismatch makes
+      # every link 404 with nothing in either log to explain it.
+      - key: BALLOT_SECRET
+        sync: false
+      # Origin the links are built from. Unset falls back to RENDER_EXTERNAL_URL,
+      # which Render injects and which is already a real https origin — no
+      # domain purchase is on this feature's critical path.
+      - key: PUBLIC_BASE_URL
+        sync: false
+
       - key: TERMS_VERSION
         value: "2026-08-16"
       - key: NODE_ENV
@@ -79,6 +90,12 @@ services:
       - key: SENDBLUE_FROM_NUMBER
         sync: false
       - key: ANTHROPIC_API_KEY
+        sync: false
+
+      # Same value as commish-web. See the note there.
+      - key: BALLOT_SECRET
+        sync: false
+      - key: PUBLIC_BASE_URL
         sync: false
 
       # --- behavior ---

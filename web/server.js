@@ -542,6 +542,75 @@ app.patch('/api/leagues/:leagueId/config', requireAccount, loadLeague, wrap(asyn
   res.json({ config: rows[0].config, applied: Object.keys(patch) });
 }));
 
+// -------------------------------------------------------------- ballots ----
+//
+// The voting surface. Public by design and by necessity: the link lands in a
+// group chat and is opened in an in-app browser where nobody is signed in and
+// nobody is going to sign in for a dinner poll. The token in the path IS the
+// credential — minted per member, HMAC signed, verified here. That is what lets
+// this be zero-auth for the voter while still being non-anonymous to us, which
+// 0004_identity_binding.sql argues is the only defensible way to count a vote
+// that comes out of a group chat.
+//
+// No rate limiter. The token is a MAC over a fixed body, so there is nothing to
+// guess and no enumeration to slow down — and a limiter keyed on IP would
+// throttle a whole league sitting behind one carrier NAT, which is precisely
+// the collision this design exists to avoid.
+
+const ballots = require('../src/ballots');
+const ballotlink = require('../src/ballotlink');
+
+if (!process.env.BALLOT_SECRET) {
+  console.warn('[web] BALLOT_SECRET is unset, so every /v/ link will 404.');
+  console.warn('[web] Set the SAME value here and on the worker, which mints the links.');
+}
+
+// The static shell. The token never appears in this response; the page reads it
+// from its own URL and calls the API below with it.
+app.get('/v/:token', (_req, res) => {
+  res.sendFile(path.join(__dirname, 'vote', 'index.html'));
+});
+
+/**
+ * One answer for every failure.
+ *
+ * A forged signature, a valid token for a deleted ballot, and a member who was
+ * removed from the league all return the same 404. Telling them apart would
+ * tell anyone probing which half of a token they had guessed right.
+ */
+function readBallotToken(req, res) {
+  const claim = ballotlink.read(req.params.token);
+  if (!claim) { res.status(404).json({ error: 'not_found' }); return null; }
+  return claim;
+}
+
+app.get('/api/v/:token', wrap(async (req, res) => {
+  const claim = readBallotToken(req, res);
+  if (!claim) return;
+  const view = await ballots.view(claim.ballotId, claim.memberId);
+  if (!view) return res.status(404).json({ error: 'not_found' });
+  res.json(view);
+}));
+
+app.post('/api/v/:token/vote', wrap(async (req, res) => {
+  const claim = readBallotToken(req, res);
+  if (!claim) return;
+
+  const options = Array.isArray(req.body?.options) ? req.body.options : [];
+  const out = await ballots.castVote(claim.ballotId, claim.memberId, options);
+
+  if (!out.ok) {
+    // "closed" is a normal thing to happen, not a malformed request — someone
+    // tapped a second after the deadline. A distinct status lets the page say
+    // that instead of the generic "did not save".
+    const status = out.error === 'closed' ? 409
+      : (out.error === 'not_eligible' || out.error === 'no_such_ballot') ? 404
+      : 400;
+    return res.status(status).json({ error: out.error });
+  }
+  res.json(out.view);
+}));
+
 // -------------------------------------------------------------- webhooks ----
 
 /**
