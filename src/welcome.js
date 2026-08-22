@@ -183,8 +183,26 @@ async function ensureWelcomed(league, { send, needsBinding = false, known, unkno
     return { welcomed: false, sent: false, text };
   }
 
+  /*
+   * The contact card rides along with the introduction.
+   *
+   * This is the exact moment it is worth anything: twelve people are looking at
+   * a message from a number none of them recognise. A card sent later is an
+   * interruption; a card sent now is the answer to the question they are
+   * already asking.
+   *
+   * Refused when the base URL is local, for the same reason scripts/invite.js
+   * refuses to text a localhost link: an unreachable attachment on somebody's
+   * phone cannot be taken back.
+   */
+  let mediaUrl = null;
   try {
-    await send(league.chat_id, text);
+    const base = require('./onboardlink').baseUrl();
+    if (!/localhost|127\.0\.0\.1/.test(base)) mediaUrl = `${base}/contact.vcf`;
+  } catch { /* no secret configured; the introduction still goes out */ }
+
+  try {
+    await send(league.chat_id, text, { mediaUrl });
   } catch (err) {
     console.error(`[welcome] send failed for ${league.name}:`, err.message);
     return { welcomed: false, sent: false };

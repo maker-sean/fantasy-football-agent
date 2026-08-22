@@ -367,7 +367,7 @@ class Responder {
     if (verdict.reply && league && !league.welcomed_at) {
       const needs = await welcome.needsBinding(league.id).catch(() => false);
       const res = await welcome.ensureWelcomed(league, {
-        send: (chat, text) => drafts.sendRecap(this.provider, chat, text),
+        send: (chat, text, opts) => drafts.sendRecap(this.provider, chat, text, opts),
         needsBinding: needs,
         dryRun: this.dryRun,
       });

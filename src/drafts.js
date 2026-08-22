@@ -111,13 +111,16 @@ async function recent(leagueId, limit = 10) {
  * deliberate rather than incidental, so the second message does not land in the
  * same instant as the first and defeat the effect.
  */
-async function sendRecap(provider, chatId, body, { gapMs = 1500 } = {}) {
+async function sendRecap(provider, chatId, body, { gapMs = 1500, mediaUrl = null } = {}) {
   const { splitMessages } = require('./recap');
   const parts = splitMessages(body);
   const sent = [];
   for (const [i, part] of parts.entries()) {
     if (i) await new Promise(r => setTimeout(r, gapMs));
-    sent.push(await provider.send(chatId, part));
+    // Any attachment rides on the FIRST message only. Repeating it on each
+    // part would send the same contact card three times in a row, which is a
+    // worse introduction than none.
+    sent.push(await provider.send(chatId, part, i === 0 && mediaUrl ? { mediaUrl } : {}));
   }
   return { parts, sent };
 }
