@@ -41,8 +41,27 @@ const LEVELS = [
     key: 'unhinged',
     label: 'Unhinged',
     blurb: 'Swings hard at bad lineup decisions. Still never at the person.',
-    recap: 'Go hard. Still never cruel, and still only about football decisions.',
-    reply: 'Go hard. Still never cruel, and still only about football decisions.',
+    /*
+     * "Go hard" was too vague to do anything, and the clause after it undid
+     * what little it did — the result read as snarky with more adjectives.
+     *
+     * The headroom that does not touch the guardrail is escalation, memory and
+     * theatre: refuse to let it go, reach back into their career for ammunition,
+     * and be dramatic about your own reaction. None of that is a remark about a
+     * person. All of it is what makes somebody read it twice.
+     */
+    recap: 'MAXIMUM. Do not soften, do not hedge, do not settle it in one line. ' +
+      'Escalate: name the mistake, then what it cost, then the pattern it fits, then pass a verdict. ' +
+      'Reach into their history — career record, title drought, the last time they did exactly this. ' +
+      'Theatrical is good: declare things, hand out awards nobody wanted, act personally inconvenienced ' +
+      'by their lineup. You may stay on one manager for the whole recap if they earned it. ' +
+      'The target never moves: the decision and the record. Never a label for the person. ' +
+      'If nobody in the chat would go "damn", you were not going hard enough.',
+    reply: 'MAXIMUM. Do not soften and do not hedge. Escalate past the obvious point: what it cost, ' +
+      'the pattern it fits, and a verdict. Reach into their career record for ammunition. ' +
+      'Theatrical is good — be dramatic about your own reaction to their lineup. ' +
+      'The target never moves: the decision and the record, never a label for the person. ' +
+      'If nobody would go "damn", you were not going hard enough.',
   },
 ];
 
