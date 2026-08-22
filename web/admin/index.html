@@ -54,6 +54,50 @@
 
   <section id="board" hidden>
 
+    <!-- Two jobs, two tabs. Getting people IN is a different question from
+         whether the bot is behaving once they are, and the numbers that answer
+         one are noise while you are asking the other. -->
+    <nav class="tabs" role="tablist" aria-label="Operator views">
+      <button class="tab on" id="tab-btn-signups" role="tab" aria-selected="true" type="button">Signups</button>
+      <button class="tab" id="tab-btn-leagues" role="tab" aria-selected="false" type="button">Active leagues</button>
+      <button class="tab" id="tab-btn-messages" role="tab" aria-selected="false" type="button">Messages</button>
+    </nav>
+
+    <div id="tab-signups" role="tabpanel">
+      <div class="ops-grid">
+        <div class="stat">
+          <span class="stat-label">Signups, last hour</span>
+          <span class="stat-value" id="sg-1">…</span>
+          <span class="stat-sub" id="sg-total">…</span>
+        </div>
+        <div class="stat">
+          <span class="stat-label">Last 12 hours</span>
+          <span class="stat-value" id="sg-12">…</span>
+          <span class="stat-sub">rolling window</span>
+        </div>
+        <div class="stat">
+          <span class="stat-label">Last 24 hours</span>
+          <span class="stat-value" id="sg-24">…</span>
+          <span class="stat-sub">rolling window</span>
+        </div>
+      </div>
+
+      <h3 class="ops-h">Page views, by hour</h3>
+      <div class="spark" id="visits" aria-hidden="true"></div>
+      <p class="stat-sub" id="visits-sub">…</p>
+
+      <!-- Against the PREVIOUS stage, not against the top. Measured from the
+           top, every late stage looks catastrophic and no single step stands
+           out — which is the opposite of what a drop-off view is for. -->
+      <h3 class="ops-h">Where people stop</h3>
+      <div class="tbl-wrap"><table class="tbl" id="funnel"><tbody></tbody></table></div>
+
+      <h3 class="ops-h">How they arrive</h3>
+      <div class="ops-grid" id="textflow"></div>
+    </div>
+
+    <div id="tab-leagues" role="tabpanel" hidden>
+
     <!-- The two numbers that decide whether this product is real, side by side.
          Reply rate alone says it might be failing. The decision breakdown says
          WHY, which is a different problem with a different fix. -->
@@ -79,13 +123,41 @@
     <div class="tbl-wrap"><table class="tbl" id="decisions"><tbody></tbody></table></div>
 
     <h3 class="ops-h">Leagues</h3>
-    <div class="tbl-wrap"><table class="tbl" id="leagues"><tbody></tbody></table></div>
+    <div class="lg-controls">
+      <input id="lg-filter" type="search" placeholder="Filter by name…" autocomplete="off">
+      <select id="lg-state">
+        <option value="">All states</option>
+        <option value="live">Live</option>
+        <option value="awaiting_chat">Awaiting chat</option>
+        <option value="members_bound">Members bound</option>
+        <option value="league_linked">League linked</option>
+      </select>
+      <span class="lg-count" id="lg-count"></span>
+    </div>
+    <div class="tbl-wrap lg-scroll"><table class="tbl" id="leagues"><tbody></tbody></table></div>
 
     <h3 class="ops-h" id="thread-h" hidden>Thread</h3>
     <div id="thread" class="thread" hidden></div>
 
     <h3 class="ops-h">Generated recaps</h3>
     <div class="tbl-wrap"><table class="tbl" id="drafts"><tbody></tbody></table></div>
+    </div>
+
+    <!-- Every conversation, group and 1:1 alike, read the way a chat app reads.
+         Keyed on chat_id rather than league, so the signup texts from people
+         who do not have a league yet are here too — during a signup push those
+         are the only conversations that matter. -->
+    <div id="tab-messages" role="tabpanel" hidden>
+      <div class="msg-layout">
+        <aside class="convo-list" id="convos" aria-label="Conversations"></aside>
+        <div class="convo-pane">
+          <div class="convo-head" id="convo-head"></div>
+          <div class="convo-thread" id="convo-thread">
+            <p class="muted small" style="padding:16px">Pick a conversation.</p>
+          </div>
+        </div>
+      </div>
+    </div>
   </section>
 </main>
 

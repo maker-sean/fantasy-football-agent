@@ -86,6 +86,28 @@ function fillTokens(html) {
 const WEBSITE_DIR = path.join(__dirname, '..', 'website');
 const pageCache = new Map();
 
+/*
+ * Count page views. Path and time, nothing else.
+ *
+ * Deliberately anonymous — see 0018_funnel.sql. It also has to be invisible to
+ * the request: fire and forget, never awaited, and a failure is swallowed. A
+ * marketing page that 500s because an analytics insert deadlocked would be a
+ * remarkably stupid way to lose a signup.
+ *
+ * Only real page requests are counted. Assets, the API and the health check
+ * would each multiply one human visit into a dozen rows and make the number
+ * mean nothing.
+ */
+const COUNTED_PAGE = /^\/(?:|index\.html|start\.html|pricing\.html|messaging\.html|terms\.html|privacy\.html)$/;
+
+app.use((req, _res, next) => {
+  if (req.method === 'GET' && COUNTED_PAGE.test(req.path)) {
+    db.query('insert into page_views (path) values ($1)', [req.path === '/' ? '/index.html' : req.path])
+      .catch(() => { /* analytics must never break a page */ });
+  }
+  next();
+});
+
 /** Read a page and substitute the operator details, cached in production. */
 function filledPage(file) {
   let html = pageCache.get(file);
@@ -252,6 +274,22 @@ const onboardlink = require('../src/onboardlink');
 async function accountForInvite(invite) {
   const { rows: [signup] } = await db.query('select * from signups where id = $1', [invite.signupId]);
   if (!signup || !signup.phone) return null;
+
+  /*
+   * Record that the link was opened.
+   *
+   * redeemed_at keeps the FIRST time only, so it measures "did they ever
+   * start"; redeem_count keeps climbing, which is the audit trail the token
+   * itself does not have. Fire and forget — a failed write here must not cost
+   * somebody their sign-in.
+   */
+  db.query(
+    `update signups
+        set redeemed_at = coalesce(redeemed_at, now()),
+            redeem_count = redeem_count + 1
+      where id = $1`, [signup.id]
+  ).catch(err => console.error('[invite] could not record redemption:', err.message));
+
   return {
     account: await db.accountByPhone(signup.phone)
              || await db.upsertAccountByPhone({ phone: signup.phone }),
@@ -975,6 +1013,42 @@ app.get('/api/admin/overview', admin, wrap(async (req, res) => {
     flags.all(),
   ]);
   res.json({ days, replies, decisions, flags: flagRows, dryRunEnv: process.env.REPLY_DRY_RUN === 'true' });
+}));
+
+/**
+ * The signup funnel: volume, traffic, and where people stop.
+ *
+ * One request rather than four, because the operator board renders it as a
+ * single view and four round trips would let the tiles disagree with the funnel
+ * beneath them by a few seconds.
+ */
+app.get('/api/admin/funnel', admin, wrap(async (req, res) => {
+  const hours = Math.min(Math.max(Number(req.query.hours) || 24, 1), 168);
+  const [tiles, visits, stages, text] = await Promise.all([
+    observe.signupTiles([1, 12, 24]),
+    observe.visitsByHour(hours),
+    observe.funnel(),
+    observe.textFlow(),
+  ]);
+  res.json({ hours, tiles, visits, funnel: stages, textFlow: text });
+}));
+
+/** Every conversation, most recent first. Group threads and 1:1 alike. */
+app.get('/api/admin/threads', admin, wrap(async (_req, res) => {
+  res.json({ conversations: await observe.conversations({ limit: 100 }) });
+}));
+
+/**
+ * One conversation.
+ *
+ * The chat id arrives in the query string rather than the path: a Sendblue
+ * group handle is fine in a path, but a 1:1 chat id is a phone number in E.164
+ * and the leading + does not survive a path segment intact.
+ */
+app.get('/api/admin/thread', admin, wrap(async (req, res) => {
+  const chatId = String(req.query.chatId || '');
+  if (!chatId) return res.status(400).json({ error: 'chat_id_required' });
+  res.json({ chatId, messages: await observe.conversation(chatId, { limit: 300 }) });
 }));
 
 app.get('/api/admin/leagues', admin, wrap(async (_req, res) => {

@@ -106,31 +106,103 @@ function renderOverview(o) {
   };
 }
 
-function renderLeagues(list) {
-  LEAGUES = list;
-  const live = list.filter(l => l.onboarding_state === 'live').length;
-  $('live-count').textContent = live;
-  $('live-sub').textContent = `${list.length} onboarded`;
+/*
+ * Every league, sortable and filterable, in a pane that scrolls on its own.
+ *
+ * The table used to be a short unsorted list, which was fine at one league and
+ * useless at fifty: the ones worth looking at are the quiet ones and the
+ * half-bound ones, and neither floats to the top on its own.
+ *
+ * Sorting and filtering happen HERE, not on the server. The whole list is
+ * already in hand — it arrived with the page — so a round trip per click would
+ * add latency to answer a question the browser can already answer.
+ */
+let LG_SORT = { key: 'last_message_at', dir: -1 };
 
-  const rows = [`<tr class="head"><td>League</td><td>State</td><td class="num">Bound</td><td class="num">Msgs</td><td class="num">Pending</td><td>Last activity</td></tr>`];
-  for (const l of list) {
+const LG_COLS = [
+  { key: 'name',               label: 'League',        sort: 'name' },
+  { key: 'onboarding_state',   label: 'State',         sort: 'onboarding_state' },
+  { key: 'bound',              label: 'Bound',         sort: 'bound_members',      num: true },
+  { key: 'messages',           label: 'Msgs',          sort: 'messages',           num: true },
+  { key: 'responses_per_send', label: 'Resp/send',     sort: 'responses_per_send', num: true },
+  { key: 'days_active',        label: 'Days',          sort: 'days_active',        num: true },
+  { key: 'pending_drafts',     label: 'Pending',       sort: 'pending_drafts',     num: true },
+  { key: 'last_message_at',    label: 'Last activity', sort: 'last_message_at' },
+];
+
+function renderLeagues(list) {
+  if (list) LEAGUES = list;
+  const live = LEAGUES.filter(l => l.onboarding_state === 'live').length;
+  $('live-count').textContent = live;
+  $('live-sub').textContent = `${LEAGUES.length} onboarded`;
+
+  const q = ($('lg-filter').value || '').trim().toLowerCase();
+  const state = $('lg-state').value;
+  let rows = LEAGUES.filter(l =>
+    (!q || String(l.name || '').toLowerCase().includes(q)) &&
+    (!state || l.onboarding_state === state));
+
+  const { key, dir } = LG_SORT;
+  rows = rows.slice().sort((a, b) => {
+    const av = a[key], bv = b[key];
+    // Nulls always sink, whichever way the sort is pointing. A league with no
+    // messages is not the "best" performer just because you clicked descending.
+    if (av === null || av === undefined) return 1;
+    if (bv === null || bv === undefined) return -1;
+    if (typeof av === 'number' && typeof bv === 'number') return (av - bv) * dir;
+    return String(av).localeCompare(String(bv)) * dir;
+  });
+
+  $('lg-count').textContent = rows.length === LEAGUES.length
+    ? `${rows.length} league${rows.length === 1 ? '' : 's'}`
+    : `${rows.length} of ${LEAGUES.length}`;
+
+  const head = LG_COLS.map(c => {
+    const on = LG_SORT.key === c.sort;
+    const arrow = on ? (LG_SORT.dir === 1 ? ' ▲' : ' ▼') : '';
+    return `<td class="${c.num ? 'num ' : ''}sortable${on ? ' sorted' : ''}" data-sort="${c.sort}">${c.label}${arrow}</td>`;
+  }).join('');
+
+  const html = [`<tr class="head">${head}</tr>`];
+  for (const l of rows) {
     // Partial binding is the failure that degrades everything quietly: the
     // recap says "Roster 7" and the gate refuses to answer strangers.
     const partial = l.total_members > 0 && l.bound_members < l.total_members;
-    rows.push(`<tr class="click" data-league="${esc(l.id)}">
+    // No chat id means there is no conversation to open yet, so the row must
+    // not pretend to be clickable.
+    const openable = Boolean(l.chat_id);
+    html.push(`<tr class="${openable ? 'click' : ''}" data-chat="${esc(l.chat_id || '')}" data-league="${esc(l.id)}">
       <td>${esc(l.name)}<div class="dim mono" style="font-size:.72rem">${esc(l.provider)} · ${esc(l.season || '')}</div></td>
       <td class="mono ${l.onboarding_state === 'live' ? 'tag-reply' : 'warn'}">${esc(l.onboarding_state)}</td>
       <td class="num ${partial ? 'warn' : ''}">${l.bound_members}/${l.total_members}</td>
       <td class="num">${l.messages}</td>
+      <td class="num ${l.responses_per_send === null ? 'dim' : ''}">${l.responses_per_send ?? '—'}</td>
+      <td class="num dim">${l.days_active ?? '—'}</td>
       <td class="num ${l.pending_drafts ? 'warn' : 'dim'}">${l.pending_drafts || '—'}</td>
       <td class="dim">${l.last_message_at ? fmtTime(l.last_message_at) : '—'}</td>
     </tr>`);
   }
+
   const tbody = $('leagues').querySelector('tbody');
-  tbody.innerHTML = rows.join('');
-  tbody.querySelectorAll('tr.click').forEach(tr =>
-    tr.onclick = () => openThread(tr.dataset.league));
+  tbody.innerHTML = html.join('');
+
+  tbody.querySelectorAll('td.sortable').forEach(td => td.onclick = () => {
+    const k = td.dataset.sort;
+    // Same column flips direction; a new column starts descending, because for
+    // every numeric column here "most" is the interesting end.
+    LG_SORT = LG_SORT.key === k ? { key: k, dir: -LG_SORT.dir } : { key: k, dir: -1 };
+    renderLeagues();
+  });
+
+  tbody.querySelectorAll('tr.click').forEach(tr => tr.onclick = () => {
+    // Straight into the conversation rather than the inline thread panel. The
+    // question behind clicking a league is almost always "what did it say", and
+    // the Messages tab answers it better than a table ever did.
+    selectTab('messages');
+    openConvo(tr.dataset.chat);
+  });
 }
+
 
 /*
  * The thread, with silent decisions interleaved.
@@ -195,15 +267,210 @@ function renderDrafts(list) {
 }
 
 // --- boot -------------------------------------------------------------------
+// ------------------------------------------------------------- signups ----
+
+function renderTiles(tiles) {
+  const by = h => (tiles.find(t => t.hours === h) || {}).count ?? 0;
+  $('sg-1').textContent  = by(1);
+  $('sg-12').textContent = by(12);
+  $('sg-24').textContent = by(24);
+  const total = (tiles.find(t => t.hours === null) || {}).count ?? 0;
+  $('sg-total').textContent = total + (total === 1 ? ' all time' : ' all time');
+}
+
+/**
+ * Hourly bars, drawn with divs.
+ *
+ * Scaled to the busiest hour in the window rather than to a fixed ceiling, so
+ * shape is readable at four views an hour and at four hundred. A zero hour
+ * keeps a visible sliver — a column of nothing is indistinguishable from a
+ * rendering bug, and "was it quiet or is this broken" is the exact question the
+ * chart exists to stop you asking.
+ */
+function renderVisits(visits) {
+  const box = $('visits');
+  box.innerHTML = '';
+  const peak = Math.max(1, ...visits.map(v => v.views));
+  for (const v of visits) {
+    const bar = document.createElement('div');
+    bar.className = 'bar' + (v.views === 0 ? ' empty' : '');
+    bar.style.height = Math.max(2, Math.round((v.views / peak) * 100)) + '%';
+    const hr = new Date(v.hour);
+    bar.title = `${hr.toLocaleTimeString([], { hour: 'numeric' })} — ${v.views} view${v.views === 1 ? '' : 's'}`;
+    box.appendChild(bar);
+  }
+  const total = visits.reduce((n, v) => n + v.views, 0);
+  $('visits-sub').textContent = total
+    ? `${total} views over ${visits.length} hours · busiest hour ${peak}`
+    : 'No page views recorded yet — counting started when this was deployed.';
+}
+
+function renderFunnel(stages) {
+  const body = $('funnel').querySelector('tbody');
+  body.innerHTML = '';
+  // The biggest single drop, so the row that matters is marked rather than
+  // left to be eyeballed against eight others.
+  const worst = stages.reduce((a, b) => (b.dropped ?? -1) > (a?.dropped ?? -1) ? b : a, null);
+
+  for (const st of stages) {
+    const tr = document.createElement('tr');
+    if (st.dropped && worst && st.key === worst.key) tr.className = 'worst';
+
+    const label = document.createElement('td');
+    label.textContent = st.label;
+    if (st.note) {
+      const n = document.createElement('span');
+      n.className = 'muted small';
+      n.textContent = ' · ' + st.note;
+      label.appendChild(n);
+    }
+
+    const count = document.createElement('td');
+    count.textContent = st.count;
+
+    const rate = document.createElement('td');
+    rate.textContent = st.rate === null ? '—' : st.rate + '%';
+
+    const lost = document.createElement('td');
+    lost.textContent = st.dropped ? '−' + st.dropped : '';
+    if (st.dropped) lost.className = 'drop';
+
+    tr.append(label, count, rate, lost);
+    body.appendChild(tr);
+  }
+}
+
+function renderTextFlow(t) {
+  const box = $('textflow');
+  box.innerHTML = '';
+  const cards = [
+    ['Came via a code', t.viaCode, 'picked a league on the site first'],
+    ['Texted in cold', t.cold, 'no code — straight to the number'],
+    ['Codes never texted', t.codesUnused, 'picked a league, never texted'],
+    ['Opted out', t.optedOut, 'replied STOP'],
+  ];
+  for (const [label, value, sub] of cards) {
+    const el = document.createElement('div');
+    el.className = 'stat';
+    el.innerHTML = '<span class="stat-label"></span><span class="stat-value"></span><span class="stat-sub"></span>';
+    el.querySelector('.stat-label').textContent = label;
+    el.querySelector('.stat-value').textContent = value;
+    el.querySelector('.stat-sub').textContent = sub;
+    box.appendChild(el);
+  }
+}
+
+/** Tabs. Nothing refetches — load() already has both halves in hand. */
+function selectTab(name) {
+  for (const t of ['signups', 'leagues', 'messages']) {
+    const on = t === name;
+    $('tab-' + t).hidden = !on;
+    const btn = $('tab-btn-' + t);
+    btn.classList.toggle('on', on);
+    btn.setAttribute('aria-selected', String(on));
+  }
+}
+
+// ------------------------------------------------------------ messages ----
+
+let CONVOS = [];
+let OPEN_CHAT = null;
+
+const when = iso => {
+  const d = new Date(iso), now = new Date();
+  const sameDay = d.toDateString() === now.toDateString();
+  if (sameDay) return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  const days = Math.round((now - d) / 86400000);
+  if (days < 7) return d.toLocaleDateString([], { weekday: 'short' });
+  return d.toLocaleDateString([], { month: 'numeric', day: 'numeric' });
+};
+
+function renderConvos(list) {
+  CONVOS = list;
+  const box = $('convos');
+  box.innerHTML = '';
+  if (!list.length) {
+    box.innerHTML = '<p class="muted small" style="padding:16px">No messages yet.</p>';
+    return;
+  }
+  for (const c of list) {
+    const row = document.createElement('button');
+    row.type = 'button';
+    row.className = 'convo' + (c.chatId === OPEN_CHAT ? ' on' : '');
+    row.innerHTML =
+      '<div class="convo-top"><span class="convo-title"></span><span class="convo-when"></span></div>' +
+      '<div class="convo-prev"></div>';
+    row.querySelector('.convo-title').textContent = c.title;
+    row.querySelector('.convo-when').textContent = when(c.lastAt);
+    // The direction marker matters more than it looks: "→" is the last word
+    // being the bot's, which on a quiet thread is the difference between
+    // waiting on a person and the bot having gone silent.
+    row.querySelector('.convo-prev').textContent =
+      (c.lastDirection === 'outbound' ? '→ ' : '') + (c.lastBody || '').slice(0, 90);
+    row.onclick = () => openConvo(c.chatId);
+    box.appendChild(row);
+  }
+}
+
+async function openConvo(chatId) {
+  OPEN_CHAT = chatId;
+  renderConvos(CONVOS);                       // repaint the selection
+
+  const meta = CONVOS.find(c => c.chatId === chatId);
+  $('convo-head').textContent = meta
+    ? meta.title + (meta.subtitle ? ' · ' + meta.subtitle : '') + ' · ' + meta.messages + ' messages'
+    : chatId;
+
+  const pane = $('convo-thread');
+  pane.innerHTML = '<p class="muted small" style="padding:16px">Loading…</p>';
+  const { messages } = await api('GET', '/api/admin/thread?chatId=' + encodeURIComponent(chatId));
+
+  pane.innerHTML = '';
+  let lastSender = null;
+  for (const m of messages) {
+    const wrap = document.createElement('div');
+    wrap.className = 'bubble-row ' + m.direction;
+
+    // In a group, who said it is the point. Only shown when the speaker
+    // changes, the way a chat app does it — repeating it on every bubble turns
+    // a conversation into a log.
+    if (m.is_group && m.direction === 'inbound' && m.sender_phone !== lastSender) {
+      const who = document.createElement('span');
+      who.className = 'bubble-who';
+      who.textContent = m.sender_phone || 'unknown';
+      wrap.appendChild(who);
+    }
+    lastSender = m.sender_phone;
+
+    const b = document.createElement('div');
+    b.className = 'bubble';
+    b.textContent = m.body || '';
+    b.title = new Date(m.occurred_at).toLocaleString() + (m.protocol ? ' · ' + m.protocol : '');
+    wrap.appendChild(b);
+    pane.appendChild(wrap);
+  }
+  // Newest at the bottom and opened scrolled to it, which is where a chat app
+  // leaves you and where the interesting message is.
+  pane.scrollTop = pane.scrollHeight;
+}
+
 async function load() {
-  const [overview, { leagues }, { drafts }] = await Promise.all([
+  const [overview, { leagues }, { drafts }, funnel, { conversations }] = await Promise.all([
     api('GET', '/api/admin/overview?days=30'),
     api('GET', '/api/admin/leagues'),
     api('GET', '/api/admin/drafts?limit=25'),
+    api('GET', '/api/admin/funnel?hours=24'),
+    api('GET', '/api/admin/threads'),
   ]);
   renderOverview(overview);
   renderLeagues(leagues);
   renderDrafts(drafts);
+
+  renderTiles(funnel.tiles);
+  renderVisits(funnel.visits);
+  renderFunnel(funnel.funnel);
+  renderTextFlow(funnel.textFlow);
+  renderConvos(conversations);
 }
 
 async function boot() {
@@ -225,4 +492,9 @@ async function boot() {
 }
 
 $('send-link').onclick = sendLink;
+$('tab-btn-signups').onclick = () => selectTab('signups');
+$('tab-btn-leagues').onclick = () => selectTab('leagues');
+$('tab-btn-messages').onclick = () => selectTab('messages');
+$('lg-filter').oninput = () => renderLeagues();
+$('lg-state').onchange = () => renderLeagues();
 boot();
