@@ -164,7 +164,28 @@ async function record({ phone, email = null, leagueId, rawText, source = 'sms' }
      league?.total_rosters || null, rawText || null, source]
   );
 
-  if (rows[0]) return { signup: rows[0], created: true, league };
+  if (rows[0]) {
+    /*
+     * Tell the operator, here rather than at the call sites.
+     *
+     * Every signup passes through this function: the texted keyword, the
+     * website form, and the conversational path that returns before handle()
+     * ever sees it. Alerting from handle() missed that third one, which is the
+     * same early-return shape that hid the welcome and the mute. One funnel.
+     *
+     * Only on a genuinely new row. A repeat is somebody retrying, not a second
+     * lead, and alerting on it trains the one person who has to act to ignore
+     * the alerts. Failure is swallowed inside notify: a signup recorded and not
+     * announced is a missed notification, one that throws is a lost lead.
+     */
+    await require('./notify').operator(null, require('./notify').waitlistText({
+      leagueName: league?.name || rows[0].league_name,
+      teams: league?.total_rosters,
+      phone: rows[0].phone || normalized || mail,
+      source,
+    })).catch(() => {});
+    return { signup: rows[0], created: true, league };
+  }
 
   const { rows: existing } = normalized
     ? await db.query(
@@ -439,6 +460,7 @@ async function handle(msg, provider, { dryRun = false } = {}) {
   if (!dryRun && provider) {
     await provider.send(msg.senderId, text);
   }
+
   console.log(`[signup] ${res.created ? 'NEW' : 'repeat'} ${res.league?.name || parsed.leagueId || '(no league)'}`);
   return { handled: true, created: res.created, signup: res.signup, reply: text };
 }

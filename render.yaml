@@ -98,6 +98,13 @@ services:
       - key: PUBLIC_BASE_URL
         sync: false
 
+      # Where operator alerts go. A signup used to leave nothing but a
+      # console.log, and the dashboard shows counts rather than who, so the only
+      # way to learn somebody was waiting was to open a terminal. Unset means
+      # alerts are off, which is a valid deployment.
+      - key: OPERATOR_PHONE
+        sync: false
+
       # --- behavior ---
       # NFL slates are Eastern. Wrong timezone means kickoff captures fire at the
       # wrong hour and lineups are lost with no error.
