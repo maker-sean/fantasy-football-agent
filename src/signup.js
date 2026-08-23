@@ -99,6 +99,41 @@ async function resolveCode(code) {
  * Returns { signup, created, league } — `league` is null when Sleeper does not
  * recognise the id, which is surfaced rather than stored as though it were fine.
  */
+/**
+ * Is this league already live on Commish AI?
+ *
+ * A twelve person league has twelve people who might text the code, and the
+ * eleven who are not the commissioner should be told it is already set up
+ * rather than parked on a waitlist for something they already have. The old
+ * path put them in the queue, which meant the honest next step was inviting a
+ * second person to onboard a league that was already onboarded.
+ *
+ * Checks the SEASON CHAIN, not just the id. Sleeper gives every season its own
+ * league_id, so someone pasting last year's link is holding a different id for
+ * the same league, and telling them it is unclaimed would be true of the id and
+ * wrong about the league.
+ */
+async function alreadyOnboarded(leagueId) {
+  if (!leagueId) return null;
+  const direct = await db.liveLeagueBySleeperId(leagueId);
+  if (direct) return direct;
+
+  // The chain, in both directions: they may hold an older id than the live row,
+  // or a newer one than the row that was onboarded.
+  try {
+    const chain = await require('./history').chain(leagueId, { max: 8 });
+    for (const season of chain) {
+      const hit = await db.liveLeagueBySleeperId(season.league_id);
+      if (hit) return hit;
+    }
+    const { rows } = await db.query(
+      `select * from leagues where previous_sleeper_league_id = $1 and provider <> 'archive' limit 1`,
+      [String(leagueId)]);
+    if (rows[0]) return rows[0];
+  } catch { /* Sleeper unreachable; the direct check already ran */ }
+  return null;
+}
+
 async function record({ phone, email = null, leagueId, rawText, source = 'sms' }) {
   const normalized = phone ? db.normalizePhone(phone) : null;
   const mail = email ? String(email).trim().toLowerCase() : null;
@@ -379,6 +414,21 @@ async function handle(msg, provider, { dryRun = false } = {}) {
     );
   }
 
+  /*
+   * Already live: say so instead of queueing them behind their own league.
+   *
+   * No signup row is written. A waitlist entry for a league that is already
+   * running is a lead that can only ever be actioned by onboarding it twice.
+   */
+  const live = await alreadyOnboarded(leagueId).catch(() => null);
+  if (live) {
+    const text = `${live.name} is already set up on Commish AI. Ask whoever set it up to add `
+               + `you to the group chat, and I will be in there.\n\n${FOOTER}`;
+    if (!dryRun && provider) await provider.send(msg.senderId, text);
+    console.log(`[signup] ${live.name} already onboarded, not queueing`);
+    return { handled: true, created: false, alreadyOnboarded: true, league: live, reply: text };
+  }
+
   const res = await record({
     phone: msg.senderId,
     leagueId,
@@ -396,6 +446,6 @@ async function handle(msg, provider, { dryRun = false } = {}) {
 module.exports = {
   parse, record, reply, handle,
   advance, getConversation, setConversation, endConversation, leaguesForUsername,
-  issueCode, resolveCode, newCode,
+  issueCode, resolveCode, newCode, alreadyOnboarded,
   KEYWORD, KEYWORDS, SIGNUP, RESERVED, CODE_ALPHABET, CODE_LEN,
 };

@@ -586,7 +586,25 @@ async function recentJobs(limit = 20) {
   return rows;
 }
 
+/**
+ * The live league for a Sleeper id, whoever owns it.
+ *
+ * Deliberately NOT scoped to an account, which is what the onboarding endpoint
+ * was doing: it resumed correctly for the same person and let a different one
+ * create a second row for the same league. Archive rows are excluded because
+ * history.js writes one per past season and they share the id space by design.
+ */
+async function liveLeagueBySleeperId(sleeperLeagueId) {
+  if (!sleeperLeagueId) return null;
+  const { rows } = await query(
+    `select * from leagues
+      where sleeper_league_id = $1 and provider <> 'archive'
+      limit 1`, [String(sleeperLeagueId)]);
+  return rows[0] || null;
+}
+
 module.exports = {
+  liveLeagueBySleeperId,
   pool, query, normalizePhone,
   leagueByChat, leagueById, activeLeagues, upsertLeague,
   upsertMember, bindMember, renameMember, recordClaim, boundPhones,

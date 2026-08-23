@@ -689,10 +689,34 @@ app.post('/api/leagues', requireAccount, wrap(async (req, res) => {
   const lg = await sleeper.league(sleeperLeagueId).catch(() => null);
   if (!lg?.league_id) return res.status(404).json({ error: 'league_not_found' });
 
-  // Same league, same account, twice: resume rather than duplicate.
-  const existing = (await db.leaguesForAccount(req.account.id))
-    .find(l => l.sleeper_league_id === sleeperLeagueId);
-  if (existing) return res.json({ league: existing, resumed: true });
+  /*
+   * One Sleeper league, one live row, whoever is asking.
+   *
+   * This checked leaguesForAccount, so the same person re-adding a league
+   * resumed and a DIFFERENT person onboarding the same league quietly created a
+   * second one. In a twelve person league that is not a rare accident, it is
+   * whoever else got excited and followed the link. Two rows means two sets of
+   * members, two chat links racing for the same thread, and recaps computed
+   * twice, none of which errors.
+   */
+  const claimed = await db.liveLeagueBySleeperId(sleeperLeagueId);
+  if (claimed) {
+    // Same account: this is a resume, which is the normal way back into a
+    // half finished onboarding.
+    if (claimed.account_id && claimed.account_id === req.account.id) {
+      return res.json({ league: claimed, resumed: true });
+    }
+    // Somebody else already has it. Say so plainly and do not name them: the
+    // account holder did not consent to having their identity handed to
+    // whoever types a league id into the form.
+    return res.status(409).json({
+      error: 'league_already_onboarded',
+      leagueName: claimed.name,
+      state: claimed.onboarding_state,
+      message: `${claimed.name} is already set up on Commish AI. `
+             + 'Ask whoever set it up to add you to the group chat.',
+    });
+  }
 
   const { rows } = await db.query(
     `insert into leagues (name, sleeper_league_id, account_id, provider, season,
