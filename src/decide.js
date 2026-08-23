@@ -26,6 +26,23 @@
  * the word that way and is entitled to choose. It is offered unticked. The
  * difference between offering and defaulting is the whole point.
  */
+/**
+ * A tapback, not a message.
+ *
+ * Sendblue does not mark these. A reaction arrives with message_type "group"
+ * and an empty send_style, identical to somebody typing, and its body is the
+ * reaction word wrapped around a QUOTE of what it reacted to. That quote is the
+ * problem: 47 reactions in this league's first night, 19 of which carried a bot
+ * name inside the quoted text, so reacting to something the bot said addressed
+ * the bot and it answered its own echo.
+ *
+ * They are still real chat and stay in the history, because "glad it landed" is
+ * a reasonable thing to say next. They just must not be the reason to speak.
+ */
+const REACTION = /^\s*(?:(?:laughed at|liked|loved|disliked|emphasi[sz]ed|questioned)\s+[“"]|reacted\s+\S+\s+to\s+[“"]|removed a\s+.+\s+from\s+[“"])/i;
+
+const isReaction = text => REACTION.test(String(text || ''));
+
 const DEFAULT_BOT_NAMES = ['bot'];
 
 const DEFAULTS = {
@@ -116,6 +133,11 @@ function layerSuppress(ctx) {
   }
 
   if (!burst.length) return { layer: 'suppress', reply: false, reason: 'empty_burst' };
+
+  // Nothing here but tapbacks. Somebody laughing is not a question.
+  if (burst.every(m => isReaction(m.text) || !String(m.text || '').trim())) {
+    return { layer: 'suppress', reply: false, reason: 'reaction_only' };
+  }
 
   if (league?.config?.paused) {
     return { layer: 'suppress', reply: false, reason: 'league_paused' };
@@ -260,8 +282,17 @@ function decide({ burst, state, league = {}, overrides = {} }) {
   const cfg = config(league, overrides);
   // Whether we were spoken to is computed up front, because the hard limits and
   // the pacing limit treat it differently.
-  const addressed = burst.some(m => mentionsBot(m.text, cfg.botNames)) ||
-    burst.some(m => m.raw?.reply_to_bot || m.replyToBot);
+  /*
+   * Reactions never count as being addressed.
+   *
+   * A tapback quotes the message it reacts to, so a laugh at one of the bot's
+   * own replies contains the bot's name and used to read as a fresh question.
+   * The burst is still delivered intact to the model, which can mention the
+   * laugh if it is relevant. It just does not get to be the trigger.
+   */
+  const spoken = burst.filter(m => !isReaction(m.text));
+  const addressed = spoken.some(m => mentionsBot(m.text, cfg.botNames)) ||
+    spoken.some(m => m.raw?.reply_to_bot || m.replyToBot);
   const ctx = { burst, state, league, cfg, addressed };
 
   for (const layer of LAYERS) {
@@ -288,4 +319,4 @@ function decide({ burst, state, league = {}, overrides = {} }) {
 }
 
 module.exports = {
-  DEFAULT_BOT_NAMES, decide, mentionsBot, config, DEFAULTS, LAYERS };
+  DEFAULT_BOT_NAMES, decide, mentionsBot, isReaction, config, DEFAULTS, LAYERS };

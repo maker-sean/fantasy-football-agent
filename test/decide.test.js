@@ -7,7 +7,7 @@
  * these assert that the bot stays QUIET.
  */
 const assert = require('assert');
-const { decide, mentionsBot, DEFAULTS } = require('../src/decide');
+const { decide, mentionsBot, isReaction, DEFAULTS } = require('../src/decide');
 const { BurstCollector } = require('../src/burst');
 
 let pass = 0;
@@ -46,6 +46,48 @@ it('"commish" is NOT a default trigger — it is a human in every league', () =>
   assert.strictEqual(mentionsBot('commish is asleep at the wheel again', DEFAULTS.botNames), null);
 });
 it('empty text is not a mention', () => assert.strictEqual(mentionsBot('', ['bot']), null));
+
+console.log('\nreactions are chat, not questions');
+
+it('a tapback quoting the bot does not address the bot', () => {
+  // The whole bug: the quote carries the bot's own name, so laughing at a reply
+  // read as a fresh question and it answered its own echo.
+  const v = run([msg('Laughed at \u201cJarvis 1.1 can pull whatever it wants\u201d')],
+    quiet(), { config: { botNames: ['bot', 'jarvis'] } });
+  assert.strictEqual(v.reply, false);
+  assert.strictEqual(v.reason, 'reaction_only');
+});
+
+it('every tapback shape Sendblue passes through is recognised', () => {
+  for (const t of [
+    'Laughed at \u201cwhatever\u201d', 'Liked \u201cwhatever\u201d', 'Loved \u201cwhatever\u201d',
+    'Disliked \u201cwhatever\u201d', 'Emphasized \u201cwhatever\u201d', 'Questioned \u201cwhatever\u201d',
+    'Reacted \ud83d\udca9 to \u201cwhatever\u201d',
+  ]) assert.ok(isReaction(t), `not detected: ${t}`);
+});
+
+it('a real message is never mistaken for a reaction', () => {
+  for (const t of [
+    'bot who won in 2023',
+    'I liked that answer bot',
+    'Loved ones aside, bot, what is our closest game',
+    'questioned whether bot knows anything',
+  ]) assert.ok(!isReaction(t), `wrongly treated as a reaction: ${t}`);
+});
+
+it('a reaction alongside a real question still answers the question', () => {
+  const v = run([
+    msg('Laughed at \u201csomething the bot said\u201d'),
+    msg('bot what is our closest game'),
+  ], quiet(), { config: { botNames: ['bot'] } });
+  assert.strictEqual(v.reply, true, 'a laugh in the burst silenced a real question');
+});
+
+it('reactions stay in the burst, so the model can still mention the laugh', () => {
+  const burst = [msg('Laughed at \u201csomething\u201d'), msg('bot what is our closest game')];
+  const v = run(burst, quiet(), { config: { botNames: ['bot'] } });
+  assert.strictEqual(v.messageCount, 2, 'the reaction was dropped rather than just ignored');
+});
 
 console.log('\nlayer 1 — direct address');
 it('replies when mentioned', () => {
