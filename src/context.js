@@ -85,46 +85,68 @@ async function leagueContext(leagueId, opts = {}) {
     unknowns: [],
   };
 
+  /*
+   * A league with no snapshot of its OWN is not a league with no history.
+   *
+   * This returned early, which was wrong in the one window where it matters
+   * most. A league that links its chat before the season starts has zero
+   * snapshots on the live row — six years of them hang off the archive rows —
+   * and ctx.lastSeason and ctx.career below are the only things that reach
+   * those. Returning here handed the model "No league data has been captured
+   * yet" during August, when every question a group chat asks is historical.
+   *
+   * Asked whether Marlow was any good, it correctly declined to guess while a
+   * 38-45 record over six seasons and a title sat two code paths below.
+   */
   if (!latest) {
-    ctx.unknowns.push('No league data has been captured yet.');
-    return ctx;
-  }
-
-  const p = latest.payload;
-  ctx.season = p.league?.season || latest.season;
-  ctx.status = p.league?.status || null;
-  ctx.week = latest.week;
-  ctx.teamCount = p.league?.total_rosters ?? null;
-
-  const played = (p.rosters || []).some(r => (r.settings?.wins ?? 0) + (r.settings?.losses ?? 0) > 0);
-  ctx.gamesPlayed = played;
-
-  if (played) {
-    ctx.standings = standingsFrom(p);
-  } else {
     ctx.unknowns.push(
-      `The ${ctx.season} season has not started — league status is "${ctx.status}" and no games have been played, so there are no standings, records, or results for ${ctx.season}.`
+      'Nothing has been captured for the CURRENT season yet, so there are no standings, '
+      + 'records or results for it. Past seasons are still known and are fair game.'
     );
+    // The archive lookup compares against this, so it needs a season even when
+    // no snapshot supplied one.
+    ctx.season = league.season || null;
   }
 
-  // Attach team names to linked members so the bot can answer "whose team".
-  const byUserId = new Map((ctx.standings.length ? ctx.standings : standingsFrom(p))
-    .map(s => [s.sleeperUserId, s]));
-  for (const m of ctx.members) {
-    const s = byUserId.get(m.sleeperUserId);
-    if (s) { m.team = s.team; m.record = `${s.wins}-${s.losses}`; }
-  }
+  if (latest) {
+    const p = latest.payload;
+    ctx.season = p.league?.season || latest.season;
+    ctx.status = p.league?.status || null;
+    ctx.week = latest.week;
+    ctx.teamCount = p.league?.total_rosters ?? null;
 
-  const unlinked = (p.users || []).length - ctx.members.filter(m => m.team).length;
-  if (unlinked > 0) {
-    ctx.unknowns.push(
-      `${unlinked} of ${(p.users || []).length} managers are not linked to a phone number, so the bot does not know which chat participant owns which team unless they are listed under KNOWN PEOPLE.`
-    );
+    const played = (p.rosters || []).some(r => (r.settings?.wins ?? 0) + (r.settings?.losses ?? 0) > 0);
+    ctx.gamesPlayed = played;
+
+    if (played) {
+      ctx.standings = standingsFrom(p);
+    } else {
+      ctx.unknowns.push(
+        `The ${ctx.season} season has not started — league status is "${ctx.status}" and no games have been played, so there are no standings, records, or results for ${ctx.season}.`
+      );
+    }
+
+    // Attach team names to linked members so the bot can answer "whose team".
+    const byUserId = new Map((ctx.standings.length ? ctx.standings : standingsFrom(p))
+      .map(s => [s.sleeperUserId, s]));
+    for (const m of ctx.members) {
+      const s = byUserId.get(m.sleeperUserId);
+      if (s) { m.team = s.team; m.record = `${s.wins}-${s.losses}`; }
+    }
+
+    const unlinked = (p.users || []).length - ctx.members.filter(m => m.team).length;
+    if (unlinked > 0) {
+      ctx.unknowns.push(
+        `${unlinked} of ${(p.users || []).length} managers are not linked to a phone number, so the bot does not know which chat participant owns which team unless they are listed under KNOWN PEOPLE.`
+      );
+    }
   }
 
   // Last completed season, so the bot has real material before the new one
   // starts. This is what makes a pre-draft league answerable at all.
-  if (opts.includeArchive !== false && league.sleeper_league_id) {
+  // ctx.season guards the comparison below, which is a string compare and
+  // would match every archived season if it were null.
+  if (opts.includeArchive !== false && league.sleeper_league_id && ctx.season) {
     const { rows: arch } = await db.query(
       `select s.season, s.week, s.payload from snapshots s
        join leagues l on l.id = s.league_id
