@@ -330,6 +330,62 @@ function contextBlock(ctx) {
 
     // Who took the punishment, by year. The counts above cannot answer "who
     // lost it in 2022", which is the shape the question actually takes.
+    /*
+     * Who is new and who has gone.
+     *
+     * Both are derivable and neither was being said. Asked how Ivers drafts, the
+     * bot answered "nothing on record for that name", which is true and reads
+     * like it failed to look him up: Ivers is new this season, replacing mrenshaw7,
+     * and "he is new" is a better answer than "I have nothing". The other
+     * direction matters more — mrenshaw7 has six seasons in the archive and no
+     * seat at the table, so quoting that record as though he is still here
+     * would be wrong in front of the person who replaced him.
+     *
+     * Matched on sleeper_user_id where there is one, and on name otherwise,
+     * because a manager who has not been assigned a roster in Sleeper has no id
+     * to match on. That is exactly Ivers's situation.
+     */
+    const careerIds = new Set((ctx.career || []).map(c => c.userId));
+    /*
+     * Career rows are keyed on SLEEPER HANDLES and members on real names, so
+     * comparing the two directly finds nothing: Sean is "smeadows" in the archive.
+     * The resolved name is what makes them the same person, so match on both.
+     */
+    const careerNames = new Set((ctx.career || []).flatMap(c => [
+      (c.name || '').toLowerCase(),
+      (names.get(c.userId) || '').toLowerCase(),
+    ]).filter(Boolean));
+    const memberIds = new Set((ctx.members || []).filter(m => m.sleeperUserId).map(m => m.sleeperUserId));
+    const memberNames = new Set((ctx.members || []).filter(m => m.name).map(m => m.name.toLowerCase()));
+
+    const arrivals = (ctx.members || [])
+      .filter(m => m.name)
+      // A row with no Sleeper id AND no roster identifies nobody. Those are
+      // merge leftovers, and counting them called Sean and Danner new to a league
+      // they have played six seasons in.
+      .filter(m => m.sleeperUserId || m.rosterId)
+      .filter(m => !(m.sleeperUserId && careerIds.has(m.sleeperUserId)))
+      .filter(m => !careerNames.has(m.name.toLowerCase()))
+      .map(m => m.name);
+
+    const departures = (ctx.career || [])
+      .filter(c => !memberIds.has(c.userId))
+      .filter(c => !(c.name && memberNames.has(c.name.toLowerCase())))
+      .map(c => c.name || c.userId);
+
+    if (arrivals.length || departures.length) {
+      L.push('');
+      L.push('WHO IS ACTUALLY IN THE LEAGUE RIGHT NOW:');
+      if (arrivals.length) {
+        L.push(`  new this season, with NO history at all: ${arrivals.join(', ')}. `
+             + `Say they are new rather than saying you have nothing on them.`);
+      }
+      if (departures.length) {
+        L.push(`  in the history but NOT in the league any more: ${departures.join(', ')}. `
+             + `Their record is real and they are gone, so do not talk about them as current.`);
+      }
+    }
+
     const champs = require('./history').championBlock(ctx.career, names);
     if (champs) { L.push(''); L.push(champs); }
 
