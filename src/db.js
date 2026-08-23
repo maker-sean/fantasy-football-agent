@@ -352,10 +352,37 @@ async function bindMember(leagueId, { phone, sleeperUserId, sleeperRosterId, dis
     }
   }
 
-  // Clear any conflicting rows only when explicitly forced (commissioner).
+  /*
+   * Clear any conflicting rows only when explicitly forced (commissioner).
+   *
+   * This is a MOVE, and it used to be only the first half of one. Stripping the
+   * Sleeper identity off the old row and inserting a new one leaves the old row
+   * behind holding a team name and a username and nothing that identifies
+   * anybody: no phone, no id, no roster. Two of those are sitting in Halcyon
+   * Kings right now, one each for Sean and Danner, and the introduction counted
+   * them as real people and told thirteen of them that "3 more rosters" were
+   * unaccounted for above a menu offering one.
+   *
+   * It happens whenever somebody exists as two half rows, which is the normal
+   * state before they claim: onboarding writes a row with their phone, the
+   * nightly Sleeper sync writes a different row with their id and roster, and
+   * the claim brings the two together. So it is not historical and not rare —
+   * every league accumulates one per member who claims that way.
+   *
+   * Deleting a row this same statement just emptied is a different act from
+   * deleting data, and the guard says so: all three identifying columns must be
+   * null, so a row still holding anything is left exactly where it is.
+   */
   if (force) {
     if (byUser && byUser.phone !== normalized) {
       await query('update members set sleeper_user_id = null, sleeper_roster_id = null where id = $1', [byUser.id]);
+      const { rowCount } = await query(
+        `delete from members
+          where id = $1
+            and phone is null
+            and sleeper_user_id is null
+            and sleeper_roster_id is null`, [byUser.id]);
+      if (rowCount) console.log(`[members] moved the binding and removed the emptied row ${byUser.id}`);
     }
   }
 
