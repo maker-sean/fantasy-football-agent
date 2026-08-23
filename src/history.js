@@ -255,12 +255,39 @@ async function captureSeason(lg, { week = 17 } = {}) {
   const games = await gamesFor(lg.league_id,
     { playoffWeekStart: payload.league?.settings?.playoff_week_start ?? 15 }).catch(() => []);
 
+  /*
+   * Everything computed above actually gets written.
+   *
+   * It did not. toilet, finalPlaces, moves and games were each fetched — four
+   * network round trips per season — and then dropped on the floor, because the
+   * payload spread only ever picked up champion_roster_id. Each was added in
+   * its own commit and none of them extended this object.
+   *
+   * The readers were all pointing at keys nobody wrote: career() looks for
+   * toilet_roster_id and moves_by_roster, gameRecords and benchMistakes read
+   * payload.games. They degrade to empty rather than throwing, so a league with
+   * none of it produces a bot that is quietly less interesting and no error at
+   * all.
+   *
+   * refresh, because snapshots are insert-only and six seasons of a real
+   * league were already written wrong. A completed season's final snapshot is
+   * reproducible from Sleeper in full, which is what makes overwriting this one
+   * kind sound — see the note in db.recordSnapshot.
+   */
   await db.recordSnapshot({
     leagueId: league.id,
     season: lg.season,
     week,
     kind: 'final',
-    payload: { ...payload, champion_roster_id: champion },
+    refresh: true,
+    payload: {
+      ...payload,
+      champion_roster_id: champion,
+      toilet_roster_id: toilet ?? null,
+      final_places: finalPlaces ?? null,
+      moves_by_roster: moves ?? {},
+      games,
+    },
   });
   return { league, season: lg.season, champion, toilet };
 }
@@ -487,9 +514,14 @@ function benchBlock(rows, names = new Map()) {
  * Returns one compact row per Sleeper account. Deliberately small: this goes
  * into a prompt on every reply, so it has to earn its tokens.
  */
-async function career(sleeperLeagueId) {
-  const seasons = await chain(sleeperLeagueId);
-  const ids = seasons.map(s => s.league_id);
+/**
+ * @param opts.ids  pre-walked chain, when the caller already has one. chain()
+ *                  is up to twenty sequential HTTP calls, and context.js needs
+ *                  the same list to scope its own last-season lookup — see the
+ *                  note there about a league being handed a stranger's past.
+ */
+async function career(sleeperLeagueId, { ids: given = null } = {}) {
+  const ids = given || (await chain(sleeperLeagueId)).map(s => s.league_id);
   if (!ids.length) return [];
 
   const { rows } = await db.query(

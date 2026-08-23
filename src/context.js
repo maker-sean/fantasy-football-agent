@@ -147,13 +147,40 @@ async function leagueContext(leagueId, opts = {}) {
   // ctx.season guards the comparison below, which is a string compare and
   // would match every archived season if it were null.
   if (opts.includeArchive !== false && league.sleeper_league_id && ctx.season) {
-    const { rows: arch } = await db.query(
+    /*
+     * THIS LEAGUE'S OWN PAST, and nobody else's.
+     *
+     * The query below used to filter on provider = 'archive' and a season, with
+     * nothing tying the rows to the league doing the asking. With one league in
+     * the database that is invisibly correct. With two it returns whichever
+     * 2025 week 17 snapshot the planner reaches first — so a league can be
+     * handed a stranger's standings as its own last season, stated to the model
+     * as fact, with no error raised anywhere.
+     *
+     * It was found while building the onboarding pre-flight, which ingests a
+     * second league's history and would have been the thing that triggered it.
+     *
+     * One chain walk, shared with career() below. chain() is up to twenty
+     * sequential HTTP calls and both callers want the same list.
+     */
+    const chainIds = await require('./history').chain(league.sleeper_league_id)
+      .then(seasons => seasons.map(s => s.league_id))
+      .catch(err => {
+        console.error('[context] chain walk failed:', err.message);
+        return [];
+      });
+
+    // No chain means no way to scope. Prefer no last season over somebody
+    // else's: missing colour reads as a quiet bot, wrong colour reads as a
+    // confident one.
+    const { rows: arch } = chainIds.length ? await db.query(
       `select s.season, s.week, s.payload from snapshots s
        join leagues l on l.id = s.league_id
        where l.provider = 'archive' and s.season < $1
+         and l.sleeper_league_id = any($2::text[])
        order by s.season desc, s.week desc limit 1`,
-      [String(ctx.season)]
-    );
+      [String(ctx.season), chainIds]
+    ) : { rows: [] };
     if (arch.length) {
       const a = arch[0];
       ctx.lastSeason = {
@@ -175,7 +202,7 @@ async function leagueContext(leagueId, opts = {}) {
      * A failure here loses the colour and nothing else, so it must not take the
      * rest of the context down with it.
      */
-    ctx.career = await require('./history').career(league.sleeper_league_id).catch(err => {
+    ctx.career = await require('./history').career(league.sleeper_league_id, { ids: chainIds }).catch(err => {
       console.error('[context] career lookup failed:', err.message);
       return [];
     });

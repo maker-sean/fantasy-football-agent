@@ -485,7 +485,33 @@ async function recordMessage(msg) {
  * exists, the original wins — a later re-run must never overwrite the state
  * captured at the real kickoff moment.
  */
-async function recordSnapshot({ leagueId, season, week, kind, payload }) {
+async function recordSnapshot({ leagueId, season, week, kind, payload, refresh = false }) {
+  /*
+   * Insert-only by default, and that default is load-bearing: a kickoff lineup
+   * cannot be reconstructed after the fact, so a re-run must never overwrite
+   * one. See the architecture note in README.
+   *
+   * `refresh` is the one exception, and it is only sound for a COMPLETED
+   * season's final snapshot, which Sleeper can reproduce in full. It exists
+   * because insert-only turned a bug into a permanent one: captureSeason spent
+   * months computing games, the toilet bowl, final placements and transaction
+   * counts and then writing none of them, and because a re-capture was a no-op
+   * there was no way to repair a league short of deleting its history by hand.
+   * The league the product was demoed on had the data from an earlier version
+   * and every league captured after did not.
+   */
+  if (refresh && kind === 'final') {
+    const { rows } = await query(
+      `insert into snapshots (league_id, season, week, kind, payload)
+       values ($1,$2,$3,$4,$5)
+       on conflict (league_id, season, week, kind)
+         do update set payload = excluded.payload, captured_at = now()
+       returning *`,
+      [leagueId, String(season), Number(week), kind, payload]
+    );
+    return rows[0] || null;
+  }
+
   const { rows } = await query(
     `insert into snapshots (league_id, season, week, kind, payload)
      values ($1,$2,$3,$4,$5)
