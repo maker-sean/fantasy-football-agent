@@ -96,17 +96,17 @@ const JOBS = [
    * "could not determine target service for group". Every record said it went
    * out. It was found because somebody read the chat and asked.
    *
-   * Every seven minutes. Cheap either way — it reads only recent rows with no
+   * Every six minutes. Cheap either way — it reads only recent rows with no
    * terminal state, and one request finds nothing when nothing is wrong — and
-   * the tighter cadence buys margin against the retry window: a failure caught
-   * at seven minutes still has eight minutes of the fifteen minute resend
-   * budget left, where a ten minute sweep left only five.
+   * the tight cadence buys margin against the retry window: a failure caught
+   * at six minutes still has nine of the fifteen minute resend budget left,
+   * where a ten minute sweep left only five.
    *
-   * Seven does not divide into 60, so it fires at :00 :07 ... :56 and then the
-   * hour rolls, making that last gap four minutes rather than seven. Harmless:
-   * the MAXIMUM gap is still seven, which is the number that matters.
+   * Six divides into 60, so every gap is exactly six. Seven was tried first and
+   * fires at :00 :07 ... :56, leaving a ragged four minute gap when the hour
+   * rolls. Harmless, and there is no reason to have it.
    */
-  ['delivery',       '*/7 * * * *', () => auditDelivery()],
+  ['delivery',       '*/6 * * * *', () => auditDelivery()],
   // Housekeeping.
   ['players',        '0 4 * * *',   () => snapshots.refreshPlayers()],
   ['members',        '30 4 * * *',  () => snapshots.syncMembers()],
