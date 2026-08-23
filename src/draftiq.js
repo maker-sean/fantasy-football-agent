@@ -211,6 +211,68 @@ function mirrors(picks) {
   return out.sort((a, b) => swing(b) - swing(a));
 }
 
+/**
+ * Counts, not verdicts.
+ *
+ * This module refuses to rank managers by draft skill, and that stands. But
+ * "who has the most whiffs" is a different question: it counts events with a
+ * printed definition, anyone can audit it, and it is the honest substitute
+ * when somebody asks who is worst. "I cannot call that, but here is who has
+ * whiffed most" is a real answer where a ranking would be a guess.
+ *
+ * WHY THERE IS A SEVERITY THRESHOLD. Counting every pick that merely
+ * underperformed its slot gives 17, 16, 16, 16, 15... across twelve managers.
+ * Rank delta is negatively biased, so almost every pick "whiffs" and the leader
+ * is noise wearing a superlative. Requiring a fall of 20 positional ranks
+ * despite a full season played gives 6, 5, 4, 3, 3, 3, 2, 2, 1, 1, 1, 1, which
+ * describes something real.
+ *
+ * AND WHY THE LEAD HAS TO BE CLEAR. Even then the top two are one pick apart,
+ * and one pick over six seasons is not a fact worth stating. A leader is named
+ * only when they beat the runner up by two; otherwise this says it is too close,
+ * which is true and is still more useful than silence.
+ */
+const WHIFF_DROP = 20;
+// Symmetric on purpose. A steal counted at any positive delta gives 29, 25, 23,
+// 23, 22... which counts picks that merely did fine, not picks anyone remembers.
+const STEAL_GAIN = 20;
+const CLEAR_LEAD = 2;
+
+function extremes(picks, startable) {
+  const isWhiff = p => p.gain <= -WHIFF_DROP && p.round <= 5 && p.gamesPlayed >= 12;
+  const isSteal = p => p.gain >= STEAL_GAIN && p.finishRank != null && p.finishRank <= startable[p.position];
+
+  const tally = test => {
+    const n = new Map();
+    for (const p of picks) if (test(p)) {
+      const k = p.sleeperUserId;
+      n.set(k, (n.get(k) || 0) + 1);
+    }
+    return n;
+  };
+
+  const rank = (counts, key, noun) => {
+    if (!counts.size) return null;
+    const sorted = [...counts.values()].sort((a, b) => b - a);
+    const best = sorted[0];
+    if (best < 2) return null;
+    const holders = [...counts].filter(([, c]) => c === best).map(([id]) => id);
+    // Runner up is the next DIFFERENT count, so an exact tie is not read as a
+    // clear lead over itself.
+    const next = sorted.find(c => c < best) ?? 0;
+    return {
+      key, noun, count: best, holders,
+      clear: holders.length === 1 && best - next >= CLEAR_LEAD,
+      runnerUp: next,
+    };
+  };
+
+  return [
+    rank(tally(isWhiff), 'most whiffs', `picks in rounds 1-5 that fell ${WHIFF_DROP}+ places while playing a full season`),
+    rank(tally(isSteal), 'most steals', `picks that finished startable and ${STEAL_GAIN}+ places above where they went`),
+  ].filter(Boolean);
+}
+
 // ------------------------------------------------------------- assembly ----
 
 /**
@@ -256,6 +318,7 @@ async function analyze(sleeperLeagueId, { seasons = null } = {}) {
     startable,
     ...buckets(picks, startable),
     mirrors: mirrors(picks).slice(0, 2),
+    extremes: extremes(picks, startable),
     picks,
   };
 }
@@ -307,6 +370,22 @@ function draftBlock(result, names = new Map()) {
          + ' say so if it comes up):');
     cursed.forEach(p => L.push(`${line(p)}, ${p.gamesPlayed} games`));
   }
+  if (result.extremes?.length) {
+    L.push('  DRAFT EXTREMES (computed over every pick in the window, not just the ones'
+         + ' listed above. Safe to state as counts. There is NO ranking of who drafts'
+         + ' best and you must not claim one):');
+    for (const e of result.extremes) {
+      const nameOf = id => {
+        const p = (result.picks || []).find(x => x.sleeperUserId === id);
+        return p ? who(p) : id;
+      };
+      const names = e.holders.map(nameOf).join(' and ');
+      L.push(e.clear
+        ? `    ${e.key}: ${names}, ${e.count} ${e.noun}`
+        : `    ${e.key}: ${names} on ${e.count}, but the next is ${e.runnerUp} so the lead is`
+          + ' too thin to call. Say it is close rather than crowning anyone');
+    }
+  }
   for (const m of result.mirrors || []) {
     L.push(`  SAME PLAYER, BOTH WAYS: ${m.player} was ${who(m.up)}'s best pick in ${m.up.season}`
          + ` (${move(m.up)}) and ${who(m.down)}'s worst in ${m.down.season} (${move(m.down)}).`);
@@ -315,6 +394,6 @@ function draftBlock(result, names = new Map()) {
 }
 
 module.exports = {
-  analyze, startableLine, annotate, buckets, mirrors, draftBlock,
+  analyze, startableLine, annotate, buckets, mirrors, extremes, draftBlock,
   POSITIONS,
 };

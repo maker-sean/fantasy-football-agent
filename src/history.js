@@ -191,10 +191,59 @@ function careerBlock(rows, names = new Map()) {
   return L.join('\n');
 }
 
+/**
+ * The four superlatives, computed rather than left to be inferred.
+ *
+ * A model handed twelve individual lines and asked who is worst will rank them
+ * itself, and ranking is exactly the operation the verifier cannot check: a
+ * real answer here called Marlow's floor "lower than everyone else in this
+ * convo" while five managers had finished last and one had done it twice.
+ * Every figure in that sentence was correct and the claim was false.
+ *
+ * So the comparisons that can be made are made here, from the same rows, and
+ * the ones that cannot are absent on purpose. TIES ARE LISTED, never collapsed
+ * to a single name, because a coin flip between two people is the most likely
+ * way this reintroduces the bug it exists to remove.
+ */
+function careerExtremes(rows, names = new Map()) {
+  if (rows.length < 2) return '';
+  const label = r => names.get(r.userId) || r.name || r.userId;
+  const pct = r => r.wins / Math.max(1, r.wins + r.losses);
+  const rec = r => `${r.wins}-${r.losses}`;
+
+  /*
+   * All holders of the extreme, so a tie reads as a tie.
+   *
+   * Past two holders the names stop being the fact. Six managers with one
+   * title each is not "most titles", it is "nobody has two" — and printing six
+   * names next to a superlative is an invitation to quote one of them as the
+   * leader, which is the exact failure this function exists to prevent.
+   */
+  const top = (score, fmt, lead) => {
+    const best = Math.max(...rows.map(score));
+    const who = rows.filter(r => score(r) === best);
+    if (!who.length) return null;
+    if (who.length > 2) {
+      return `  ${lead}: nobody leads, ${who.length} are tied on ${fmt(who[0])}. Do not name one of them as the leader`;
+    }
+    return `  ${lead}: ${who.map(label).join(' and ')} (${fmt(who[0])})`;
+  };
+
+  const L = ['LEAGUE EXTREMES (computed, safe to state as fact. Any OTHER ranking is not'
+           + ' in this context and must not be claimed):'];
+  const titles = top(r => r.titles, r => `${r.titles}`, 'most titles');
+  if (titles && Math.max(...rows.map(r => r.titles)) > 0) L.push(titles);
+  const lasts = top(r => r.lasts, r => `${r.lasts}`, 'most last place finishes');
+  if (lasts && Math.max(...rows.map(r => r.lasts)) > 0) L.push(lasts);
+  L.push(top(r => pct(r), rec, 'best career record'));
+  L.push(top(r => -pct(r), rec, 'worst career record'));
+  return L.filter(Boolean).join('\n');
+}
+
 const ordinal = n => {
   if (n == null) return 'unknown';
   const s = ['th', 'st', 'nd', 'rd'], v = n % 100;
   return n + (s[(v - 20) % 10] || s[v] || s[0]);
 };
 
-module.exports = { chain, archiveLeague, captureSeason, career, careerBlock, ordinal };
+module.exports = { chain, archiveLeague, captureSeason, career, careerBlock, careerExtremes, ordinal };

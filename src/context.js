@@ -179,6 +179,13 @@ async function leagueContext(leagueId, opts = {}) {
       console.error('[context] career lookup failed:', err.message);
       return [];
     });
+
+    // Draft accuracy over the same chain. Network plus six seasons of stats,
+    // so it degrades to nothing rather than taking the reply down with it.
+    ctx.draft = await require('./draftiq').analyze(league.sleeper_league_id).catch(err => {
+      console.error('[context] draft lookup failed:', err.message);
+      return null;
+    });
   }
 
   /*
@@ -287,6 +294,19 @@ function contextBlock(ctx) {
     );
     L.push('');
     L.push(require('./history').careerBlock(ctx.career, names));
+    // The comparisons, computed. Without these the model derives its own from
+    // the twelve lines above, which is the one operation the verifier cannot
+    // check. See careerExtremes.
+    const extremes = require('./history').careerExtremes(ctx.career, names);
+    if (extremes) { L.push(''); L.push(extremes); }
+
+    /*
+     * Draft history, last. It is the deepest material and the most expensive
+     * to be wrong about, so it sits below the career lines it depends on.
+     *
+     * A failure here costs the colour and nothing else, same as career.
+     */
+    if (ctx.draft) { L.push(''); L.push(require('./draftiq').draftBlock(ctx.draft, names)); }
   }
 
   if (ctx.projections?.rows?.length) {
