@@ -79,18 +79,40 @@ const server = app.listen(0, async () => {
       assert.strictEqual((await call('POST', '/api/leagues', { sleeperLeagueId: 'abc' })).status, 400);
     });
 
+    /*
+     * A league nobody has onboarded.
+     *
+     * This used the live Halcyon Kings id, and passed only because the
+     * endpoint was scoped to the account: every run quietly inserted a SECOND
+     * live row for a league that already had one. The test was demonstrating
+     * the duplicate bug rather than guarding against it. This id is real in
+     * Sleeper and exists here only as an archive row, which the unique index
+     * deliberately does not count.
+     */
+    const UNCLAIMED = '600000000000000001';
+
     let leagueId;
     await it('linking a league puts it in league_linked, not live', async () => {
-      const r = await call('POST', '/api/leagues', { sleeperLeagueId: '1400000000000000001' });
+      const r = await call('POST', '/api/leagues', { sleeperLeagueId: UNCLAIMED });
       assert.strictEqual(r.status, 201);
       assert.strictEqual(r.body.league.onboarding_state, 'league_linked');
       leagueId = r.body.league.id;
     });
 
     await it('linking the same league twice resumes instead of duplicating', async () => {
-      const r = await call('POST', '/api/leagues', { sleeperLeagueId: '1400000000000000001' });
+      const r = await call('POST', '/api/leagues', { sleeperLeagueId: UNCLAIMED });
       assert.strictEqual(r.body.resumed, true);
       assert.strictEqual(r.body.league.id, leagueId);
+    });
+
+    await it('a league somebody else already onboarded is refused, not duplicated', async () => {
+      // The live league belongs to a different account. Twelve people can text
+      // the code; the eleven who are not the commissioner must not each get
+      // their own copy of it.
+      const r = await call('POST', '/api/leagues', { sleeperLeagueId: '1400000000000000001' });
+      assert.strictEqual(r.status, 409);
+      assert.strictEqual(r.body.error, 'league_already_onboarded');
+      assert.ok(r.body.message, 'no message for the UI to show');
     });
 
     console.log('\nstep 5 — name and number per roster');
@@ -193,6 +215,11 @@ const server = app.listen(0, async () => {
       assert.strictEqual((await call('GET', '/api/leagues/00000000-0000-0000-0000-000000000000/roster')).status, 404);
     });
 
+    // The league created above is owned by the test account; drop it explicitly
+    // so a failed run cannot leave a live row holding a real Sleeper id.
+    await db.query(
+      `delete from leagues where sleeper_league_id = $1 and provider <> 'archive'`,
+      ['600000000000000001']);
     await db.query('delete from accounts where email like $1', ['webtest%@example.invalid']);
     console.log(`\n${pass} passing`);
   } catch (e) {
