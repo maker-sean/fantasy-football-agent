@@ -303,7 +303,11 @@ function perManager(picks, startable) {
     const steals = u.all.filter(isSteal).sort((a, b) => b.gain - a.gain);
     return {
       sleeperUserId: u.sleeperUserId, manager: u.manager,
-      worst: whiffs[0] || null, best: steals[0] || null,
+      // ALL of them, not just the worst. A count the context cannot enumerate
+      // is a number the bot will quote and then be unable to back up: asked to
+      // name Kellan's six whiffs it had one, and had to say so after volunteering
+      // the figure repeatedly.
+      whiffList: whiffs, worst: whiffs[0] || null, best: steals[0] || null,
       whiffs: whiffs.length, steals: steals.length,
     };
   }).sort((a, b) => b.whiffs - a.whiffs);
@@ -408,13 +412,14 @@ function draftBlock(result, names = new Map()) {
     cursed.forEach(p => L.push(`${line(p)}, ${p.gamesPlayed} games`));
   }
   if (result.perManager?.length) {
-    L.push('  BY MANAGER (each person\'s own worst and best pick. Use THIS when somebody'
-         + ' is asked about by name, and say plainly when they have no whiffs on record):');
+    L.push('  BY MANAGER (every whiff each person has, and their best pick. Use THIS when'
+         + ' somebody is asked about by name, and it is what any whiff COUNT above is made'
+         + ' of, so you can always name them. Say plainly when someone has none):');
     for (const m of result.perManager) {
-      const bits = [];
-      bits.push(m.worst ? `worst ${m.worst.season} ${m.worst.player} ${move(m.worst)}` : 'no whiffs on record');
-      if (m.best) bits.push(`best ${m.best.season} ${m.best.player} ${move(m.best)}`);
-      L.push(`    ${who(m)}: ${bits.join(', ')} (${m.whiffs} whiffs, ${m.steals} steals)`);
+      const list = (m.whiffList || []).map(p => `${p.season} ${p.player} ${move(p)}`).join('; ');
+      const bits = [m.whiffs ? `${m.whiffs} whiffs: ${list}` : 'no whiffs on record'];
+      if (m.best) bits.push(`best pick ${m.best.season} ${m.best.player} ${move(m.best)}`);
+      L.push(`    ${who(m)}: ${bits.join('. ')}`);
     }
   }
   if (result.extremes?.length) {
