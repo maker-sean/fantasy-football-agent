@@ -200,6 +200,15 @@ async function leagueContext(leagueId, opts = {}) {
       console.error('[context] bench mistakes failed:', err.message);
       return [];
     });
+
+    /*
+     * When the draft is. The most common question a league asks in August, and
+     * the one thing in here about the CURRENT season rather than the archive.
+     */
+    ctx.draftSchedule = await sleeper.draftSchedule(league.sleeper_league_id).catch(err => {
+      console.error('[context] draft schedule failed:', err.message);
+      return null;
+    });
   }
 
   /*
@@ -361,6 +370,33 @@ function contextBlock(ctx) {
              `${p.opponent ? ' vs ' + p.opponent : ''}) ${p.points}`);
     }
     L.push('  * = currently in their starting lineup. You have projections for NOBODY ELSE\'S roster.');
+  }
+
+  if (ctx.draftSchedule && ctx.draftSchedule.status !== 'complete') {
+    const d = ctx.draftSchedule;
+    L.push('');
+    /*
+     * Spelled out with the timezone attached, because "8pm" to twelve people in
+     * three timezones is not an answer. The raw timestamp is deliberately not
+     * printed: a model handed epoch milliseconds will try to do arithmetic on
+     * them.
+     */
+    const when = d.startsAt
+      ? new Date(d.startsAt).toLocaleString('en-US', {
+          weekday: 'long', month: 'long', day: 'numeric',
+          hour: 'numeric', minute: '2-digit', timeZoneName: 'short',
+        })
+      : null;
+    L.push('THE DRAFT (this season, live from Sleeper. Quote the date exactly as written):');
+    L.push(when
+      ? `  scheduled for ${when}`
+      : '  no date has been set yet, the commissioner picks it in Sleeper');
+    L.push(`  ${d.type || 'unknown'} draft, ${d.rounds ?? '?'} rounds` +
+           (d.pickSeconds ? `, ${d.pickSeconds} seconds a pick` : ''));
+    L.push(d.orderSet
+      ? '  the draft order is set, but you have NOT been given it and must say so'
+      : '  the draft order has NOT been set yet. Nobody knows where they are picking,'
+        + ' and the commissioner sets it in Sleeper. You do not set it.');
   }
 
   if (ctx.unknowns.length) {

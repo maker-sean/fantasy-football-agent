@@ -65,6 +65,49 @@ async function allPlayers() {
 }
 
 /**
+ * The UPCOMING draft: when it is, how it runs, and whether an order exists.
+ *
+ * "When is our draft" is the most common question a league asks in August and
+ * the bot had no answer, because everything about drafts in here was built for
+ * archived seasons and reads picks that do not exist yet. Sleeper has known the
+ * answer the whole time: /league/{id}/drafts carries start_time, the format,
+ * and the draft_order, on a league sitting in pre_draft.
+ *
+ * draft_order being empty is itself worth reporting rather than hiding. A
+ * league a week out with no order set is exactly the league arguing about how
+ * to pick one, which is what yours was doing when it asked.
+ *
+ * Short TTL because this is the live season, not the archive: a commissioner
+ * moving the date is the whole reason somebody asks again.
+ */
+const SCHEDULE_TTL_MS = Number(process.env.DRAFT_SCHEDULE_TTL_MS || 10 * 60 * 1000);
+const scheduleCache = new Map();
+
+async function draftSchedule(leagueId) {
+  const hit = scheduleCache.get(leagueId);
+  if (hit && Date.now() - hit.at < SCHEDULE_TTL_MS) return hit.value;
+
+  const drafts = await get(`/league/${encodeURIComponent(leagueId)}/drafts`).catch(() => null);
+  const d = (drafts || [])[0];
+  if (!d) return null;
+
+  const value = {
+    status: d.status || null,                 // pre_draft | drafting | complete
+    type: d.type || null,                     // snake | auction | linear
+    season: d.season || null,
+    rounds: d.settings?.rounds ?? null,
+    pickSeconds: d.settings?.pick_timer ?? null,
+    // Milliseconds since epoch, or null when the commissioner has not set one.
+    startsAt: d.start_time || null,
+    // An order exists only once it has been generated. Empty is a real state.
+    orderSet: Boolean(d.draft_order && Object.keys(d.draft_order).length),
+    scoring: d.metadata?.scoring_type || null,
+  };
+  scheduleCache.set(leagueId, { at: Date.now(), value });
+  return value;
+}
+
+/**
  * The season's draft, trimmed to what a recap can use.
  *
  * Sleeper returns each pick with metadata and reactions attached, which is a
@@ -278,7 +321,7 @@ async function seasonStats(season, { scoring = 'half_ppr', live = false } = {}) 
 }
 
 module.exports = {
-  projections, seasonStats,
+  projections, seasonStats, draftSchedule,
   BASE, get, state, league, rosters, users, matchups, transactions,
   allPlayers, weekSnapshot, rosterOwners, draft,
 };
