@@ -381,10 +381,31 @@ function contextBlock(ctx) {
      * printed: a model handed epoch milliseconds will try to do arithmetic on
      * them.
      */
+    /*
+     * THE ZONE IS PINNED, not inherited.
+     *
+     * This passed no timeZone and took whatever the process had. render.yaml
+     * sets CRON_TZ and never TZ, so the worker resolves to UTC and this would
+     * have rendered "Monday, August 31 at 12:00 AM UTC" for a draft that starts
+     * Sunday at 8pm. Wrong day, wrong hour, and plausible enough on the page
+     * that nobody would question it. It only looked right locally because this
+     * laptop is already Eastern.
+     *
+     * shortGeneric prints "ET" rather than "EDT", which is what a person writes
+     * and stays correct either side of a daylight saving change.
+     */
+    /*
+     * CRON_TZ or Eastern, and deliberately NOT process.env.TZ. Falling back to
+     * TZ reintroduces the bug: TZ is the host's zone, which on Render is UTC,
+     * and inheriting it is precisely what printed the wrong day. NFL slates are
+     * Eastern, which is the same reasoning render.yaml gives for CRON_TZ.
+     */
+    const zone = process.env.CRON_TZ || 'America/New_York';
     const when = d.startsAt
       ? new Date(d.startsAt).toLocaleString('en-US', {
+          timeZone: zone,
           weekday: 'long', month: 'long', day: 'numeric',
-          hour: 'numeric', minute: '2-digit', timeZoneName: 'short',
+          hour: 'numeric', minute: '2-digit', timeZoneName: 'shortGeneric',
         })
       : null;
     L.push('THE DRAFT (this season, live from Sleeper. Quote the date exactly as written):');

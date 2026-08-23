@@ -35,7 +35,26 @@ it('a scheduled draft prints a date a human can act on', () => {
   assert.match(b, /scheduled for/);
   // The timezone has to be named. "8pm" to twelve people in three timezones is
   // not an answer.
-  assert.match(b, /\b(EDT|EST|GMT|UTC|[A-Z]{2,5}T)\b/);
+  assert.match(b, /\bET\b/);
+});
+
+it('the zone is pinned, not inherited from the host', () => {
+  // render.yaml sets CRON_TZ and never TZ, so the worker resolves to UTC. With
+  // no explicit timeZone this printed "Monday, August 31 at 12:00 AM UTC" for a
+  // draft starting Sunday 8pm: wrong day, wrong hour, entirely plausible. It
+  // only looked correct on a laptop that was already Eastern.
+  const original = process.env.TZ;
+  const originalCron = process.env.CRON_TZ;
+  try {
+    delete process.env.CRON_TZ;
+    process.env.TZ = 'UTC';
+    const b = contextBlock(ctx(base));
+    assert.match(b, /8:00 PM ET/, 'the draft time drifted with the host timezone');
+    assert.ok(!/12:00 AM/.test(b), 'rendered in UTC');
+  } finally {
+    if (original === undefined) delete process.env.TZ; else process.env.TZ = original;
+    if (originalCron !== undefined) process.env.CRON_TZ = originalCron;
+  }
 });
 
 it('the raw timestamp never reaches the model', () => {
