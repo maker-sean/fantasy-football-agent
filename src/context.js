@@ -193,6 +193,13 @@ async function leagueContext(leagueId, opts = {}) {
       console.error('[context] game records failed:', err.message);
       return null;
     });
+
+    // Points left on the bench. Cached per process, since every season it reads
+    // is finished and the answer cannot change.
+    ctx.benchMistakes = await require('./history').benchMistakes(league.sleeper_league_id).catch(err => {
+      console.error('[context] bench mistakes failed:', err.message);
+      return [];
+    });
   }
 
   /*
@@ -325,6 +332,11 @@ function contextBlock(ctx) {
     if (ctx.gameRecords) {
       L.push('');
       L.push(require('./history').gameRecordsBlock(ctx.gameRecords, names));
+    }
+
+    if (ctx.benchMistakes?.length) {
+      L.push('');
+      L.push(require('./history').benchBlock(ctx.benchMistakes, names));
     }
 
     /*

@@ -126,11 +126,32 @@ async function gamesFor(sleeperLeagueId, { weeks = 17, playoffWeekStart = 15 } =
     }
     for (const [, pair] of byMatchup) {
       if (pair.length !== 2) continue;
+      /*
+       * The LINEUP rides along, because the call that returns the score already
+       * returns it and the first cut threw it away.
+       *
+       * Asked what management mistakes were made in a specific matchup, the bot
+       * had nothing, and that class of question cannot be pre-computed at all:
+       * the game being asked about is chosen after the prompt is built. Keeping
+       * starters and the points every rostered player scored turns it into a
+       * lookup. 486 bytes a row, roughly 600KB across the whole archive.
+       *
+       * Stored as ids, not names. Player names change, get traded and retire;
+       * the id does not, and src/sleeper.js already has allPlayers to resolve
+       * them at read time.
+       */
+      const side = m => ({
+        r: Number(m.roster_id),
+        p: Math.round(m.points * 100) / 100,
+        s: m.starters || [],
+        pp: m.players_points || {},
+      });
+      const one = side(pair[0]), two = side(pair[1]);
       games.push({
         w: i + 1,
         po: i + 1 >= playoffWeekStart ? 1 : 0,
-        a: Number(pair[0].roster_id), ap: Math.round(pair[0].points * 100) / 100,
-        b: Number(pair[1].roster_id), bp: Math.round(pair[1].points * 100) / 100,
+        a: one.r, ap: one.p, b: two.r, bp: two.p,
+        lineups: { [one.r]: { s: one.s, pp: one.pp }, [two.r]: { s: two.s, pp: two.pp } },
       });
     }
   });
@@ -244,6 +265,15 @@ async function gameRecords(sleeperLeagueId) {
   if (!games.length) return null;
 
   const byMargin = [...games].sort((a, b) => a.margin - b.margin);
+  /*
+   * COMBINED totals, which is a different question from the lowest single
+   * score and was asked within an hour of the single-score version shipping.
+   * Noted rather than hidden: this is the block approach growing one line per
+   * question, which is the argument for a query layer, not against this line.
+   */
+  const byTotal = [...games].sort((a, b) =>
+    (a.winner.points + a.loser.points) - (b.winner.points + b.loser.points));
+  const total = g => Math.round((g.winner.points + g.loser.points) * 100) / 100;
   const byScore = [...games].flatMap(g => [
     { ...g, who: g.winner, points: g.winner.points },
     { ...g, who: g.loser, points: g.loser.points },
@@ -255,6 +285,8 @@ async function gameRecords(sleeperLeagueId) {
     from: spanSeasons[0], to: spanSeasons.at(-1),
     closest: byMargin.slice(0, 3),
     blowout: byMargin.at(-1),
+    lowestCombined: byTotal.slice(0, 2).map(g => ({ ...g, combined: total(g) })),
+    highestCombined: { ...byTotal.at(-1), combined: total(byTotal.at(-1)) },
     highest: byScore[0],
     lowest: byScore.at(-1),
   };
@@ -278,8 +310,134 @@ function gameRecordsBlock(records, names = new Map()) {
   L.push(`  closest game ever: ${line(records.closest[0])}`);
   for (const g of records.closest.slice(1)) L.push(`  next closest: ${line(g)}`);
   L.push(`  biggest hiding: ${line(records.blowout)}`);
+  for (const g of records.lowestCombined || []) {
+    L.push(`  lowest COMBINED total in one matchup (both teams added together, not the same `
+         + `as the lowest single score below): ${when(g)}, ${who(g.winner)} ${g.winner.points} `
+         + `and ${who(g.loser)} ${g.loser.points}, ${g.combined} between them`);
+  }
+  if (records.highestCombined) {
+    const g = records.highestCombined;
+    L.push(`  highest COMBINED total: ${when(g)}, ${who(g.winner)} ${g.winner.points} and `
+         + `${who(g.loser)} ${g.loser.points}, ${g.combined} between them`);
+  }
   L.push(`  highest score by anyone: ${who(records.highest.who)} ${records.highest.points}, ${when(records.highest)}`);
   L.push(`  lowest score by anyone: ${who(records.lowest.who)} ${records.lowest.points}, ${when(records.lowest)}`);
+  return L.join('\n');
+}
+
+/*
+ * What a flex slot will accept. Anything not listed takes its own position.
+ */
+const FLEX_SLOTS = { FLEX: ['RB', 'WR', 'TE'], SUPER_FLEX: ['QB', 'RB', 'WR', 'TE'], REC_FLEX: ['WR', 'TE'] };
+
+/**
+ * Points left on the bench, per roster-week, across the whole archive.
+ *
+ * POSITION ELIGIBILITY IS THE WHOLE JOB. Comparing the best bench score to the
+ * worst starter is one line and produces claims like "you should have started
+ * your backup QB at running back", which is worse than saying nothing: it is
+ * confidently wrong in front of the person who made the decision. So a swap
+ * only counts when the benched player could legally have filled the slot the
+ * starter occupied, which needs roster_positions and a position per player.
+ *
+ * Positions come from the local players table, not sleeper.allPlayers(). That
+ * endpoint is 15MB and Sleeper's own docs say once a day at most; the table is
+ * already synced and is a join instead of a download.
+ *
+ * Only the single best swap per roster-week is kept. A full optimal-lineup
+ * solve would find more points, but "you left 39 on the bench" invites an
+ * argument about the solver, while "you started Montgomery for zero over Taylor
+ * for 39.8" is a thing that happened and nobody can dispute.
+ */
+const benchCache = new Map();
+
+async function benchMistakes(sleeperLeagueId, { limit = 3 } = {}) {
+  /*
+   * Cached for the life of the process. Every season this reads is finished, so
+   * the answer cannot change, and the alternative is 12,000 player rows and a
+   * pass over 582 games on every single reply.
+   */
+  const cacheKey = `${sleeperLeagueId}:${limit}`;
+  if (benchCache.has(cacheKey)) return benchCache.get(cacheKey);
+
+  const seasons = await chain(sleeperLeagueId);
+  const ids = seasons.map(s => s.league_id);
+  if (!ids.length) return [];
+
+  const { rows } = await db.query(
+    `select s.season, s.payload from snapshots s
+       join leagues l on l.id = s.league_id
+      where l.sleeper_league_id = any($1::text[]) and s.kind = 'final'
+      order by s.season asc`, [ids]);
+  if (!rows.length) return [];
+
+  const { rows: players } = await db.query(
+    'select player_id, full_name, position from players where position is not null');
+  const byId = new Map(players.map(p => [p.player_id, p]));
+
+  const out = [];
+  for (const { season, payload } of rows) {
+    const slots = (payload.league?.roster_positions || []).filter(s => s !== 'BN');
+    const users = new Map((payload.users || []).map(u => [u.user_id, u.display_name]));
+    const owner = new Map((payload.rosters || []).map(r => [Number(r.roster_id), r.owner_id]));
+
+    for (const g of payload.games || []) {
+      for (const [rosterId, lineup] of Object.entries(g.lineups || {})) {
+        const started = new Set(lineup.s || []);
+        const points = lineup.pp || {};
+        const bench = Object.keys(points).filter(id => !started.has(id));
+
+        let best = null;
+        (lineup.s || []).forEach((starterId, i) => {
+          const slot = slots[i];
+          if (!slot) return;
+          const eligible = FLEX_SLOTS[slot] || [slot];
+          const starterPts = points[starterId] ?? 0;
+
+          for (const benchId of bench) {
+            const p = byId.get(benchId);
+            if (!p || !eligible.includes(p.position)) continue;
+            const gain = Math.round(((points[benchId] ?? 0) - starterPts) * 100) / 100;
+            if (gain > 0 && (!best || gain > best.cost)) {
+              best = {
+                cost: gain, slot,
+                benched: p.full_name, benchedPoints: points[benchId] ?? 0,
+                started: byId.get(starterId)?.full_name || starterId, startedPoints: starterPts,
+              };
+            }
+          }
+        });
+
+        if (best) {
+          const userId = owner.get(Number(rosterId));
+          out.push({ season, week: g.w, playoff: Boolean(g.po),
+            userId, name: users.get(userId) || null, ...best });
+        }
+      }
+    }
+  }
+
+  out.sort((a, b) => b.cost - a.cost);
+  const top = out.slice(0, limit);
+  benchCache.set(cacheKey, top);
+  return top;
+}
+
+/** The worst lineup calls, for the prompt. */
+function benchBlock(rows, names = new Map()) {
+  if (!rows?.length) return '';
+  const who = r => {
+    const known = names.get(r.userId);
+    return known && r.name && known !== r.name ? `${known} (${r.name})` : known || r.name || 'unknown';
+  };
+  const L = ['WORST LINEUP CALLS EVER (a benched player who could legally have filled the slot,'
+           + ' and outscored the starter. Position eligibility is already checked, so these are'
+           + ' real. Points, not hindsight about matchups):'];
+  for (const r of rows) {
+    L.push(`  ${r.season} week ${r.week}${r.playoff ? ' (playoff)' : ''} ${who(r)}: started `
+         + `${r.started} for ${r.startedPoints} over ${r.benched} for ${r.benchedPoints} `
+         + `at ${r.slot}, ${r.cost} points left on the bench`);
+  }
   return L.join('\n');
 }
 
@@ -570,4 +728,5 @@ const ordinal = n => {
 };
 
 module.exports = { chain, archiveLeague, captureSeason, career, careerBlock, careerExtremes,
-  toiletLoser, movesByRoster, gamesFor, gameRecords, gameRecordsBlock, luck, luckBlock, toiletBlock, activityBlock, ordinal };
+  toiletLoser, movesByRoster, gamesFor, gameRecords, gameRecordsBlock,
+  benchMistakes, benchBlock, luck, luckBlock, toiletBlock, activityBlock, ordinal };
