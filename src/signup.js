@@ -196,7 +196,12 @@ async function record({ phone, email = null, leagueId, rawText, source = 'sms',
     await require('./notify').operator(null, require('./notify').waitlistText({
       leagueName: league?.name || rows[0].league_name,
       teams: league?.total_rosters,
-      phone: rows[0].phone || normalized || mail,
+      // The PHONE only. It used to fall back to the email so the alert always
+      // had something to slice a ref out of, which is exactly how "INVITE .com"
+      // reached a real phone. Absent means absent, and waitlistText says so.
+      phone: rows[0].phone || normalized || null,
+      email: rows[0].email || mail || null,
+      name: [rows[0].first_name, rows[0].last_name].filter(Boolean).join(' ') || null,
       source,
       pendingCount: waiting.length || 1,
     })).catch(() => {});

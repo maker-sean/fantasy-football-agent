@@ -102,5 +102,48 @@ const withEnv = async (val, fn) => {
     assert.match(t, /Reply INVITE/);
   });
 
+  console.log('\na lead nobody can text');
+
+  await it('a signup with no phone is not told to reply INVITE', async () => {
+    /*
+     * The first real website signup produced "Reply INVITE .com". The ref is
+     * the last four characters of the contact and, with no phone, the caller
+     * was passing the email address in that slot.
+     *
+     * The instruction was wrong underneath the typo too: invites.pending()
+     * filters on `phone is not null` and invites.send() refuses without one, so
+     * INVITE could never have reached that row however it was typed.
+     */
+    const t = notify.waitlistText({
+      leagueName: 'Halcyon Kings', teams: 12, source: 'web',
+      email: 'someone@example.invalid', name: 'Sean Mihm',
+    });
+    assert.doesNotMatch(t, /Reply INVITE/, 'told the operator to do something that cannot work');
+    assert.doesNotMatch(t, /\.com/, 'sliced a ref out of an email address again');
+    assert.match(t, /Email them yourself/);
+  });
+
+  await it('an email-only lead carries the name and address, since that is all there is', async () => {
+    const t = notify.waitlistText({
+      leagueName: 'X', teams: 12, source: 'web',
+      email: 'someone@example.invalid', name: 'Sean Mihm',
+    });
+    assert.match(t, /Sean Mihm/);
+    assert.match(t, /someone@example\.invalid/);
+  });
+
+  await it('a lead with neither contact says the dashboard is the only copy', async () => {
+    const t = notify.waitlistText({ leagueName: 'X', teams: 10, source: 'web' });
+    assert.match(t, /dashboard is the only place/);
+  });
+
+  await it('a name rides along on a normal texted signup too', async () => {
+    const t = notify.waitlistText({
+      leagueName: 'X', teams: 12, phone: '+15551234567', name: 'Dana Reyes' });
+    assert.match(t, /Dana Reyes/);
+    assert.match(t, /Reply INVITE/, 'a phone signup still carries the command');
+    assert.match(t, /4567/);
+  });
+
   console.log(`\n${pass} passing`);
 })();

@@ -612,6 +612,47 @@ function waitlistActions(s) {
   return wrap;
 }
 
+/* A website lead with an address and no number: yours to email, and to clear. */
+function emailOnlyActions(s) {
+  const wrap = document.createElement('div');
+  wrap.className = 'pf';
+
+  const note = document.createElement('div');
+  note.className = 'pf-note';
+  note.textContent = s.email
+    ? 'No phone — email them yourself, then mark it handled.'
+    : 'No phone and no email. Nothing here can reach them.';
+  wrap.appendChild(note);
+
+  const row = document.createElement('div');
+  row.className = 'pf-row';
+
+  if (s.email) {
+    // A real mailto, prefilled. The gap this closes is small and constant:
+    // copying an address out of a table, every time, forever.
+    const mail = document.createElement('a');
+    mail.className = 'btn';
+    mail.href = `mailto:${encodeURIComponent(s.email)}`
+      + `?subject=${encodeURIComponent('Commish AI — ' + (s.league_name || 'your league'))}`;
+    mail.textContent = 'Email them';
+    row.appendChild(mail);
+  }
+
+  const done = document.createElement('button');
+  done.className = 'btn btn-quiet';
+  done.textContent = 'Mark handled';
+  done.onclick = async () => {
+    if (!confirm('Take this off the waitlist? Nothing is sent to them.')) return;
+    try {
+      await api('POST', `/api/admin/signups/${s.id}/decline`);
+      await renderWaitlist();
+    } catch (err) { alert('Could not update: ' + err.message); }
+  };
+  row.appendChild(done);
+  wrap.appendChild(row);
+  return wrap;
+}
+
 /* Answers next to the facts they were given, which is the only way to check one. */
 function renderPreflightPanel(panel, run) {
   panel.className = 'pf-panel';
@@ -693,6 +734,16 @@ async function renderWaitlist() {
     const act = document.createElement('td');
     if (s.status === 'new' && s.phone) {
       act.appendChild(waitlistActions(s));
+    } else if (s.status === 'new') {
+      /*
+       * A lead with no phone number.
+       *
+       * Nothing here can text them: invites.send() refuses without a number and
+       * is right to. This used to render an empty cell, which left the row
+       * sitting on `new` forever with no way to clear it and no hint that the
+       * next move was a human writing an email.
+       */
+      act.appendChild(emailOnlyActions(s));
     } else if (s.redeemed_at) {
       act.className = 'muted small';
       act.textContent = 'opened the link';

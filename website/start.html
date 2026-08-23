@@ -381,13 +381,21 @@ function watchForText(code) {
       const d = await r.json();
       if (!d.used) return schedule();
       stopPolling();
+      /*
+       * The card still flips before the redirect. The navigation is not
+       * instant, and a page that sits on "Waiting for your text…" for a beat
+       * after the text has plainly arrived reads as a page that missed it.
+       */
       $('sms-card').classList.remove('pending');
       $('sms-card').classList.add('done');
       $('waiting').classList.add('done');
       $('pulse').textContent = '✓';
       $('pulse').classList.add('check');
       $('wait-title').textContent = "Got it. You're in the queue.";
-      $('wait-note').textContent = "We'll text you when it's your league's turn. Nothing else to do.";
+      $('wait-note').textContent = 'Taking you to the confirmation…';
+      // Only which door they came through. No address and no league name goes
+      // in this URL: a query string ends up in history and in screen shares.
+      location.href = 'success.html?via=text';
     } catch {
       schedule();          // transient; the next tick retries
     }
@@ -482,9 +490,9 @@ $('email-go').addEventListener('click', async () => {
     });
     const d = await r.json();
     if (!r.ok) throw new Error(d.error || 'failed');
-    say($('email-msg'), d.created
-      ? `You're in the queue${d.league ? ' for ' + d.league.name : ''}. We'll email you.`
-      : "You're already on the list, nothing else to do.", 'ok');
+    // Same page whether this was new or a repeat: both mean they are on the
+    // list, and "you were already on it" is a correction nobody needs.
+    location.href = 'success.html?via=email';
   } catch {
     $('email-go').disabled = false;
     say($('email-msg'), "Couldn't add you just now. Try again in a moment.", 'err');

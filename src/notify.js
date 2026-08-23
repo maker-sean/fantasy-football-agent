@@ -72,10 +72,38 @@ async function operator(provider, text, { dryRun = false } = {}) {
  * acting was a terminal, a script name nobody remembers, and a phone number
  * that had to be looked up first.
  */
-function waitlistText({ leagueName, teams, phone, source, pendingCount = 1 }) {
+function waitlistText({ leagueName, teams, phone, email, name, source, pendingCount = 1 }) {
   const who = leagueName || 'a league with no Sleeper id';
   const size = teams ? `, ${teams} teams` : '';
-  const ref = String(phone || '').slice(-4);
+  const from = source === 'web' ? ' (from the website)' : '';
+
+  /*
+   * Who they are, now that we know.
+   *
+   * The website asks for a name before it hands out the code, so an alert that
+   * says only "a league, 12 teams" is throwing away the one thing that makes it
+   * possible to reply like a person. This line was written before that field
+   * existed.
+   */
+  const person = [name, email].filter(Boolean).join('  ');
+  const intro = `New signup: ${who}${size}${from}.` + (person ? `\n${person}` : '');
+
+  /*
+   * A signup with no phone CANNOT be invited, and must not be told to try.
+   *
+   * The first real website signup produced "Reply INVITE .com": the ref is the
+   * last four characters of the contact, and with no phone it fell back to the
+   * email address. The advice underneath it was wrong anyway — invites.pending()
+   * filters on `phone is not null` and invites.send() refuses without one, so
+   * INVITE could never have reached this row however it was typed. An
+   * instruction that cannot work is worse than no instruction: it costs the
+   * minute somebody spends finding that out.
+   */
+  if (!phone) {
+    return `${intro}\n\nNo phone on this one, so INVITE will not reach them. `
+         + `Email them yourself${email ? '' : ' — and there is no address either, so the '
+           + 'dashboard is the only place this lead exists'}.`;
+  }
 
   /*
    * The ref is in the alert even when it is not needed yet.
@@ -85,11 +113,12 @@ function waitlistText({ leagueName, teams, phone, source, pendingCount = 1 }) {
    * means the message you scroll back to is still actionable after a second
    * league lands.
    */
+  const ref = String(phone).slice(-4);
   const how = pendingCount > 1
     ? `Reply INVITE ${ref} to send the setup link. ${pendingCount} are waiting, so the number matters.`
     : `Reply INVITE to send the setup link, or INVITE ${ref} to be explicit.`;
 
-  return `New signup: ${who}${size}${source === 'web' ? ' (from the website)' : ''}.\n\n${how}`;
+  return `${intro}\n\n${how}`;
 }
 
 module.exports = { operator, operatorPhone, waitlistText };

@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>You're on the waitlist | Commish AI</title>
+<meta name="description" content="You've been added to the Commish AI waitlist.">
+<!-- Nothing to index here, and the URL carries a signup someone just made. -->
+<meta name="robots" content="noindex">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<nav>
+  <div class="wrap">
+    <a class="brand" href="index.html" aria-label="Commish"><span class="brand-word" aria-hidden="true"><svg viewBox="0 0 4609 700" focusable="false"><g transform="translate(-33 700)" fill="currentColor"><path d="M33 -124 116 -593 241 -700H582L683 -579L665 -480H529L539 -537L501 -584H301L241 -533L176 -167L218 -116H418L473 -163L484 -220H620L599 -105L476 0H135Z M698 -124 781 -593 906 -700H1266L1368 -577L1284 -103L1162 0H800ZM1099 -116 1159 -167 1224 -533 1182 -584H967L907 -533L841 -167L883 -116Z M1520 -700H1638L1767 -248H1769L2056 -700H2190L2067 0H1936L2011 -426H2009L1791 -98H1707L1605 -426H1603L1528 0H1397Z M2331 -700H2449L2578 -248H2580L2867 -700H3001L2878 0H2747L2822 -426H2820L2602 -98H2518L2416 -426H2414L2339 0H2208Z M3147 -700H3283L3159 0H3023Z M3310 -116 3327 -208H3461L3450 -149L3477 -116H3683L3723 -150L3744 -266L3717 -299H3460L3364 -415L3396 -600L3514 -700H3829L3926 -584L3910 -491H3776L3786 -551L3759 -584H3561L3522 -551L3504 -448L3531 -415H3788L3884 -299L3848 -100L3731 0H3406Z M4075 -700H4211L4160 -407H4455L4506 -700H4642L4519 0H4383L4434 -291H4139L4088 0H3952Z"/></g></svg></span><span class="mark" aria-hidden="true"><svg viewBox="4 10 56 44" focusable="false"><path d="M20 10 H44 A16 16 0 0 1 60 26 V49 A5 5 0 0 1 55 54 H20 A16 16 0 0 1 4 38 V26 A16 16 0 0 1 20 10 Z"/><g class="dots"><circle cx="16" cy="32" r="4.5"/><circle cx="32" cy="32" r="4.5"/><circle cx="48" cy="32" r="4.5"/></g></svg></span></a>
+    <ul>
+      <li><a href="pricing.html">Pricing</a></li>
+      <li><a href="terms.html">Terms</a></li>
+    </ul>
+  </div>
+</nav>
+
+<section class="legal">
+  <div class="wrap narrow">
+    <p class="eyebrow">You're in</p>
+    <h1>You've been added to the waitlist.</h1>
+    <p class="lede">We're excited to bring Commish AI to your league, and we'll be reaching
+    out soon.</p>
+
+    <!-- Which way we will actually contact them, because "we'll be in touch"
+         leaves somebody watching the wrong inbox. Set from the path they took;
+         the generic line stands when this page is opened cold. -->
+    <div class="callout">
+      <h3>What happens next, honestly</h3>
+      <p class="small" id="how" style="margin-bottom:10px">We have what we need and we'll be in
+      touch when it's your league's turn.</p>
+      <p class="small" style="margin-bottom:10px">
+        Commish is in early access and onboarding is not automatic yet. A real person reads your
+        league and sets it up, which is why this is a queue rather than a login. We would rather
+        tell you that than take your money and leave you waiting.
+      </p>
+      <p class="small" style="margin-bottom:0">
+        Nothing is charged today. Reply <kbd>STOP</kbd> to any text and you will not hear from us
+        again. See <a href="messaging.html">messaging terms</a>.
+      </p>
+    </div>
+
+    <p style="margin-top:26px"><a class="btn ghost" href="index.html">Back to the site</a></p>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <span>© <span id="yr">2026</span> {{BUSINESS_NAME}}</span>
+    <nav><ul>
+      <li><a href="index.html">Home</a></li>
+      <li><a href="pricing.html">Pricing</a></li>
+      <li><a href="terms.html">Terms</a></li>
+      <li><a href="messaging.html">Messaging terms</a></li>
+    </ul></nav>
+  </div>
+</footer>
+<script>
+  document.getElementById('yr').textContent = new Date().getFullYear();
+
+  /*
+   * How we will reach them, from ?via.
+   *
+   * Read rather than trusted: anything other than the two values we set falls
+   * through to the generic line already in the markup. The parameter says which
+   * door somebody came through and nothing about who they are — no address and
+   * no league name goes in this URL, because a query string is the one part of
+   * a page that ends up in history, referrers and anybody's screen share.
+   */
+  const via = new URLSearchParams(location.search).get('via');
+  const line = {
+    text:  "We'll text the number you messaged from. Nothing else to do.",
+    email: "We'll email the address you gave us. Nothing else to do.",
+  }[via];
+  if (line) document.getElementById('how').textContent = line;
+</script>
+</body>
+</html>
