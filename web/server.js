@@ -1249,6 +1249,18 @@ app.get('/api/admin/errors', admin, wrap(async (req, res) => {
  * league was waiting was a number going from 1 to 2, with no way to see who
  * without opening a terminal. A signup sat unnoticed for eleven hours that way.
  */
+/*
+ * Asked for and missing: a feature list written by the league.
+ *
+ * A query, not a log. decisions holds every reply and messages holds every
+ * question, so this works on history rather than only on what happens next.
+ */
+app.get('/api/admin/gaps', admin, wrap(async (req, res) => {
+  const gaps = require('../src/gaps');
+  const days = Math.min(Number(req.query.days) || 30, 365);
+  res.json({ gaps: await gaps.withNames(await gaps.recent({ days, limit: 100 })) });
+}));
+
 app.get('/api/admin/signups', admin, wrap(async (_req, res) => {
   const invites = require('../src/invites');
   const { rows: recent } = await db.query(

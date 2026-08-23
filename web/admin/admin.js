@@ -343,6 +343,52 @@ function el2(tag, cls, text) {
   return n;
 }
 
+// ---------------------------------------------------------------- gaps ----
+
+/**
+ * Every time the bot said it did not have something.
+ *
+ * Question above answer, because the question is the feature request and the
+ * answer is only how it was refused.
+ */
+async function renderGaps() {
+  const body = $('gaps').querySelector('tbody');
+  let data;
+  try {
+    data = await api('GET', '/api/admin/gaps?days=30');
+  } catch (err) {
+    $('gaps-sub').textContent = 'Could not load: ' + err.message;
+    return;
+  }
+
+  body.innerHTML = '';
+  const rows = data.gaps || [];
+  if (!rows.length) {
+    $('gaps-sub').textContent = 'Nothing asked for and missing in the last 30 days.';
+    return;
+  }
+
+  for (const g of rows) {
+    const tr = document.createElement('tr');
+
+    const when = document.createElement('td');
+    when.className = 'muted small';
+    when.textContent = new Date(g.created_at).toLocaleDateString() + ' · ' + g.asker;
+
+    const what = document.createElement('td');
+    const q = document.createElement('div');
+    q.textContent = String(g.question || '(question not recorded)').replace(/\s+/g, ' ').slice(0, 140);
+    const a = document.createElement('div');
+    a.className = 'muted small';
+    a.textContent = String(g.answer || '').replace(/\s+/g, ' ').slice(0, 140);
+    what.appendChild(q); what.appendChild(a);
+
+    tr.appendChild(when); tr.appendChild(what);
+    body.appendChild(tr);
+  }
+  $('gaps-sub').textContent = `${rows.length} in the last 30 days. Each one is somebody telling you what to build next.`;
+}
+
 // ------------------------------------------------------------ waitlist ----
 
 /**
@@ -814,6 +860,7 @@ async function load() {
 
   renderTiles(funnel.tiles);
   renderWaitlist().catch(err => console.error('[admin] waitlist failed:', err));
+  renderGaps().catch(err => console.error('[admin] gaps failed:', err));
   renderVisits(funnel.visits.map(v => ({ hour: v.hour, count: v.views, views: v.views })));
   renderFunnel(funnel.funnel);
   renderTextFlow(funnel.textFlow);

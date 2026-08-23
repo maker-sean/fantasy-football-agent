@@ -47,6 +47,7 @@
     "invite": "node scripts/invite.js",
     "history": "node scripts/history.js",
     "welcome": "node scripts/welcome.js",
+    "gaps": "node scripts/gaps.js",
     "make-logo": "node scripts/make-logo.js"
   },
   "dependencies": {
