@@ -503,6 +503,10 @@ input[type="range"] { accent-color: var(--turf); }
    the pair wrapped it left them touching vertically and indented the second one
    by the 8px meant to separate them horizontally. */
 .hero-actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 30px; }
+/* Sits under the buttons, deliberately quiet. Loud enough to be read before
+   clicking, quiet enough that it never competes with the call to action —
+   a price that shouts reads as the point of the page. */
+.hero-price { margin: 14px 0 0; font-size: .87rem; }
 
 .hero-phone { display: flex; justify-content: center; }
 
