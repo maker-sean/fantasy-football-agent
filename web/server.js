@@ -597,7 +597,7 @@ app.post('/api/signup-intent', wrap(async (req, res) => {
    * questions conversationally after they land.
    */
   const profile = readProfile(req.body);
-  const missing = ['firstName', 'email', 'platform'].filter(k => !profile[k]);
+  const missing = ['firstName', 'email', 'platform', 'plan'].filter(k => !profile[k]);
   if (profile.platform === 'other' && !profile.platformOther) missing.push('platformOther');
   if (missing.length) return res.status(400).json({ error: 'incomplete_profile', missing });
 
@@ -648,7 +648,11 @@ function readProfile(body) {
   const wanted = String(body?.platform || '').trim().toLowerCase();
   const platform = intake.PLATFORMS.some(([key]) => key === wanted) ? wanted : null;
   const email = String(body?.email || '').trim();
+  // Season or dynasty. Validated against the same two the tiles offer, so a
+  // hand-rolled request cannot invent a third plan nobody sells.
+  const wantedPlan = String(body?.plan || '').trim().toLowerCase();
   return {
+    plan: ['season', 'dynasty'].includes(wantedPlan) ? wantedPlan : null,
     firstName: parsed?.first || null,
     lastName: parsed?.last || null,
     // Permissive, like every other address check here: bouncing a valid one
@@ -721,6 +725,7 @@ app.post('/api/signup-email', wrap(async (req, res) => {
     lastName: profile.lastName,
     platform: profile.platform,
     platformOther: profile.platformOther,
+    plan: profile.plan,
   });
   res.json({
     ok: true,
@@ -1349,8 +1354,17 @@ app.get('/api/admin/signups', admin, wrap(async (_req, res) => {
   const { rows: recent } = await db.query(
     `select id, phone, league_name, season, total_rosters, status,
             source, created_at, invited_at, redeemed_at,
-            first_name, last_name, email, platform, platform_other
+            first_name, last_name, email, platform, platform_other, plan
        from signups order by created_at desc limit 50`);
+
+  /*
+   * The split, because a per-signup column answers "what did this one pick" and
+   * the question is "does anyone pick dynasty" — that decides whether the
+   * offseason features are worth building.
+   */
+  const { rows: planSplit } = await db.query(
+    `select coalesce(plan, 'not asked') as plan, count(*)::int as n
+       from signups group by 1 order by n desc`);
   /*
    * The latest pre-flight per signup, in one query rather than N.
    *
@@ -1384,6 +1398,7 @@ app.get('/api/admin/signups', admin, wrap(async (_req, res) => {
   };
 
   res.json({
+    planSplit,
     pending: (await invites.pending()).map(decorate),
     // The whole list too, so an invited league does not vanish from the screen
     // the moment it is actioned and leave you wondering whether it worked.

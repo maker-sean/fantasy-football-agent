@@ -75,13 +75,13 @@ async function issueCode({ sleeperLeagueId, league, profile = null }) {
     const code = newCode();
     const { rows } = await db.query(
       `insert into signup_codes (code, sleeper_league_id, league_name, season, total_rosters,
-                                 first_name, last_name, email, platform, platform_other)
-       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+                                 first_name, last_name, email, platform, platform_other, plan)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
        on conflict (code) do nothing
        returning *`,
       [code, sleeperLeagueId, league?.name || null, league?.season || null, league?.total_rosters || null,
        profile?.firstName || null, profile?.lastName || null, profile?.email || null,
-       profile?.platform || null, profile?.platformOther || null]
+       profile?.platform || null, profile?.platformOther || null, profile?.plan || null]
     );
     if (rows[0]) return rows[0];
   }
@@ -146,7 +146,7 @@ async function alreadyOnboarded(leagueId) {
  *   them here. Either way a lead is asked once, by whichever door it came in.
  */
 async function record({ phone, email = null, leagueId, rawText, source = 'sms',
-  firstName = null, lastName = null, platform = null, platformOther = null }) {
+  firstName = null, lastName = null, platform = null, platformOther = null, plan = null }) {
   const normalized = phone ? db.normalizePhone(phone) : null;
   const mail = email ? String(email).trim().toLowerCase() : null;
   if (!normalized && !mail) throw new Error('a signup needs a phone or an email');
@@ -169,13 +169,13 @@ async function record({ phone, email = null, leagueId, rawText, source = 'sms',
 
   const { rows } = await db.query(
     `insert into signups (phone, email, sleeper_league_id, league_name, season, total_rosters,
-                          raw_text, source, first_name, last_name, platform, platform_other)
-     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+                          raw_text, source, first_name, last_name, platform, platform_other, plan)
+     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
      on conflict ${conflict} do nothing
      returning *`,
     [normalized, mail, leagueId || null, league?.name || null, league?.season || null,
      league?.total_rosters || null, rawText || null, source,
-     firstName || null, lastName || null, platform || null, platformOther || null]
+     firstName || null, lastName || null, platform || null, platformOther || null, plan || null]
   );
 
   if (rows[0]) {
@@ -562,6 +562,7 @@ async function handle(msg, provider, { dryRun = false } = {}) {
     email: codeRow?.email || null,
     platform: codeRow?.platform || null,
     platformOther: codeRow?.platform_other || null,
+    plan: codeRow?.plan || null,
   });
   const text = await confirmAndAsk({ phone: msg.senderId, res, leagueId });
 

@@ -170,30 +170,44 @@ const server = app.listen(0, async () => {
    */
   const LEAGUE = '1400000000000000003';   // a real Sleeper id, so the route gets past its lookup
   const intent = body => post('/api/signup-intent', { sleeperLeagueId: LEAGUE, ...body });
+  const FULL = { name: 'Dana Reyes', email: 'zz-profile-gate@example.invalid',
+                 platform: 'discord', plan: 'season' };
 
   await it('a bare request for a code is refused', async () => {
     const r = await intent({});
     assert.strictEqual(r.status, 400);
     assert.strictEqual(r.body.error, 'incomplete_profile');
-    assert.deepStrictEqual(r.body.missing, ['firstName', 'email', 'platform']);
+    assert.deepStrictEqual(r.body.missing, ['firstName', 'email', 'platform', 'plan']);
   });
 
-  await it('two out of three is still refused, and says which one', async () => {
-    const r = await intent({ name: 'Dana Reyes', email: 'zz-profile-gate@example.invalid' });
+  await it('a missing answer is refused, and named', async () => {
+    const r = await intent({ name: 'Dana Reyes', email: 'zz-profile-gate@example.invalid',
+      plan: 'season' });
     assert.strictEqual(r.status, 400);
     assert.deepStrictEqual(r.body.missing, ['platform']);
   });
 
+  await it('the plan is required, because both tiles used to land here silently', async () => {
+    const { plan, ...noPlan } = FULL;
+    const r = await intent(noPlan);
+    assert.strictEqual(r.status, 400);
+    assert.deepStrictEqual(r.body.missing, ['plan']);
+  });
+
+  await it('a plan nobody sells is dropped rather than stored', async () => {
+    const r = await intent({ ...FULL, plan: 'lifetime' });
+    assert.strictEqual(r.status, 400);
+    assert.deepStrictEqual(r.body.missing, ['plan']);
+  });
+
   await it('picking "something else" without saying where is refused', async () => {
-    const r = await intent({ name: 'Dana Reyes', email: 'zz-profile-gate@example.invalid',
-      platform: 'other' });
+    const r = await intent({ ...FULL, platform: 'other' });
     assert.strictEqual(r.status, 400);
     assert.deepStrictEqual(r.body.missing, ['platformOther']);
   });
 
   await it('a complete answer gets a code, carrying the profile', async () => {
-    const r = await intent({ name: 'Dana Reyes', email: 'zz-profile-gate@example.invalid',
-      platform: 'discord' });
+    const r = await intent({ ...FULL, plan: 'dynasty' });
     assert.strictEqual(r.status, 200);
     assert.ok(/^[A-Z0-9]{4}$/.test(r.body.code), 'no code came back');
     const { rows: [row] } = await db.query(
@@ -201,7 +215,17 @@ const server = app.listen(0, async () => {
     assert.strictEqual(row.first_name, 'Dana');
     assert.strictEqual(row.email, 'zz-profile-gate@example.invalid');
     assert.strictEqual(row.platform, 'discord');
+    assert.strictEqual(row.plan, 'dynasty');
     await db.query('delete from signup_codes where code = $1', [r.body.code]);
+  });
+
+  await it('the plan survives the text, which is the whole point of asking', async () => {
+    // Both Start trial buttons landed on the same page and it never asked, so
+    // the choice somebody had just made was dropped between the tile and here.
+    const c = await codeFor('plan', { firstName: 'Dana', lastName: 'Reyes',
+      email: 'zz-profile-plan@example.invalid', platform: 'discord', plan: 'dynasty' });
+    const { row } = await redeem('+15558819006', c.code);
+    assert.strictEqual(row.plan, 'dynasty');
   });
 
   console.log('\nthe texted door fills the same columns');

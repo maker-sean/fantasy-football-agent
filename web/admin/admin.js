@@ -716,7 +716,9 @@ async function renderWaitlist() {
     // Who they are and where they want the bot. Platform is what decides the
     // build order, so it belongs on the screen where you triage the queue.
     const who = [s.first_name, s.last_name].filter(Boolean).join(' ');
-    const detail = [who, s.email, s.platform_other || s.platform].filter(Boolean);
+    // Plan sits with the other things they told us, not in its own column: it
+    // is one word and a column of mostly "season" is a column of nothing.
+    const detail = [who, s.email, s.platform_other || s.platform, s.plan].filter(Boolean);
     if (detail.length) {
       const d = document.createElement('div');
       d.className = 'muted small';
@@ -757,9 +759,19 @@ async function renderWaitlist() {
   }
 
   const waiting = (data.pending || []).length;
-  $('waitlist-sub').textContent = waiting
+  /*
+   * The plan split next to the queue length. "Does anyone actually pick
+   * dynasty" is the question that decides whether the offseason features get
+   * built, and until now nothing recorded the answer — both Start trial buttons
+   * pointed at the same page and it never asked.
+   */
+  const split = (data.planSplit || [])
+    .filter(r => r.plan !== 'not asked')
+    .map(r => `${r.n} ${r.plan}`).join(', ');
+  const head = waiting
     ? `${waiting} waiting. You can also reply INVITE to the alert text.`
     : 'Nobody waiting.';
+  $('waitlist-sub').textContent = split ? `${head}  ·  ${split}` : head;
 }
 
 // ------------------------------------------------------------- signups ----

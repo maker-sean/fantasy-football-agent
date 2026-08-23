@@ -79,6 +79,24 @@
         <input id="email" type="email" autocomplete="email" placeholder="you@example.com">
       </div>
       <div class="row" style="margin-top:8px">
+        <!-- Season or dynasty.
+             
+             Both pricing tiles have a Start trial button and both used to land
+             here, so the choice somebody had just made was thrown away — and
+             there was no way to answer "does anyone pick dynasty", which is the
+             question that decides whether the offseason features get built.
+             
+             Preselected from ?plan when they arrived from a tile, and shown
+             rather than hidden, so they can see what they picked and change it.
+             Somebody arriving from the hero button has made no choice yet and
+             answers it here. -->
+        <select id="plan" aria-label="Season or dynasty?">
+          <option value="">Season or dynasty?</option>
+          <option value="season">Season — through the championship</option>
+          <option value="dynasty">Dynasty — all twelve months</option>
+        </select>
+      </div>
+      <div class="row" style="margin-top:8px">
         <!-- Where their league actually LIVES, which is not where onboarding
              happens. Somebody answering Discord is not confused about being
              texted; they are telling us what to build next. -->
@@ -424,6 +442,8 @@ function watchForText(code) {
 }
 
 // The free-text box only exists once "Something else" is the answer.
+$('plan').addEventListener('change', refreshProfileGate);
+
 $('platform').addEventListener('change', () => {
   $('platform-other-row').style.display = $('platform').value === 'other' ? '' : 'none';
   refreshProfileGate();
@@ -433,10 +453,23 @@ function profileBody() {
   return {
     name: $('name').value.trim() || null,
     email: $('email').value.trim() || null,
+    plan: $('plan').value || null,
     platform: $('platform').value || null,
     platformOther: $('platform-other').value.trim() || null,
   };
 }
+
+/*
+ * Preselect the plan they clicked, if they came from a tile.
+ *
+ * Read rather than trusted: anything that is not one of the two we sell leaves
+ * the field empty and they pick for themselves. The select is the record either
+ * way — the query string only decides what it starts on.
+ */
+(() => {
+  const wanted = new URLSearchParams(location.search).get('plan');
+  if (['season', 'dynasty'].includes(wanted)) $('plan').value = wanted;
+})();
 
 /*
  * What is still missing, in the order the fields appear.
@@ -453,6 +486,7 @@ function missingField() {
   const b = profileBody();
   if (!b.name || !/[a-z]/i.test(b.name)) return 'your name';
   if (!b.email || !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(b.email)) return 'an email address';
+  if (!b.plan) return 'season or dynasty';
   if (!b.platform) return 'where your league chats';
   if (b.platform === 'other' && !b.platformOther) return 'where that is';
   return null;
