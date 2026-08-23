@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Pricing | Commish AI</title>
-<meta name="description" content="The first week is free. $24 a season per league, $36 for dynasty. Split twelve ways, that is two dollars a manager.">
+<meta name="description" content="The first week is free. $5 per manager per year, $8 for dynasty. A twelve-team league is $60 a year.">
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="styles.css">
 </head>
@@ -25,8 +25,12 @@
 <section>
   <div class="wrap">
     <p class="eyebrow">Pricing</p>
-    <h1>Free for a week. After that, $24 a season.</h1>
-    <p class="lede">Split twelve ways, $24 is two dollars a manager for the year, and your league
+    <h1>Free for a week. After that, $5 a manager.</h1>
+    <!-- The total, said out loud. Per-person pricing hides the number somebody
+         actually pays, and a commissioner working it out in their head after
+         they have already committed is how a fair price starts feeling like a
+         trick. Twelve is the number this league size actually is. -->
+    <p class="lede">Five dollars each, for the year — $60 for a twelve-team league, and your league
     already argues about a $50 buy-in. The first week costs nothing and needs no card, because a
     bot in a group chat either earns its place by the first Tuesday or it does not.</p>
 
@@ -36,8 +40,12 @@
     <div class="grid" style="margin-top:44px">
       <div class="price feature">
         <h3>Season</h3>
-        <p class="amount">$24</p>
-        <p class="muted small">Per league, through the championship</p>
+        <!-- Per MANAGER now, not per league. The unit line does the work here:
+             the same "$5" means very different totals depending on which one it
+             is, and a reader who assumes the cheaper reading finds out at the
+             worst possible moment. -->
+        <p class="amount">$5</p>
+        <p class="muted small">Per manager, per year — a twelve-team league is $60</p>
         <ul>
           <li>The Tuesday recap, every week</li>
           <li>Pre-kickoff injury alerts</li>
@@ -50,8 +58,8 @@
 
       <div class="price">
         <h3>Dynasty</h3>
-        <p class="amount">$36</p>
-        <p class="muted small">Per league, all twelve months</p>
+        <p class="amount">$8</p>
+        <p class="muted small">Per manager, per year — a twelve-team league is $96</p>
         <ul>
           <li>Everything in Season</li>
           <li>It does not switch off in January</li>
@@ -63,7 +71,8 @@
     </div>
 
     <p class="small muted fine-print">
-      Prices in USD. Message and data rates from your carrier may apply.
+      Prices in USD, quoted per manager and billed once for the league. Message and data rates from
+      your carrier may apply.
       See <a href="terms.html">terms</a> and <a href="privacy.html">privacy policy</a>.
     </p>
   </div>
@@ -72,6 +81,16 @@
 <section id="start">
   <div class="wrap narrow">
     <h2>Questions your league will ask</h2>
+
+    <!-- First, because it is the question a per-manager price creates the moment
+         somebody reads it. Quoting per head and charging per league is the right
+         way round — it makes the number comparable to a buy-in — but only if the
+         page says so before the commissioner starts working out how to collect
+         twelve payments. -->
+    <h3>Does everyone have to pay separately?</h3>
+    <p>No. It is one payment for the league, priced by how many managers are in it — a twelve-team
+    league is $60 for the year, paid once. We quote it per manager because that is the number worth
+    comparing to your buy-in, not because we are chasing eleven people for five dollars.</p>
 
     <h3>Does everyone need an iPhone?</h3>
     <p>No. Mixed iPhone and Android group chats were the requirement this was built around. Three
