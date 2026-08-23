@@ -141,6 +141,102 @@ function parseClaim(text, { rosters, addressed, withinWindow, botNames = [] }) {
   return null;
 }
 
+/**
+ * Somebody who is ALREADY bound telling us who they are.
+ *
+ * Whitlock texted "I am Whitlock and I am the manager of Ruizs Onside Bandits" and the
+ * bot replied "Noted, Whitlock runs Ruiz's Onside Bandits". Nothing was noted. No
+ * claim parsed, no attempt logged, his row untouched. It was true by luck,
+ * because he happened to already be bound to exactly that — the same sentence
+ * would have come out if he were on the wrong roster, and a confident wrong
+ * statement about who somebody is is the failure the whole identity system
+ * exists to prevent.
+ *
+ * parseClaim will not catch these and should not: it takes a roster number or
+ * an exact label, and loosening it to accept prose is how a display name ends
+ * up as "and I are winning". This is a separate, looser matcher whose ONLY
+ * outcome is a truthful statement of what is already recorded.
+ *
+ * Deliberately narrow at the front. "I am" has to be followed by something
+ * name-shaped or team-shaped; "I am winning" and "I'm out this week" are
+ * ordinary chat and must stay that way.
+ */
+/*
+ * STRONG forms. These phrasings are almost never anything but an identity
+ * statement, so they stand on their own.
+ */
+const SELF_STRONG = new RegExp([
+  "(?:i'?m|i am)\\s+the\\s+(?:manager|owner|gm)\\s+of\\b",
+  "my team(?:'?s| is)\\b",
+  "\\bi (?:run|own)\\s+\\p{L}",
+].join('|'), 'iu');
+
+/*
+ * WEAK forms. "I am X" is only an identity statement when X is somebody's name,
+ * and a regex cannot tell: "I am winning", "I'm out this week" and "this is
+ * ridiculous" all look exactly like "I am Whitlock" to a pattern.
+ *
+ * So the weak form has to LAND on something known — a member's name or a team
+ * name in this league. That turns a guess into a lookup, which is the same move
+ * every superlative in this codebase had to make.
+ */
+const SELF_WEAK = /^(?:i'?m|i am|this is|my name'?s?(?: is)?|call me)\s+(.{2,60})$/iu;
+
+/** Accents and punctuation off, so "Ruizs Onside Bandits" finds "Ruiz's Onside Bandits". */
+const flatten = s => String(s || '')
+  .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+  .toLowerCase().replace(/[^a-z0-9 ]+/g, ' ').replace(/\s+/g, ' ').trim();
+
+/**
+ * Does this read as somebody stating their own identity?
+ *
+ * `known` is the names and team names in this league. Without it only the
+ * strong forms match, which is the safe direction: a missed self-intro gets an
+ * ordinary answer, a false one lectures somebody about the commissioner for
+ * saying "I am winning".
+ */
+function looksLikeSelfIntro(text, { botNames = [], known = [] } = {}) {
+  let s = String(text || '').trim();
+  if (!s) return false;
+  for (const n of botNames) {
+    const re = new RegExp(`^@?${String(n).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b[\\s:,-]*`, 'i');
+    if (re.test(s)) { s = s.replace(re, '').trim(); break; }
+  }
+  if (SELF_STRONG.test(s)) return true;
+
+  const m = SELF_WEAK.exec(s);
+  if (!m) return false;
+  const said = flatten(m[1]);
+  if (!said) return false;
+  return known.some(k => {
+    const f = flatten(k);
+    return f.length > 1 && (said === f || said.startsWith(f + ' ') || said.includes(f));
+  });
+}
+
+/**
+ * What to say back. States what IS recorded and who can change it.
+ *
+ * Never "noted". Nothing was recorded and saying so is the whole point: the
+ * previous version sounded like an acknowledgement and was a coincidence.
+ */
+function alreadyBoundReply({ displayName, teamName, rosterId }) {
+  const team = teamName || (rosterId ? `roster ${rosterId}` : 'your team');
+  const who = displayName || 'you';
+  return `${team} is already down as yours, ${who}. `
+       + `I cannot change who owns what, only your commissioner can, on the website.`;
+}
+
+/** Do not say it twice in a row. Once is informative, twice is nagging. */
+async function recentlyToldBound(leagueId, phone) {
+  const { rows } = await db.query(
+    `select 1 from identity_claims
+      where league_id = $1 and phone = $2 and outcome = 'already_bound'
+        and created_at > now() - interval '6 hours' limit 1`,
+    [leagueId, db.normalizePhone(phone)]);
+  return rows.length > 0;
+}
+
 /** A name people would actually want printed, or nothing. */
 function cleanName(raw) {
   const n = String(raw || '').trim().replace(/^["']|["']$/g, '');
@@ -319,6 +415,7 @@ function helpIntent(text) {
 }
 
 module.exports = {
+  looksLikeSelfIntro, alreadyBoundReply, recentlyToldBound, SELF_STRONG, SELF_WEAK,
   unclaimed, menuText, askText, parseClaim, cleanName, apply, replyFor,
   withinWindow, markAsked, recentlyPrompted, recentlyLinked, helpIntent, HELP_INTENTS,
   CLAIM_WINDOW_MINUTES, PROMPT_GAP_HOURS,

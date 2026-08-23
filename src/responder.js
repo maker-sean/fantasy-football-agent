@@ -410,6 +410,52 @@ class Responder {
       }
     }
 
+    /*
+     * Somebody who is ALREADY bound saying who they are.
+     *
+     * Whitlock texted "I am Whitlock and I am the manager of Ruizs Onside Bandits" and
+     * got back "Noted, Whitlock runs Ruiz's Onside Bandits". Nothing was noted: no
+     * claim parsed, no attempt logged, his row untouched. It was true by luck,
+     * and the identical sentence would have come out if he were on the wrong
+     * roster. A confident wrong statement about who somebody is is precisely
+     * what the identity system exists to prevent.
+     *
+     * So this states what IS recorded and who can change it, and never implies
+     * anything was written. Above the claims path because that one is gated on
+     * being unbound and would skip these people entirely.
+     */
+    if (db && league) {
+      const claimsMod = require('./claims');
+      const botNames = (league.config?.botNames || []).map(String);
+      const { rows: members } = await db.query(
+        'select phone, display_name, team_name, sleeper_roster_id from members where league_id = $1',
+        [league.id]);
+      const known = members.flatMap(m => [m.display_name, m.team_name]).filter(Boolean);
+
+      for (const m of burst) {
+        if (!m.bound) continue;
+        if (!claimsMod.looksLikeSelfIntro(m.text, { botNames, known })) continue;
+
+        const me = members.find(x => x.phone === db.normalizePhone(m.senderId));
+        if (!me) continue;
+        // Once is informative, twice is nagging.
+        if (await claimsMod.recentlyToldBound(league.id, m.senderId).catch(() => true)) break;
+
+        const text = claimsMod.alreadyBoundReply({
+          displayName: me.display_name, teamName: me.team_name, rosterId: me.sleeper_roster_id,
+        });
+        await this.sendUnlessPaused(chatId, text, 'identity');
+        await db.recordClaim({
+          leagueId: league.id, phone: m.senderId, claimedText: m.text,
+          outcome: 'already_bound', detail: { roster: me.sleeper_roster_id },
+        }).catch(() => {});
+        const verdict = { layer: 'identity', reply: true, reason: 'already_bound',
+          messageCount: burst.length, triggerMessageId: m.messageId };
+        await this.log(chatId, league, verdict, text).catch(() => {});
+        return { verdict, replied: text };
+      }
+    }
+
     if (db && league && burst.some(m => !m.bound)) {
       const handled = await this.handleClaims(chatId, burst, league)
         .catch(err => { console.error('[claims] failed:', err.message); return null; });
