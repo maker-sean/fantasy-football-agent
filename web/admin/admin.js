@@ -426,6 +426,16 @@ async function renderWaitlist() {
       n.textContent = ` · ${s.total_rosters} teams`;
       league.appendChild(n);
     }
+    // Who they are and where they want the bot. Platform is what decides the
+    // build order, so it belongs on the screen where you triage the queue.
+    const who = [s.first_name, s.last_name].filter(Boolean).join(' ');
+    const detail = [who, s.email, s.platform_other || s.platform].filter(Boolean);
+    if (detail.length) {
+      const d = document.createElement('div');
+      d.className = 'muted small';
+      d.textContent = detail.join('  ·  ');
+      league.appendChild(d);
+    }
 
     const when = document.createElement('td');
     when.className = 'muted small';

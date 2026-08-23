@@ -24,7 +24,8 @@ const onboardlink = require('./onboardlink');
 async function pending() {
   const { rows } = await db.query(
     `select id, phone, league_name, season, total_rosters, sleeper_league_id,
-            status, source, created_at
+            status, source, created_at,
+            first_name, last_name, email, platform, platform_other
        from signups
       where phone is not null
         and status = 'new'

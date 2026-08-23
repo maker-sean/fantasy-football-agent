@@ -33,8 +33,13 @@ const target = argv.find(a => !a.startsWith('--'));
     if (!rows.length) { console.log('\n  The waitlist is empty.\n'); return; }
     console.log('');
     for (const r of rows) {
-      console.log('  ' + String(r.phone).padEnd(16) + String(r.league_name || '—').padEnd(22)
+      console.log('  ' + String(r.phone).padEnd(16) + String(r.league_name || '-').padEnd(22)
                 + String(r.status).padEnd(10) + new Date(r.created_at).toLocaleString());
+      // Who they are and where they want it, because that is what decides who
+      // gets onboarded first and what gets built next.
+      const who = [r.first_name, r.last_name].filter(Boolean).join(' ');
+      const bits = [who, r.email, r.platform_other || r.platform].filter(Boolean);
+      if (bits.length) console.log('  ' + ' '.repeat(16) + bits.join('  |  '));
     }
     console.log('\n  npm run invite -- <phone> --send\n');
     return;

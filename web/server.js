@@ -1265,7 +1265,8 @@ app.get('/api/admin/signups', admin, wrap(async (_req, res) => {
   const invites = require('../src/invites');
   const { rows: recent } = await db.query(
     `select id, phone, league_name, season, total_rosters, status,
-            source, created_at, invited_at, redeemed_at
+            source, created_at, invited_at, redeemed_at,
+            first_name, last_name, email, platform, platform_other
        from signups order by created_at desc limit 50`);
   res.json({
     pending: await invites.pending(),

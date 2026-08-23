@@ -248,6 +248,25 @@ function reply({ created, league, leagueId }) {
        + `soon!\n\n${FOOTER}`;
 }
 
+/**
+ * Confirm the signup, then ask the first intake question.
+ *
+ * BOTH completion points call this. A signup finishes either by texting a code
+ * from the website or by picking a league in the conversation, and wiring the
+ * follow-up to only one of them is how the welcome, the mute and the operator
+ * alert each ended up half-done today.
+ *
+ * The confirmation and the first question go out as ONE message. Two texts
+ * arriving together reads like a system with a queue; one reads like somebody
+ * talking, which is the product's whole premise.
+ */
+async function confirmAndAsk({ phone, res, leagueId }) {
+  const text = reply({ ...res, leagueId });
+  if (!res.signup?.id) return text;
+  await setConversation(phone, 'intake_name', { signupId: res.signup.id });
+  return `${text}\n\n${require('./intake').askName()}`;
+}
+
 // ------------------------------------------------------- conversation ----
 
 /**
@@ -321,6 +340,20 @@ async function advance(msg) {
 
   const text = String(msg.text || '').trim();
 
+  /*
+   * The three questions asked AFTER a signup lands: name, email, and where
+   * they actually want the bot. Handled in src/intake.js and routed here so
+   * there is still one conversation per phone and one place that owns it.
+   */
+  if (String(convo.state || '').startsWith('intake_')) {
+    const out = await require('./intake').advance({
+      phone: msg.senderId, text, convo,
+      setState: (state, data) => setConversation(msg.senderId, state, data),
+      endState: () => endConversation(msg.senderId),
+    });
+    if (out) return out.reply;
+  }
+
   if (convo.state === 'awaiting_username') {
     const { user, leagues, season } = await leaguesForUsername(text);
     if (!user) {
@@ -332,9 +365,8 @@ async function advance(msg) {
     }
     if (leagues.length === 1) {
       // Nothing to choose between — don't make them pick from a list of one.
-      await endConversation(msg.senderId);
       const res = await record({ phone: msg.senderId, leagueId: leagues[0].league_id, rawText: msg.text });
-      return reply({ ...res, leagueId: leagues[0].league_id });
+      return confirmAndAsk({ phone: msg.senderId, res, leagueId: leagues[0].league_id });
     }
     // Candidates are stored, not re-fetched, so the number they reply with
     // resolves against the exact list they were shown.
@@ -366,9 +398,8 @@ async function advance(msg) {
            + options.map((o, i) => `${i + 1}) ${o.name}`).join('\n');
     }
 
-    await endConversation(msg.senderId);
     const res = await record({ phone: msg.senderId, leagueId: chosen.id, rawText: msg.text });
-    return reply({ ...res, leagueId: chosen.id });
+    return confirmAndAsk({ phone: msg.senderId, res, leagueId: chosen.id });
   }
 
   await endConversation(msg.senderId);
@@ -470,7 +501,7 @@ async function handle(msg, provider, { dryRun = false } = {}) {
     leagueId,
     rawText: msg.text,
   });
-  const text = reply({ ...res, leagueId });
+  const text = await confirmAndAsk({ phone: msg.senderId, res, leagueId });
 
   if (!dryRun && provider) {
     await provider.send(msg.senderId, text);
@@ -483,6 +514,6 @@ async function handle(msg, provider, { dryRun = false } = {}) {
 module.exports = {
   parse, record, reply, handle,
   advance, getConversation, setConversation, endConversation, leaguesForUsername,
-  issueCode, resolveCode, newCode, alreadyOnboarded,
+  issueCode, resolveCode, newCode, alreadyOnboarded, confirmAndAsk,
   KEYWORD, KEYWORDS, SIGNUP, RESERVED, FOOTER, CODE_ALPHABET, CODE_LEN,
 };
