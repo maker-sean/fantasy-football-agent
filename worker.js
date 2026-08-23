@@ -236,7 +236,35 @@ async function generateReply({ burst, league }) {
       // on `awaiting_chat` goes live only when a message actually arrives from
       // its group — the commissioner cannot assert it into being.
       try {
-        await chatlink.tryLink(msg, { provider: 'sendblue' });
+        const linked = await chatlink.tryLink(msg, { provider: 'sendblue' });
+
+        /*
+         * Introduce ourselves the moment we are in, not the first time somebody
+         * happens to ask something.
+         *
+         * The welcome used to hang off src/responder.js, gated on a verdict
+         * from decide(). But help and claims both return early well above that
+         * gate, so whichever of them spoke first became a league's first words.
+         * Halcyon Kings met the bot with "I do not know which of you is which
+         * yet" from a number nobody recognised, and never got the contact card,
+         * because the card rides on the introduction.
+         *
+         * tryLink returns a league ONLY on the transition, so this fires once,
+         * on the message that proves we are in the chat. ensureWelcomed guards
+         * on welcomed_at and stamps only after a successful send, so a failure
+         * here leaves the league un-introduced and it will be tried again
+         * rather than silently marked done.
+         */
+        if (linked) {
+          const welcome = require('./src/welcome');
+          const drafts = require('./src/drafts');
+          const needs = await welcome.needsBinding(linked.id).catch(() => false);
+          await welcome.ensureWelcomed(linked, {
+            send: (chat, text, opts) => drafts.sendRecap(sendblue, chat, text, opts),
+            needsBinding: needs,
+            dryRun: DRY_RUN || !ECHO,
+          }).catch(err => console.error('[welcome] introduction failed:', err.message));
+        }
       } catch (err) {
         console.error('[chatlink] failed:', err.message);
       }

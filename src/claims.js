@@ -34,11 +34,26 @@ const PROMPT_GAP_HOURS = 24;
 
 /** Rosters nobody has claimed yet, in menu order. */
 async function unclaimed(leagueId) {
+  /*
+   * A roster is claimed if ANY row for it carries a phone.
+   *
+   * Checking row by row offered roster 5 on the menu while Ivers was already
+   * bound to it on a different row, so the introduction invited the league to
+   * claim a team that was not available. The `not exists` is what makes this
+   * about the roster rather than about whichever row was read first.
+   */
   const { rows } = await db.query(
-    `select sleeper_roster_id as roster, sleeper_username, team_name, display_name
-       from members
-      where league_id = $1 and sleeper_roster_id is not null and phone is null
-      order by sleeper_roster_id`,
+    `select m.sleeper_roster_id as roster, m.sleeper_username, m.team_name, m.display_name
+       from members m
+      where m.league_id = $1
+        and m.sleeper_roster_id is not null
+        and m.phone is null
+        and not exists (
+          select 1 from members o
+           where o.league_id = m.league_id
+             and o.sleeper_roster_id = m.sleeper_roster_id
+             and o.phone is not null)
+      order by m.sleeper_roster_id`,
     [leagueId]
   );
   return rows;

@@ -129,7 +129,42 @@ async function main() {
     assert.match(welcome.welcomeText(league({ config: null })), /I am Commish/);
   });
 
-  console.log('\nthe precondition');
+  console.log('\nrows are not rosters');
+
+it('a duplicate shell row does not invent a missing roster', () => {
+  // The live table had 15 rows for 12 rosters, and counting rows made the
+  // introduction say "3 more rosters" above a list of twelve names in a twelve
+  // team league. Twelve plus three is not twelve.
+  const rows = [
+    { phone: '+1', display_name: 'Ann', sleeper_roster_id: 1 },
+    { phone: '+2', display_name: 'Bo', sleeper_roster_id: 2 },
+    { phone: null, display_name: null, sleeper_roster_id: 2 },   // shell for a bound roster
+    { phone: null, display_name: 'Ann', sleeper_roster_id: null }, // merge leftover
+  ];
+  const out = welcome.countRoster(rows);
+  assert.strictEqual(out.unknown, 0, 'a duplicate row was counted as a missing roster');
+  assert.deepStrictEqual(out.known, ['Ann', 'Bo']);
+  assert.strictEqual(out.needsBinding, false);
+});
+
+it('a genuinely unbound roster still counts as unknown', () => {
+  const out = welcome.countRoster([
+    { phone: '+1', display_name: 'Ann', sleeper_roster_id: 1 },
+    { phone: null, display_name: null, sleeper_roster_id: 2 },
+  ]);
+  assert.strictEqual(out.unknown, 1);
+  assert.strictEqual(out.needsBinding, true);
+});
+
+it('a name is never listed twice when a person has two rows', () => {
+  const out = welcome.countRoster([
+    { phone: '+1', display_name: 'Ann', sleeper_roster_id: 1 },
+    { phone: '+1', display_name: 'Ann', sleeper_roster_id: 1 },
+  ]);
+  assert.deepStrictEqual(out.known, ['Ann']);
+});
+
+console.log('\nthe precondition');
 
   await it('an already welcomed league is not welcomed twice', async () => {
     let calls = 0;

@@ -232,12 +232,45 @@ async function ensureWelcomed(league, { send, needsBinding = false, known, unkno
  * sets both.
  */
 async function roster(leagueId) {
+  /*
+   * ROWS ARE NOT ROSTERS, and counting the former is how the introduction ended
+   * up saying "3 more rosters are still just a team name to me" while the menu
+   * underneath it offered exactly one, in a twelve team league, above a list of
+   * twelve names. Twelve plus three is not twelve, and it is the first thing
+   * thirteen people read.
+   *
+   * The members table accumulates partial rows: a phone bound before a Sleeper
+   * link, a roster shell with nothing on it, leftovers from merging two halves
+   * of the same person. Every one of those inflated the count by one. So the
+   * arithmetic is done over DISTINCT ROSTERS, which is the thing being counted,
+   * and duplicate rows can no longer move it.
+   */
   const { rows } = await db.query(
-    `select display_name, phone from members where league_id = $1 order by display_name`,
+    `select display_name, phone, sleeper_roster_id from members where league_id = $1
+      order by display_name`,
     [leagueId]
   );
-  const known = rows.filter(r => r.phone && r.display_name).map(r => r.display_name);
-  const unknown = rows.length - known.length;
+
+  return countRoster(rows);
+}
+
+/**
+ * The arithmetic, separated from the query so it can be tested with the messy
+ * row shapes that caused the bug rather than only with tidy ones.
+ */
+function countRoster(rows) {
+  const reachable = new Set();
+  const names = new Map();
+  for (const r of rows) {
+    if (!r.phone) continue;
+    if (r.display_name) names.set(r.display_name, true);
+    if (r.sleeper_roster_id != null) reachable.add(Number(r.sleeper_roster_id));
+  }
+  const allRosters = new Set(
+    rows.filter(r => r.sleeper_roster_id != null).map(r => Number(r.sleeper_roster_id)));
+
+  const known = [...names.keys()].sort();
+  const unknown = Math.max(0, allRosters.size - reachable.size);
   return { known, unknown, needsBinding: unknown > 0 };
 }
 
@@ -246,4 +279,5 @@ async function needsBinding(leagueId) {
   return (await roster(leagueId)).needsBinding;
 }
 
-module.exports = { welcomeText, ensureWelcomed, needsBinding, roster, botName, botNames, orList, andList };
+module.exports = { welcomeText, ensureWelcomed, needsBinding, roster, countRoster,
+  botName, botNames, orList, andList };
