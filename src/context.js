@@ -186,6 +186,13 @@ async function leagueContext(leagueId, opts = {}) {
       console.error('[context] draft lookup failed:', err.message);
       return null;
     });
+
+    // Closest game, biggest hiding, highest and lowest score. Four lines out of
+    // 582 games, which is the only way that log fits in a prompt.
+    ctx.gameRecords = await require('./history').gameRecords(league.sleeper_league_id).catch(err => {
+      console.error('[context] game records failed:', err.message);
+      return null;
+    });
   }
 
   /*
@@ -314,6 +321,11 @@ function contextBlock(ctx) {
     // part no single season shows.
     const activity = require('./history').activityBlock(ctx.career, names);
     if (activity) { L.push(''); L.push(activity); }
+
+    if (ctx.gameRecords) {
+      L.push('');
+      L.push(require('./history').gameRecordsBlock(ctx.gameRecords, names));
+    }
 
     /*
      * Draft history, last. It is the deepest material and the most expensive

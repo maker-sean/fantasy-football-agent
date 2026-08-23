@@ -93,6 +93,51 @@ async function movesByRoster(sleeperLeagueId, { weeks = 18 } = {}) {
 }
 
 /**
+ * Every game the league has ever played, for one season.
+ *
+ * A final snapshot holds week 17 and nothing else, which answers "what was the
+ * record" and none of the questions a group chat actually asks: the closest
+ * game ever, the biggest hiding, the highest score anybody has posted. Asked
+ * for the closest game in league history the bot correctly said it had no game
+ * logs, and it was right, because a season was one row deep.
+ *
+ * A matchup row is per ROSTER, so the two sides are paired on matchup_id. A
+ * pair that is not exactly two is skipped rather than guessed at: that is a bye
+ * or a broken week, not a game.
+ *
+ * 17 calls a season, 102 across the archive, which is the same reason as
+ * movesByRoster for computing it once and storing it. 582 games came to 23KB,
+ * so this rides on the snapshot rather than earning a table.
+ */
+async function gamesFor(sleeperLeagueId, { weeks = 17, playoffWeekStart = 15 } = {}) {
+  const all = await Promise.all(
+    Array.from({ length: weeks }, (_, i) =>
+      sleeper.get(`/league/${sleeperLeagueId}/matchups/${i + 1}`).catch(() => []))
+  );
+
+  const games = [];
+  all.forEach((rows, i) => {
+    const byMatchup = new Map();
+    for (const r of rows || []) {
+      if (r.matchup_id == null || r.points == null) continue;
+      const pair = byMatchup.get(r.matchup_id) || [];
+      pair.push(r);
+      byMatchup.set(r.matchup_id, pair);
+    }
+    for (const [, pair] of byMatchup) {
+      if (pair.length !== 2) continue;
+      games.push({
+        w: i + 1,
+        po: i + 1 >= playoffWeekStart ? 1 : 0,
+        a: Number(pair[0].roster_id), ap: Math.round(pair[0].points * 100) / 100,
+        b: Number(pair[1].roster_id), bp: Math.round(pair[1].points * 100) / 100,
+      });
+    }
+  });
+  return games;
+}
+
+/**
  * Who took the toilet bowl.
  *
  * NOT the same thing as finishing bottom of the regular season table, and in
@@ -146,6 +191,8 @@ async function captureSeason(lg, { week = 17 } = {}) {
 
   const toilet = await toiletLoser(lg.league_id);
   const moves = await movesByRoster(lg.league_id).catch(() => ({}));
+  const games = await gamesFor(lg.league_id,
+    { playoffWeekStart: payload.league?.settings?.playoff_week_start ?? 15 }).catch(() => []);
 
   await db.recordSnapshot({
     leagueId: league.id,
@@ -155,6 +202,85 @@ async function captureSeason(lg, { week = 17 } = {}) {
     payload: { ...payload, champion_roster_id: champion },
   });
   return { league, season: lg.season, champion, toilet };
+}
+
+/**
+ * The game records: closest, biggest hiding, highest and lowest score.
+ *
+ * 582 games cannot go in a prompt, and they do not need to. The questions a
+ * chat asks about game logs are superlatives, so the superlatives are computed
+ * here and the log stays in the snapshot.
+ *
+ * The winner is worked out from the SCORES, not from field order. The first
+ * pass of this labelled side a as the winner and reported the closest game
+ * backwards, which is the kind of mistake that is invisible until somebody who
+ * was there reads it.
+ */
+async function gameRecords(sleeperLeagueId) {
+  const seasons = await chain(sleeperLeagueId);
+  const ids = seasons.map(s => s.league_id);
+  if (!ids.length) return null;
+
+  const { rows } = await db.query(
+    `select s.season, s.payload from snapshots s
+       join leagues l on l.id = s.league_id
+      where l.sleeper_league_id = any($1::text[]) and s.kind = 'final'
+      order by s.season asc`, [ids]);
+
+  const games = [];
+  for (const { season, payload } of rows) {
+    const users = new Map((payload.users || []).map(u => [u.user_id, u.display_name]));
+    const owner = new Map((payload.rosters || []).map(r => [Number(r.roster_id), r.owner_id]));
+    for (const g of payload.games || []) {
+      const side = (rid, pts) => ({ userId: owner.get(rid), name: users.get(owner.get(rid)) || null, points: pts });
+      const one = side(g.a, g.ap), two = side(g.b, g.bp);
+      const [winner, loser] = g.ap >= g.bp ? [one, two] : [two, one];
+      games.push({
+        season, week: g.w, playoff: Boolean(g.po),
+        winner, loser, margin: Math.round(Math.abs(g.ap - g.bp) * 100) / 100,
+      });
+    }
+  }
+  if (!games.length) return null;
+
+  const byMargin = [...games].sort((a, b) => a.margin - b.margin);
+  const byScore = [...games].flatMap(g => [
+    { ...g, who: g.winner, points: g.winner.points },
+    { ...g, who: g.loser, points: g.loser.points },
+  ]).sort((a, b) => b.points - a.points);
+
+  const spanSeasons = [...new Set(games.map(g => String(g.season)))].sort();
+  return {
+    total: games.length,
+    from: spanSeasons[0], to: spanSeasons.at(-1),
+    closest: byMargin.slice(0, 3),
+    blowout: byMargin.at(-1),
+    highest: byScore[0],
+    lowest: byScore.at(-1),
+  };
+}
+
+/**
+ * The records, for the prompt. Four lines out of 582 games.
+ */
+function gameRecordsBlock(records, names = new Map()) {
+  if (!records) return '';
+  const who = p => {
+    const known = names.get(p.userId);
+    return known && p.name && known !== p.name ? `${known} (${p.name})` : known || p.name || 'unknown';
+  };
+  const when = g => `${g.season} week ${g.week}${g.playoff ? ' (playoff)' : ''}`;
+  const line = g => `${when(g)}: ${who(g.winner)} ${g.winner.points} beat ${who(g.loser)} ${g.loser.points}, `
+                  + `by ${g.margin}`;
+
+  const L = [`GAME RECORDS (every one of the ${records.total} games this league has played, `
+           + `${records.from} to ${records.to}. These are exact, quote them as they are):`];
+  L.push(`  closest game ever: ${line(records.closest[0])}`);
+  for (const g of records.closest.slice(1)) L.push(`  next closest: ${line(g)}`);
+  L.push(`  biggest hiding: ${line(records.blowout)}`);
+  L.push(`  highest score by anyone: ${who(records.highest.who)} ${records.highest.points}, ${when(records.highest)}`);
+  L.push(`  lowest score by anyone: ${who(records.lowest.who)} ${records.lowest.points}, ${when(records.lowest)}`);
+  return L.join('\n');
 }
 
 /**
@@ -444,4 +570,4 @@ const ordinal = n => {
 };
 
 module.exports = { chain, archiveLeague, captureSeason, career, careerBlock, careerExtremes,
-  toiletLoser, movesByRoster, luck, luckBlock, toiletBlock, activityBlock, ordinal };
+  toiletLoser, movesByRoster, gamesFor, gameRecords, gameRecordsBlock, luck, luckBlock, toiletBlock, activityBlock, ordinal };
