@@ -11,3 +11,6 @@ logs/
 
 .DS_Store
 *.log
+
+# scratch files from debugging sessions
+.*.js
