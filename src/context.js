@@ -321,6 +321,9 @@ function contextBlock(ctx) {
 
     // Who took the punishment, by year. The counts above cannot answer "who
     // lost it in 2022", which is the shape the question actually takes.
+    const champs = require('./history').championBlock(ctx.career, names);
+    if (champs) { L.push(''); L.push(champs); }
+
     const toilets = require('./history').toiletBlock(ctx.career, names);
     if (toilets) { L.push(''); L.push(toilets); }
 

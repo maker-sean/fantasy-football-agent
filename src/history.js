@@ -486,6 +486,7 @@ async function career(sleeperLeagueId) {
         seasons: 0, wins: 0, losses: 0, ties: 0, points: 0, against: 0,
         best: null, worst: null, titles: 0, lasts: 0, toilets: 0, toiletSeasons: [],
         moves: 0, movesBySeason: [], finishes: [],
+        titleSeasons: [], lastSeasons: [],
       };
       u.name = users.get(s.userId)?.display_name || u.name;
       u.seasons += 1;
@@ -498,8 +499,10 @@ async function career(sleeperLeagueId) {
       u.finishes.push({ season, place });
       if (u.best === null || place < u.best) u.best = place;
       if (u.worst === null || place > u.worst) u.worst = place;
-      if (place === standings.length) u.lasts += 1;
-      if (payload.champion_roster_id && payload.champion_roster_id === s.rosterId) u.titles += 1;
+      if (place === standings.length) { u.lasts += 1; u.lastSeasons.push(season); }
+      if (payload.champion_roster_id && payload.champion_roster_id === s.rosterId) {
+        u.titles += 1; u.titleSeasons.push(season);
+      }
       if (payload.toilet_roster_id && payload.toilet_roster_id === s.rosterId) {
         u.toilets += 1; u.toiletSeasons.push(season);
       }
@@ -550,6 +553,27 @@ function activityBlock(rows, names = new Map()) {
          + `(${r.movesBySeason.map(m => m.season + ':' + m.moves).join(' ')})${trend}`);
   }
   return L.join('\n');
+}
+
+/**
+ * Champions by season.
+ *
+ * Same reason as the toilet bowl roll: the count says a title exists and cannot
+ * say which year, and "when did Marlow win" is how the question gets asked. Six
+ * lines, and they are the six the league argues about most.
+ */
+function championBlock(rows, names = new Map()) {
+  const bySeason = [];
+  for (const r of rows) {
+    const known = names.get(r.userId);
+    const who = known && r.name && known !== r.name ? `${known} (${r.name})` : known || r.name || r.userId;
+    for (const season of r.titleSeasons || []) bySeason.push({ season, who });
+  }
+  if (!bySeason.length) return '';
+  bySeason.sort((a, b) => String(b.season).localeCompare(String(a.season)));
+  return ['CHAMPIONS by season (the playoff bracket, which is what "won it" means. Not the same'
+        + ' as topping the regular season table):']
+    .concat(bySeason.map(t => `  ${t.season}: ${t.who}`)).join('\n');
 }
 
 /**
@@ -645,7 +669,14 @@ function careerBlock(rows, names = new Map()) {
   const L = [`CAREER (${span} season${span === 1 ? '' : 's'} of league history — use for colour, not for current standings):`];
   for (const r of rows) {
     const bits = [`${r.wins}-${r.losses}${r.ties ? '-' + r.ties : ''} over ${r.seasons} seasons`];
-    bits.push(r.titles ? `${r.titles} title${r.titles === 1 ? '' : 's'}` : 'no titles');
+    /*
+     * The YEAR, not just the count. "Marlow has a title" cannot answer "when did
+     * Marlow win", which is the form the question actually takes, and a bot that
+     * knows somebody won but not when sounds like it is making it up.
+     */
+    bits.push(r.titles
+      ? `${r.titles} title${r.titles === 1 ? '' : 's'} (${r.titleSeasons.join(', ')})`
+      : 'no titles');
     /*
      * "no titles, best finish 1st" reads as a contradiction and is not one:
      * the finish is REGULAR SEASON rank, the title is the playoff bracket.
@@ -660,8 +691,8 @@ function careerBlock(rows, names = new Map()) {
      * half the seasons on record. A chat that runs a punishment means the
      * second one when it says "last", so the first has to say which it is.
      */
-    if (r.lasts) bits.push(`bottom of the regular season table ${r.lasts === 1 ? 'once' : r.lasts + ' times'}`);
-    if (r.toilets) bits.push(`took the toilet bowl ${r.toilets === 1 ? 'once' : r.toilets + ' times'}`);
+    if (r.lasts) bits.push(`bottom of the regular season table in ${r.lastSeasons.join(', ')}`);
+    if (r.toilets) bits.push(`took the toilet bowl in ${r.toiletSeasons.join(', ')}`);
     const known = names.get(r.userId);
     const who = known && r.name && known !== r.name ? `${known} (${r.name})`
               : known || r.name || r.userId;
@@ -728,5 +759,5 @@ const ordinal = n => {
 };
 
 module.exports = { chain, archiveLeague, captureSeason, career, careerBlock, careerExtremes,
-  toiletLoser, movesByRoster, gamesFor, gameRecords, gameRecordsBlock,
+  championBlock, toiletLoser, movesByRoster, gamesFor, gameRecords, gameRecordsBlock,
   benchMistakes, benchBlock, luck, luckBlock, toiletBlock, activityBlock, ordinal };
