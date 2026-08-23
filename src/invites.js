@@ -63,7 +63,7 @@ function messageFor({ leagueName, url, days }) {
   const league = leagueName ? ` Set up ${leagueName} here:` : ' Set up your league here:';
   return `Commish AI — you're up.${league}\n${url}\n\n`
        + `This link signs you in, so keep it to yourself. It expires in ${days} days.\n\n`
-       + `Msg & data rates may apply. Reply STOP to opt out, HELP for help.`;
+       + `Msg & data rates may apply. Reply STOP to opt out.`;   // no HELP: it answers nothing, see src/signup.js
 }
 
 /**

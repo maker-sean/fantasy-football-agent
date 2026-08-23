@@ -26,13 +26,6 @@ const has = n => argv.includes('--' + n);
 const flag = n => { const i = argv.indexOf('--' + n); return i !== -1 ? argv[i + 1] : null; };
 const target = argv.find(a => !a.startsWith('--'));
 
-function message({ leagueName, url, days }) {
-  const league = leagueName ? ` Set up ${leagueName} here:` : ' Set up your league here:';
-  return `Commish AI — you're up.${league}\n${url}\n\n`
-       + `This link signs you in, so keep it to yourself. It expires in ${days} days.\n\n`
-       + `Msg & data rates may apply. Reply STOP to opt out, HELP for help.`;
-}
-
 (async () => {
   if (has('list') || !target) {
     const { rows } = await db.query(

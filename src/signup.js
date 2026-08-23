@@ -214,7 +214,20 @@ async function record({ phone, email = null, leagueId, rawText, source = 'sms' }
  * about to become the first message they ever actually received. Whichever one
  * lands first has to carry the disclosure.
  */
-const FOOTER = 'Msg & data rates may apply. Reply STOP to opt out, HELP for help.';
+/*
+ * BRAND, PURPOSE, RATES, OPT-OUT — and no HELP.
+ *
+ * HELP was advertised here and answers nothing: the provider suppresses
+ * outbound to a number the moment it sees a reserved keyword, so the reply
+ * never lands. src/welcome.js worked that out and left it off the
+ * introduction; these two kept promising it. A keyword that returns silence
+ * is worse than one that was never offered, because somebody in trouble
+ * texts it and concludes the whole thing is broken.
+ *
+ * If HELP is ever made to answer — CTIA expects brand and contact — it goes
+ * back in all three places at once.
+ */
+const FOOTER = 'Msg & data rates may apply. Reply STOP to opt out.';
 
 function reply({ created, league, leagueId }) {
   if (!leagueId) {
@@ -471,5 +484,5 @@ module.exports = {
   parse, record, reply, handle,
   advance, getConversation, setConversation, endConversation, leaguesForUsername,
   issueCode, resolveCode, newCode, alreadyOnboarded,
-  KEYWORD, KEYWORDS, SIGNUP, RESERVED, CODE_ALPHABET, CODE_LEN,
+  KEYWORD, KEYWORDS, SIGNUP, RESERVED, FOOTER, CODE_ALPHABET, CODE_LEN,
 };

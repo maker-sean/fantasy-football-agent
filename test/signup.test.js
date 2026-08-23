@@ -71,7 +71,12 @@ it('every reply carries brand, rates and the opt-out', () => {
     assert.ok(/Commish AI|Already got you down|couldn't find/.test(t), 'identifies the sender or the context');
     assert.ok(/Msg & data rates may apply/.test(t), 'rates disclosure');
     assert.ok(/STOP/.test(t), 'says how to stop');
-    assert.ok(/HELP/.test(t), 'says how to get help');
+    // HELP was asserted here and has been removed from the copy: the provider
+  // suppresses outbound to a number the moment it sees a reserved keyword, so
+  // the reply never lands. It is still RECOGNISED as reserved below, just no
+  // longer advertised, because a keyword that returns silence is worse than one
+  // that was never offered.
+  assert.ok(!/HELP/.test(t), 'still promising a HELP reply that never arrives');
   }
 });
 
@@ -119,6 +124,26 @@ it('a sentence containing stop is not reserved', () =>
   assert.strictEqual(RESERVED.test('when does the bot stop'), false));
 it('reserved words are also not signup keywords', () => {
   for (const w of ['STOP', 'HELP']) assert.strictEqual(parse(w), null);
+});
+
+console.log('\nthe compliance footer');
+
+it('every footer carries rates and STOP', () => {
+  const { FOOTER } = require('../src/signup');
+  assert.match(FOOTER, /rates may apply/i);
+  assert.match(FOOTER, /Reply STOP/i);
+});
+
+it('nothing advertises HELP, because HELP answers nothing', () => {
+  // The provider suppresses outbound to a number the moment it sees a reserved
+  // keyword, so a HELP reply never lands. Somebody in trouble texts it, gets
+  // silence, and concludes the whole thing is broken. welcome.js worked this
+  // out first; signup and invites kept promising it for a week.
+  const { FOOTER } = require('../src/signup');
+  const invites = require('../src/invites');
+  const sample = invites.messageFor({ leagueName: 'X', url: 'https://e.invalid', days: 7 });
+  assert.ok(!/HELP/i.test(FOOTER), 'signup footer still promises HELP');
+  assert.ok(!/HELP/i.test(sample), 'invite message still promises HELP');
 });
 
 console.log(`\n${pass} passing`);
