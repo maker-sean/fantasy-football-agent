@@ -70,15 +70,18 @@ function newCode() {
  * Issue a code for a league the visitor just picked on the site. Retries on
  * collision — 30^4 is a large space but not an infinite one.
  */
-async function issueCode({ sleeperLeagueId, league }) {
+async function issueCode({ sleeperLeagueId, league, profile = null }) {
   for (let attempt = 0; attempt < 8; attempt++) {
     const code = newCode();
     const { rows } = await db.query(
-      `insert into signup_codes (code, sleeper_league_id, league_name, season, total_rosters)
-       values ($1,$2,$3,$4,$5)
+      `insert into signup_codes (code, sleeper_league_id, league_name, season, total_rosters,
+                                 first_name, last_name, email, platform, platform_other)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
        on conflict (code) do nothing
        returning *`,
-      [code, sleeperLeagueId, league?.name || null, league?.season || null, league?.total_rosters || null]
+      [code, sleeperLeagueId, league?.name || null, league?.season || null, league?.total_rosters || null,
+       profile?.firstName || null, profile?.lastName || null, profile?.email || null,
+       profile?.platform || null, profile?.platformOther || null]
     );
     if (rows[0]) return rows[0];
   }
@@ -134,7 +137,16 @@ async function alreadyOnboarded(leagueId) {
   return null;
 }
 
-async function record({ phone, email = null, leagueId, rawText, source = 'sms' }) {
+/**
+ * @param opts.firstName/lastName/platform/platformOther
+ *   Who they are and where their league lives. The SMS path leaves these null
+ *   and collects them conversationally straight after (see confirmAndAsk and
+ *   src/intake.js) — one question per message, which reads like talking. The
+ *   website form has no conversation to have, so it asks in the form and passes
+ *   them here. Either way a lead is asked once, by whichever door it came in.
+ */
+async function record({ phone, email = null, leagueId, rawText, source = 'sms',
+  firstName = null, lastName = null, platform = null, platformOther = null }) {
   const normalized = phone ? db.normalizePhone(phone) : null;
   const mail = email ? String(email).trim().toLowerCase() : null;
   if (!normalized && !mail) throw new Error('a signup needs a phone or an email');
@@ -156,12 +168,14 @@ async function record({ phone, email = null, leagueId, rawText, source = 'sms' }
     : `(lower(email), coalesce(sleeper_league_id, '')) where email is not null`;
 
   const { rows } = await db.query(
-    `insert into signups (phone, email, sleeper_league_id, league_name, season, total_rosters, raw_text, source)
-     values ($1,$2,$3,$4,$5,$6,$7,$8)
+    `insert into signups (phone, email, sleeper_league_id, league_name, season, total_rosters,
+                          raw_text, source, first_name, last_name, platform, platform_other)
+     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
      on conflict ${conflict} do nothing
      returning *`,
     [normalized, mail, leagueId || null, league?.name || null, league?.season || null,
-     league?.total_rosters || null, rawText || null, source]
+     league?.total_rosters || null, rawText || null, source,
+     firstName || null, lastName || null, platform || null, platformOther || null]
   );
 
   if (rows[0]) {
@@ -262,9 +276,38 @@ function reply({ created, league, leagueId }) {
  */
 async function confirmAndAsk({ phone, res, leagueId }) {
   const text = reply({ ...res, leagueId });
-  if (!res.signup?.id) return text;
-  await setConversation(phone, 'intake_name', { signupId: res.signup.id });
-  return `${text}\n\n${require('./intake').askName()}`;
+  const signup = res.signup;
+  if (!signup?.id) return text;
+
+  /*
+   * Only ask for what the website did not already get.
+   *
+   * The three questions now live on the screen that hands out the code, and
+   * whatever was typed there arrives on the signup. Asking again over SMS reads
+   * as a system that was not listening — worse than never asking, because the
+   * person can see they already answered.
+   *
+   * Resumes at the first gap rather than skipping to the end, so somebody who
+   * filled in a name and nothing else is still asked the two that matter for
+   * reaching them and for the build order. All three present means no
+   * conversation is started at all: the confirmation stands on its own.
+   */
+  const intake = require('./intake');
+  const first = signup.first_name || null;
+
+  if (!first && !signup.last_name) {
+    await setConversation(phone, 'intake_name', { signupId: signup.id });
+    return `${text}\n\n${intake.askName()}`;
+  }
+  if (!signup.email) {
+    await setConversation(phone, 'intake_email', { signupId: signup.id, first });
+    return `${text}\n\n${intake.askEmail(first)}`;
+  }
+  if (!signup.platform) {
+    await setConversation(phone, 'intake_platform', { signupId: signup.id, first });
+    return `${text}\n\n${intake.askPlatform()}`;
+  }
+  return text;
 }
 
 // ------------------------------------------------------- conversation ----
@@ -467,8 +510,10 @@ async function handle(msg, provider, { dryRun = false } = {}) {
 
   // A short code carries the league the visitor already chose on the site.
   let leagueId = parsed.leagueId;
+  let codeRow = null;
   if (parsed.code) {
     const issued = await resolveCode(parsed.code);
+    codeRow = issued;
     if (!issued) {
       const text = `I don't recognise the code ${parsed.code}. Grab a fresh one from the site and text it again.`;
       if (!dryRun && provider) await provider.send(msg.senderId, text);
@@ -496,10 +541,22 @@ async function handle(msg, provider, { dryRun = false } = {}) {
     return { handled: true, created: false, alreadyOnboarded: true, league: live, reply: text };
   }
 
+  /*
+   * Whatever the website already collected comes with the code.
+   *
+   * Without this the person answers the same three questions twice — once in
+   * the form and again over SMS — which reads as a system that was not
+   * listening the first time.
+   */
   const res = await record({
     phone: msg.senderId,
     leagueId,
     rawText: msg.text,
+    firstName: codeRow?.first_name || null,
+    lastName: codeRow?.last_name || null,
+    email: codeRow?.email || null,
+    platform: codeRow?.platform || null,
+    platformOther: codeRow?.platform_other || null,
   });
   const text = await confirmAndAsk({ phone: msg.senderId, res, leagueId });
 

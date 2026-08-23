@@ -255,15 +255,29 @@ kbd { font-family: var(--mono); background: var(--raised); border: 1px solid var
 .row > .btn { flex-shrink: 0; }
 
 /* Include tel: a phone field left out of this list falls back to the
-   browser default, which is a white box in the middle of a dark form. */
-input[type="text"], input[type="email"], input[type="tel"] {
+   browser default, which is a white box in the middle of a dark form.
+   select is here for exactly the same reason — an unstyled dropdown on a dark
+   form is the most obviously broken thing on the page. */
+input[type="text"], input[type="email"], input[type="tel"], select {
   flex: 1 1 240px; min-width: 0;
   background: var(--carbon); color: var(--text);
   border: 1px solid var(--line); border-radius: var(--radius);
   padding: 13px 15px; font-size: 1rem; font-family: inherit;
 }
-input:focus { border-color: var(--turf); }
+/* Kill the platform chrome so the control matches the inputs beside it, and
+   draw the caret back in, since appearance:none takes it away. */
+select {
+  appearance: none; -webkit-appearance: none; cursor: pointer;
+  background-image: linear-gradient(45deg, transparent 50%, var(--muted) 50%),
+                    linear-gradient(135deg, var(--muted) 50%, transparent 50%);
+  background-position: calc(100% - 19px) calc(50% + 2px), calc(100% - 14px) calc(50% + 2px);
+  background-size: 5px 5px, 5px 5px;
+  background-repeat: no-repeat;
+  padding-right: 38px;
+}
+input:focus, select:focus { border-color: var(--turf); }
 input::placeholder { color: #6b6b6b; }
+input:disabled, select:disabled { opacity: .55; }
 
 .msg-line { min-height: 1.4em; margin: 10px 0 0; font-size: .92rem; color: var(--muted); }
 .msg-line.err { color: #ff8f7a; }

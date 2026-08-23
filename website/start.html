@@ -51,7 +51,68 @@
     <div id="step-done" class="step" hidden>
       <div class="picked" id="picked"></div>
 
-      <h2 style="font-size:1.15rem; margin-top:28px">One text and you're in.</h2>
+      <!-- Asked HERE, and the code does not exist until they are answered.
+
+           The intake questions used to arrive as texts, after somebody had
+           already messaged a number they had never seen. That is the wrong
+           moment: until they answer a lead is a phone number with no name and
+           no way to reach them off SMS, and plenty of people never answer.
+
+           REQUIRED, not optional. An earlier version of this screen left them
+           optional and showed the code regardless, reasoning that a form
+           withholding the code trades a signup for a profile. That reasoning
+           leaned on an email fallback catching whoever bounced, and there is no
+           fallback any more — so the real choice is a complete lead or a phone
+           number nobody can follow up. Three fields is a low price for the
+           thing being asked for.
+
+           Anyone who texts the number directly, having never seen this page,
+           still gets the same three questions conversationally. -->
+      <h2 style="font-size:1.15rem; margin-top:28px">First, who are you?</h2>
+      <p class="small muted">Three quick things, then your code. We ask so we can actually
+      reach you when it is your league's turn.</p>
+
+      <div class="row" style="margin-top:12px">
+        <input id="name" type="text" autocomplete="name" placeholder="Your name">
+      </div>
+      <div class="row" style="margin-top:8px">
+        <input id="email" type="email" autocomplete="email" placeholder="you@example.com">
+      </div>
+      <div class="row" style="margin-top:8px">
+        <!-- Where their league actually LIVES, which is not where onboarding
+             happens. Somebody answering Discord is not confused about being
+             texted; they are telling us what to build next. -->
+        <select id="platform" aria-label="Where does your league chat?">
+          <option value="">Where does your league chat?</option>
+          <option value="imessage">iMessage or text group</option>
+          <option value="messenger">Messenger</option>
+          <option value="whatsapp">WhatsApp</option>
+          <option value="groupme">GroupMe</option>
+          <option value="discord">Discord</option>
+          <option value="other">Something else</option>
+        </select>
+      </div>
+      <div class="row" id="platform-other-row" style="margin-top:8px; display:none">
+        <!-- Verbatim. The whole value of an other box is the answer nobody
+             thought to list. -->
+        <input id="platform-other" type="text" placeholder="Where?">
+      </div>
+      <div class="row" style="margin-top:14px">
+        <!-- Disabled rather than hidden, with the note below saying what is
+             still missing. A button that only appears once a form is complete
+             leaves somebody staring at a screen with no visible next step. -->
+        <button id="profile-go" class="btn" type="button" disabled>Get my text code</button>
+        <!-- The alternative, for somebody who will not text a number they just
+             met. It has no fields of its own — the address it records is the
+             one above. Onboarding is manual either way at this stage, so an
+             emailed lead is worth exactly as much as a texted one. -->
+        <button id="email-go" class="btn ghost" type="button" disabled>Email me instead</button>
+      </div>
+      <p id="profile-msg" class="msg-line small muted" role="status" aria-live="polite"></p>
+      <p id="email-msg" class="msg-line small" role="status" aria-live="polite"></p>
+
+      <div id="sms-section" hidden>
+      <h2 style="font-size:1.15rem; margin-top:28px">Then one text and you're in.</h2>
       <p>Send it from the phone you use in your league's group chat. That's how we know which
       number belongs to which commissioner.</p>
 
@@ -105,21 +166,7 @@
           again. See <a href="messaging.html">messaging terms</a>.
         </p>
       </div>
-
-      <!-- The email path. Not everyone will text an unfamiliar number from a
-           site they just met, and an SMS-only funnel also stops working the
-           moment the messaging plan's contact cap is reached. -->
-      <details class="alt-signup" id="alt">
-        <summary>Rather not text? Leave an email instead.</summary>
-        <p class="small muted" style="margin:12px 0 0">
-          Same queue, we just email you when it's your league's turn.
-        </p>
-        <div class="row" style="margin-top:12px">
-          <input id="email" type="email" autocomplete="email" placeholder="you@example.com">
-          <button id="email-go" class="btn ghost" type="button">Add me</button>
-        </div>
-        <p id="email-msg" class="msg-line" role="status" aria-live="polite"></p>
-      </details>
+      </div>
 
       <p><button id="restart" class="btn ghost" type="button">← Start over</button></p>
     </div>
@@ -240,31 +287,40 @@ async function choose(lg) {
     `<span class="lg-meta">${lg.total_rosters} teams · ${lg.season} season</span>`;
   $('picked').querySelector('strong').textContent = lg.name;
   show('step-done');
+  refreshProfileGate();
+}
 
-  // The server issues a short code and renders the QR. Asking people to text a
-  // 19-digit Sleeper league id worked only if they tapped the prefilled link —
-  // it was unreadable on a QR, impossible to dictate, and one wrong digit
-  // failed against a league that does not exist.
-  try {
-    const r = await fetch('/api/signup-intent', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ sleeperLeagueId: lg.league_id }),
-    });
-    if (!r.ok) throw new Error('intent failed');
-    const d = await r.json();
+/*
+ * The code, issued with the answers in one request.
+ *
+ * It used to be issued the instant a league was picked, which meant a live code
+ * existed for everybody who got this far and carried no idea who they were. Now
+ * nothing is allocated until the form is complete, and the profile goes with it
+ * — so there is no second endpoint attaching answers to a code afterwards, and
+ * no window where a code exists without them.
+ *
+ * A short code rather than the Sleeper league id: a 19-digit number only worked
+ * if you tapped the prefilled link. It was unreadable on a QR, impossible to
+ * dictate, and one wrong digit failed against a league that does not exist.
+ */
+async function issueCode() {
+  const r = await fetch('/api/signup-intent', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ ...profileBody(), sleeperLeagueId: state.league.league_id }),
+  });
+  if (!r.ok) throw new Error('intent failed');
+  const d = await r.json();
 
-    $('sms-body').textContent = d.body;
-    $('sms-number').textContent = d.number || 'the number below';
-    if (d.smsUri) $('smslink').href = d.smsUri;
-    if (d.qrSvg) {
-      $('qr-svg').innerHTML = d.qrSvg;
-      $('qr').hidden = false;
-    }
-    watchForText(d.code);
-  } catch {
-    say($('copy-msg'), "Couldn't set up your code just now. Refresh and pick your league again.", 'err');
+  state.code = d.code;
+  $('sms-body').textContent = d.body;
+  $('sms-number').textContent = d.number || 'the number below';
+  if (d.smsUri) $('smslink').href = d.smsUri;
+  if (d.qrSvg) {
+    $('qr-svg').innerHTML = d.qrSvg;
+    $('qr').hidden = false;
   }
+  watchForText(d.code);
 }
 
 $('find').addEventListener('click', findLeagues);
@@ -348,27 +404,106 @@ function watchForText(code) {
   check();
 }
 
+// The free-text box only exists once "Something else" is the answer.
+$('platform').addEventListener('change', () => {
+  $('platform-other-row').style.display = $('platform').value === 'other' ? '' : 'none';
+  refreshProfileGate();
+});
+
+function profileBody() {
+  return {
+    name: $('name').value.trim() || null,
+    email: $('email').value.trim() || null,
+    platform: $('platform').value || null,
+    platformOther: $('platform-other').value.trim() || null,
+  };
+}
+
+/*
+ * What is still missing, in the order the fields appear.
+ *
+ * Returns the first gap rather than a list. Three complaints at once reads as
+ * a form that is angry with you; one at a time reads as a form telling you
+ * what to do next.
+ *
+ * Deliberately loose on the address, matching the server: a strict regex
+ * rejects real mail, and the cost of a wrong one is a bounced newsletter while
+ * the cost of rejecting a good one is the signup.
+ */
+function missingField() {
+  const b = profileBody();
+  if (!b.name || !/[a-z]/i.test(b.name)) return 'your name';
+  if (!b.email || !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(b.email)) return 'an email address';
+  if (!b.platform) return 'where your league chats';
+  if (b.platform === 'other' && !b.platformOther) return 'where that is';
+  return null;
+}
+
+function refreshProfileGate() {
+  const missing = missingField();
+  for (const id of ['profile-go', 'email-go']) $(id).disabled = Boolean(missing);
+  say($('profile-msg'), missing ? `Still need ${missing}.` : 'Ready.', missing ? '' : 'ok');
+}
+
+for (const id of ['name', 'email', 'platform-other']) {
+  $(id).addEventListener('input', refreshProfileGate);
+}
+
+/*
+ * The code is issued here, with the answers, in one request.
+ *
+ * It used to be issued the moment a league was picked, and the answers were
+ * attached to it afterwards by a second public endpoint. Gating the code on a
+ * complete profile removes the need for that entirely: there is nothing to
+ * attach later, because nothing exists until the form is done.
+ */
+/*
+ * The alternative for somebody who will not text a number they just met.
+ *
+ * No inputs of its own: the three answers are already above, and the address it
+ * records is the one they typed there. Two email boxes on one screen is how a
+ * person fills the wrong one and wonders which counted.
+ *
+ * Behind the same gate as the code, because a lead reachable only by email is
+ * exactly the one that has to carry an email.
+ */
 $('email-go').addEventListener('click', async () => {
-  const email = $('email').value.trim();
-  if (!email.includes('@')) return say($('email-msg'), 'That does not look like an email address.', 'err');
+  const missing = missingField();
+  if (missing) return say($('email-msg'), `Still need ${missing}.`, 'err');
   $('email-go').disabled = true;
   say($('email-msg'), 'Adding…');
   try {
     const r = await fetch('/api/signup-email', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ email, sleeperLeagueId: state.league?.league_id || null }),
+      // Same parsers on the server as the texted intake, so one person lands in
+      // the same columns whichever door they came through.
+      body: JSON.stringify({ ...profileBody(), sleeperLeagueId: state.league?.league_id || null }),
     });
     const d = await r.json();
     if (!r.ok) throw new Error(d.error || 'failed');
     say($('email-msg'), d.created
       ? `You're in the queue${d.league ? ' for ' + d.league.name : ''}. We'll email you.`
       : "You're already on the list, nothing else to do.", 'ok');
-    $('email').disabled = true;
   } catch {
-    say($('email-msg'), "Couldn't add you just now. Try again in a moment.", 'err');
-  } finally {
     $('email-go').disabled = false;
+    say($('email-msg'), "Couldn't add you just now. Try again in a moment.", 'err');
+  }
+});
+
+$('profile-go').addEventListener('click', async () => {
+  const missing = missingField();
+  if (missing) return say($('profile-msg'), `Still need ${missing}.`, 'err');
+  $('profile-go').disabled = true;
+  say($('profile-msg'), 'One moment…');
+  try {
+    await issueCode();
+    $('sms-section').hidden = false;
+    say($('profile-msg'), 'Thanks. Your code is below.', 'ok');
+    $('sms-section').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  } catch {
+    $('profile-go').disabled = false;
+    say($('profile-msg'), "Couldn't get a code just now. Try again in a moment.", 'err');
   }
 });
 

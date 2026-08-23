@@ -584,8 +584,25 @@ app.post('/api/signup-intent', wrap(async (req, res) => {
   const lg = await sleeper.league(sleeperLeagueId).catch(() => null);
   if (!lg?.league_id) return res.status(404).json({ error: 'league_not_found' });
 
+  /*
+   * No code without a name, an address and a platform.
+   *
+   * Checked here and not only in the browser, for the reason this codebase
+   * keeps relearning: a rule enforced at one call site is a rule every other
+   * caller skips. The page disables the button, and that is a courtesy — this
+   * is the rule.
+   *
+   * Somebody who texts the number directly, having never seen this page, is
+   * unaffected. They have no code, and src/intake.js asks them the same three
+   * questions conversationally after they land.
+   */
+  const profile = readProfile(req.body);
+  const missing = ['firstName', 'email', 'platform'].filter(k => !profile[k]);
+  if (profile.platform === 'other' && !profile.platformOther) missing.push('platformOther');
+  if (missing.length) return res.status(400).json({ error: 'incomplete_profile', missing });
+
   const signup = require('../src/signup');
-  const issued = await signup.issueCode({ sleeperLeagueId, league: lg });
+  const issued = await signup.issueCode({ sleeperLeagueId, league: lg, profile });
 
   const number = process.env.SENDBLUE_FROM_NUMBER || null;
   const body = `${signup.KEYWORD} ${issued.code}`;
@@ -615,6 +632,34 @@ app.post('/api/signup-intent', wrap(async (req, res) => {
     league: { name: lg.name, season: lg.season, totalRosters: lg.total_rosters },
   });
 }));
+
+/**
+ * Name, email and platform off a request body, parsed the way the texted
+ * intake parses them.
+ *
+ * One set of parsers, deliberately. "my name is Chris Dalton" typed into a box
+ * and texted back at a question have to land in the same two columns, and a
+ * form that split on the first space would file the same person twice under
+ * different names depending on which door they came through.
+ */
+function readProfile(body) {
+  const intake = require('../src/intake');
+  const parsed = intake.parseName(body?.name);
+  const wanted = String(body?.platform || '').trim().toLowerCase();
+  const platform = intake.PLATFORMS.some(([key]) => key === wanted) ? wanted : null;
+  const email = String(body?.email || '').trim();
+  return {
+    firstName: parsed?.first || null,
+    lastName: parsed?.last || null,
+    // Permissive, like every other address check here: bouncing a valid one
+    // costs a lead, a bad one costs a row.
+    email: intake.EMAIL.test(email) ? email.toLowerCase() : null,
+    platform,
+    platformOther: platform === 'other'
+      ? String(body?.platformOther || '').trim().slice(0, 200) || null
+      : null,
+  };
+}
 
 /**
  * Has this code been texted in yet?
@@ -654,8 +699,29 @@ app.post('/api/signup-email', wrap(async (req, res) => {
     return res.status(400).json({ error: 'bad_league_id' });
   }
 
+  /*
+   * Name and platform, asked in the form because this path has no conversation.
+   *
+   * A texted signup gets these from src/intake.js one question at a time,
+   * straight after the confirmation. Somebody who leaves an email never texts
+   * anything, so nothing later ever asks them — that lead used to be an address
+   * and nothing else, permanently.
+   *
+   * Parsed with intake's own parsers rather than a second set. "Chris Dalton"
+   * typed into a box and texted back at a question have to land in the same two
+   * columns, and a form that split on the first space while intake stripped
+   * "my name is" would put different things in first_name depending on the door
+   * somebody came through.
+   */
+  const profile = readProfile(req.body);
   const signup = require('../src/signup');
-  const out = await signup.record({ email, leagueId: sleeperLeagueId, source: 'web' });
+  const out = await signup.record({
+    email, leagueId: sleeperLeagueId, source: 'web',
+    firstName: profile.firstName,
+    lastName: profile.lastName,
+    platform: profile.platform,
+    platformOther: profile.platformOther,
+  });
   res.json({
     ok: true,
     created: out.created,
