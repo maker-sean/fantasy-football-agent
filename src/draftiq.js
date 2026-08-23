@@ -273,6 +273,42 @@ function extremes(picks, startable) {
   ].filter(Boolean);
 }
 
+/**
+ * One line per manager: their own worst pick, best pick, and counts.
+ *
+ * The league-wide lists answer "who drafts well". The league does not ask that.
+ * It asks "why is Brennan bad at drafting", by name, and the top three of each
+ * list is the wrong shape for that question: Brennan appears in the whole block
+ * exactly once, on an INJURY, so the honest answer available was McCaffrey
+ * getting hurt. His two actual whiffs, DJ Chark in 2020 and Saquon in 2021,
+ * were not in the context at all. The reply was correct and weak, and it was
+ * weak because of what it was handed.
+ *
+ * Same discipline as the lists: an injury never appears as somebody's worst
+ * pick here, because it is not a pick anyone got wrong.
+ */
+function perManager(picks, startable) {
+  const isWhiff = p => p.gain <= -WHIFF_DROP && p.round <= 5 && p.gamesPlayed >= 12;
+  const isSteal = p => p.gain >= STEAL_GAIN && p.finishRank != null && p.finishRank <= startable[p.position];
+
+  const by = new Map();
+  for (const p of picks) {
+    const u = by.get(p.sleeperUserId) || { sleeperUserId: p.sleeperUserId, manager: p.manager, all: [] };
+    u.all.push(p);
+    by.set(p.sleeperUserId, u);
+  }
+
+  return [...by.values()].map(u => {
+    const whiffs = u.all.filter(isWhiff).sort((a, b) => a.gain - b.gain);
+    const steals = u.all.filter(isSteal).sort((a, b) => b.gain - a.gain);
+    return {
+      sleeperUserId: u.sleeperUserId, manager: u.manager,
+      worst: whiffs[0] || null, best: steals[0] || null,
+      whiffs: whiffs.length, steals: steals.length,
+    };
+  }).sort((a, b) => b.whiffs - a.whiffs);
+}
+
 // ------------------------------------------------------------- assembly ----
 
 /**
@@ -319,6 +355,7 @@ async function analyze(sleeperLeagueId, { seasons = null } = {}) {
     ...buckets(picks, startable),
     mirrors: mirrors(picks).slice(0, 2),
     extremes: extremes(picks, startable),
+    perManager: perManager(picks, startable),
     picks,
   };
 }
@@ -370,6 +407,16 @@ function draftBlock(result, names = new Map()) {
          + ' say so if it comes up):');
     cursed.forEach(p => L.push(`${line(p)}, ${p.gamesPlayed} games`));
   }
+  if (result.perManager?.length) {
+    L.push('  BY MANAGER (each person\'s own worst and best pick. Use THIS when somebody'
+         + ' is asked about by name, and say plainly when they have no whiffs on record):');
+    for (const m of result.perManager) {
+      const bits = [];
+      bits.push(m.worst ? `worst ${m.worst.season} ${m.worst.player} ${move(m.worst)}` : 'no whiffs on record');
+      if (m.best) bits.push(`best ${m.best.season} ${m.best.player} ${move(m.best)}`);
+      L.push(`    ${who(m)}: ${bits.join(', ')} (${m.whiffs} whiffs, ${m.steals} steals)`);
+    }
+  }
   if (result.extremes?.length) {
     L.push('  DRAFT EXTREMES (computed over every pick in the window, not just the ones'
          + ' listed above. Safe to state as counts. There is NO ranking of who drafts'
@@ -394,6 +441,6 @@ function draftBlock(result, names = new Map()) {
 }
 
 module.exports = {
-  analyze, startableLine, annotate, buckets, mirrors, extremes, draftBlock,
+  analyze, startableLine, annotate, buckets, mirrors, extremes, perManager, draftBlock,
   POSITIONS,
 };

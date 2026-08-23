@@ -300,6 +300,21 @@ function contextBlock(ctx) {
     const extremes = require('./history').careerExtremes(ctx.career, names);
     if (extremes) { L.push(''); L.push(extremes); }
 
+    // Whether a record was earned or scheduled. Computed, because a model given
+    // twelve rows of points will rank them itself and state the result as fact.
+    const luck = require('./history').luckBlock(ctx.career, names);
+    if (luck) { L.push(''); L.push(luck); }
+
+    // Who took the punishment, by year. The counts above cannot answer "who
+    // lost it in 2022", which is the shape the question actually takes.
+    const toilets = require('./history').toiletBlock(ctx.career, names);
+    if (toilets) { L.push(''); L.push(toilets); }
+
+    // How busy each manager is, and which way it is heading. Direction is the
+    // part no single season shows.
+    const activity = require('./history').activityBlock(ctx.career, names);
+    if (activity) { L.push(''); L.push(activity); }
+
     /*
      * Draft history, last. It is the deepest material and the most expensive
      * to be wrong about, so it sits below the career lines it depends on.
