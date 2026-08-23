@@ -167,6 +167,30 @@ it('a duplicate shell row does not invent a missing roster', () => {
   assert.strictEqual(out.needsBinding, false);
 });
 
+it('a co-owner with no roster of their own does not invent a missing team', () => {
+  // Sleeper's users and rosters lists do not have to line up. The Danger Zone!
+  // has 13 managers for 12 rosters because one of them co-owns somebody else's
+  // team, and a departed manager who is still listed looks identical.
+  const out = welcome.countRoster([
+    { phone: '+1', display_name: 'Ann', sleeper_roster_id: 1 },
+    { phone: '+2', display_name: 'Bo', sleeper_roster_id: 2 },
+    { phone: '+3', display_name: 'Cass', sleeper_roster_id: 2 },  // co-owns Bo's team
+  ]);
+  assert.strictEqual(out.unknown, 0, 'a co-owner was counted as a missing roster');
+  assert.deepStrictEqual(out.known, ['Ann', 'Bo', 'Cass']);
+});
+
+it('a roster nobody owns is unknown, but only once', () => {
+  // The other direction: Halcyon Kings has an unassigned roster 5, which is
+  // why that member row has a phone and a roster and no sleeper_user_id.
+  const out = welcome.countRoster([
+    { phone: '+1', display_name: 'Ann', sleeper_roster_id: 1 },
+    { phone: null, display_name: null, sleeper_roster_id: 5 },
+    { phone: null, display_name: null, sleeper_roster_id: 5 },
+  ]);
+  assert.strictEqual(out.unknown, 1);
+});
+
 it('a genuinely unbound roster still counts as unknown', () => {
   const out = welcome.countRoster([
     { phone: '+1', display_name: 'Ann', sleeper_roster_id: 1 },

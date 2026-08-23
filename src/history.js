@@ -478,6 +478,27 @@ async function career(sleeperLeagueId) {
       // Sleeper's own tiebreak: record first, then points scored.
       .sort((a, b) => (b.wins - a.wins) || (b.points - a.points));
 
+    /*
+     * A ROSTER WITHOUT AN OWNER IS A REAL STATE, not corrupt data.
+     *
+     * Sleeper's users list and rosters list do not have to line up, and both
+     * mismatches occur in leagues already in this system:
+     *
+     *   a manager with no roster  — a co-owner sharing somebody else's team, or
+     *     somebody who left and is still listed. The Danger Zone! has one of
+     *     these, and it is a co-owner: their handle is the other manager's team
+     *     name.
+     *
+     *   a roster with no owner    — an unassigned team. Halcyon Kings 2026
+     *     has one, which is why Ivers's member row carries a phone and a roster
+     *     and no sleeper_user_id: the binding had nothing to resolve against.
+     *
+     * So an incomplete binding is expected and must degrade rather than throw.
+     * The skip below is that, and it has a cost worth knowing: if a season ENDS
+     * with a roster unowned, that team's record is absent from career entirely.
+     * Fine today, since every completed season here is fully owned, and wrong
+     * the first time somebody finishes a year without claiming their team.
+     */
     standings.forEach((s, i) => {
       if (!s.userId) return;
       const u = byUser.get(s.userId) || {
