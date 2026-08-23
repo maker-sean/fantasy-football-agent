@@ -89,7 +89,25 @@ function message({ leagueName, url, days }) {
   console.log('  sent — sendblue says ' + (res?.status || 'accepted'));
   console.log('  An accepted response is not delivery. Confirm with: npm run sendblue-status\n');
 
+  /*
+   * invited_at, not just the status.
+   *
+   * Migration 0018 added this column and backfilled the rows that were already
+   * invited, and nothing has written it since: this line set status and left
+   * invited_at null. src/observe.js counts the "Sent a setup link" funnel stage
+   * as `where invited_at is not null`, so the next invite would have frozen
+   * that stage and shown a 100% drop-off between the waitlist and the link that
+   * did not happen. The tile read correctly only because the backfill had
+   * touched the one row that existed.
+   *
+   * coalesce so a re-invite does not overwrite first contact, matching how
+   * redeemed_at already behaves in web/server.js.
+   */
   await db.query(
-    `update signups set status = 'invited', updated_at = now() where id = $1`, [signup.id]);
+    `update signups
+        set status = 'invited',
+            invited_at = coalesce(invited_at, now()),
+            updated_at = now()
+      where id = $1`, [signup.id]);
 })().catch(e => { console.error('\n  ' + e.message + '\n'); process.exitCode = 1; })
     .finally(() => db.pool.end());
