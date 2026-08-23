@@ -129,7 +129,27 @@ async function main() {
     assert.match(welcome.welcomeText(league({ config: null })), /I am Commish/);
   });
 
-  console.log('\nrows are not rosters');
+  console.log('\nit says what this is, not just who it is');
+
+  await it('the introduction leads with the product name', async () => {
+    // Every other first contact already does: the signup confirmation and the
+    // invite both open "Commish AI". The one message that lands in the group
+    // chat was the exception, so thirteen people met a number with a
+    // personality and no idea what it was part of.
+    assert.match(welcome.welcomeText(league()), /Welcome to Commish AI/);
+  });
+
+  await it('it still says which word actually gets its attention', async () => {
+    // Two different questions. The brand is what this is; the trigger is what
+    // you say out loud. Losing the second to make room for the first would make
+    // the introduction useless.
+    const t = welcome.welcomeText(league({ config: { botNames: ['jarvis'] } }));
+    assert.match(t, /Welcome to Commish AI/);
+    assert.match(t, /I am Jarvis/);
+    assert.match(t, /"jarvis"/);
+  });
+
+console.log('\nrows are not rosters');
 
 it('a duplicate shell row does not invent a missing roster', () => {
   // The live table had 15 rows for 12 rosters, and counting rows made the

@@ -87,8 +87,21 @@ function welcomeText(league, { needsBinding = false, known = [], unknown = 0, me
   const name = botName(league);
   const triggers = orList(botNames(league));
 
+  /*
+   * The product gets named, then the bot does.
+   *
+   * "Alright. I am Bot" introduced a bot and nothing else, so thirteen people
+   * met a number with a personality and no idea what it was part of. Every
+   * other first contact this product makes already leads with the brand: the
+   * signup confirmation opens "Welcome to Commish AI", and so does the invite.
+   * The one message that actually lands in the group chat was the exception.
+   *
+   * Both names stay, because they answer different questions. Commish AI is
+   * what this is; ${name} is what you say out loud to get its attention.
+   */
   const first =
-    `Alright. I am ${name}, and I have already read every box score this league has ever produced.\n\n` +
+    `Welcome to Commish AI. I am ${name}, and I have already read every box score ` +
+    `this league has ever produced.\n\n` +
     `Tuesday mornings you get a recap, and it names names. Before kickoff I will tell you if you are ` +
     `starting someone who is Out, including the 9:30am games nobody remembers until it is too late.`;
 
