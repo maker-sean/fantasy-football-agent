@@ -221,6 +221,7 @@ let vcardCache = null;
 function contactCard() {
   if (vcardCache) return vcardCache;
   const number = process.env.SENDBLUE_FROM_NUMBER || '';
+  const baseUrl = process.env.PUBLIC_BASE_URL || process.env.RENDER_EXTERNAL_URL || null;
   const photo = require('fs')
     .readFileSync(path.join(WEBSITE_DIR, 'logo-512.png')).toString('base64');
 
@@ -232,7 +233,13 @@ function contactCard() {
     'ORG:Commish AI',
     'TITLE:League assistant',
     number ? `TEL;type=CELL;type=VOICE;type=pref:${number}` : null,
-    `URL:${process.env.PUBLIC_BASE_URL || 'https://commish-web.onrender.com'}`,
+    /*
+     * No hardcoded origin. This used to name the Render subdomain, which meant
+     * an unset env var did not fail — it shipped a retired origin into a card
+     * already saved in somebody's Contacts, where nothing ever rechecks it.
+     * Same chain as ballotlink and onboardlink; no URL beats the wrong one.
+     */
+    baseUrl ? `URL:${baseUrl}` : null,
     `PHOTO;ENCODING=b;TYPE=PNG:${photo}`,
     'END:VCARD',
   ].filter(Boolean);
