@@ -221,10 +221,19 @@ async function generateReply({ burst, league }) {
      */
     const u = out.meta?.usage;
     if (u) {
+      /*
+       * The cache columns too. answer.js has cached PERSONA since it was
+       * written and this recorded only input and output, so every cached read
+       * was counted at full price and there was no way to see the gap. A cache
+       * read is about a tenth of input; without it "cost" is a guess with a
+       * known bias and no way to size it.
+       */
       db.query(
-        `insert into model_usage (league_id, kind, model, input_tokens, output_tokens)
-         values ($1,'reply',$2,$3,$4)`,
-        [league.id, out.meta.model || null, u.input_tokens || 0, u.output_tokens || 0]
+        `insert into model_usage (league_id, kind, model, input_tokens, output_tokens,
+                                  cache_read_input_tokens, cache_creation_input_tokens)
+         values ($1,'reply',$2,$3,$4,$5,$6)`,
+        [league.id, out.meta.model || null, u.input_tokens || 0, u.output_tokens || 0,
+         u.cache_read_input_tokens || 0, u.cache_creation_input_tokens || 0]
       ).catch(err => console.error('[reply] could not record usage:', err.message));
     }
     return out.text;

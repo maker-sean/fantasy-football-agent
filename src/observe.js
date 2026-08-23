@@ -621,5 +621,86 @@ async function errors({ days = 7 } = {}) {
   };
 }
 
-module.exports = { replyRate, decisionBreakdown, leagueList, thread, draftHistory, scoped,
+/**
+ * Token spend per chat, with dollars.
+ *
+ * This file reported tokens and refused dollars, and said why: a stale
+ * multiplier is worse than no number. Still true — so the rate carries an
+ * expiry and src/pricing.js flags anything computed past it rather than
+ * printing a confident wrong figure. Tokens stay alongside, because they are
+ * the thing that does not go out of date.
+ *
+ * Per league, because "what does this cost" is only actionable per chat: one
+ * busy league is a different decision from fifty quiet ones.
+ */
+async function costPerChat({ days = 7 } = {}) {
+  const pricing = require('./pricing');
+
+  const { rows } = await db.query(
+    `select u.league_id, l.name as league_name, u.model,
+            count(*)::int                                   as calls,
+            coalesce(sum(u.input_tokens),0)::int            as input_tokens,
+            coalesce(sum(u.output_tokens),0)::int           as output_tokens,
+            coalesce(sum(u.cache_read_input_tokens),0)::int as cache_read_input_tokens,
+            coalesce(sum(u.cache_creation_input_tokens),0)::int as cache_creation_input_tokens
+       from model_usage u
+       left join leagues l on l.id = u.league_id
+      where u.at > now() - ($1 || ' days')::interval
+      group by u.league_id, l.name, u.model
+      order by 4 desc`, [String(days)]);
+
+  const byLeague = new Map();
+  for (const r of rows) {
+    const key = r.league_id || 'unattributed';
+    const acc = byLeague.get(key) || {
+      leagueId: r.league_id, leagueName: r.league_name || 'not attributed to a league',
+      calls: 0, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0,
+      models: new Set(), rows: [],
+    };
+    acc.calls += r.calls;
+    acc.inputTokens += r.input_tokens;
+    acc.outputTokens += r.output_tokens;
+    acc.cacheReadTokens += r.cache_read_input_tokens;
+    acc.cacheWriteTokens += r.cache_creation_input_tokens;
+    acc.models.add(r.model || 'unknown');
+    acc.rows.push(r);
+    byLeague.set(key, acc);
+  }
+
+  const leagues = [...byLeague.values()].map(a => {
+    const t = pricing.totalOf(a.rows);
+    const billedInput = a.inputTokens + a.cacheReadTokens + a.cacheWriteTokens;
+    return {
+      leagueId: a.leagueId, leagueName: a.leagueName,
+      calls: a.calls,
+      inputTokens: a.inputTokens, outputTokens: a.outputTokens,
+      cacheReadTokens: a.cacheReadTokens, cacheWriteTokens: a.cacheWriteTokens,
+      models: [...a.models],
+      cost: t.cost,
+      costPerReply: a.calls ? Math.round((t.cost / a.calls) * 1e6) / 1e6 : null,
+      /*
+       * How much of the input came from cache. Zero across a busy league means
+       * a silent invalidator, which is the single most expensive thing that can
+       * go wrong here and produces no error of any kind.
+       */
+      cacheHitRate: billedInput
+        ? Math.round((a.cacheReadTokens / billedInput) * 1000) / 10 : null,
+      caveat: pricing.caveat(t),
+    };
+  }).sort((x, y) => (y.cost || 0) - (x.cost || 0));
+
+  const all = pricing.totalOf(rows);
+  return {
+    days,
+    leagues,
+    total: {
+      cost: all.cost,
+      calls: leagues.reduce((n, l) => n + l.calls, 0),
+      caveat: pricing.caveat(all),
+    },
+  };
+}
+
+module.exports = {
+  costPerChat, replyRate, decisionBreakdown, leagueList, thread, draftHistory, scoped,
   signupTiles, visitsByHour, funnel, textFlow, conversations, conversation, opsMetrics, errors };

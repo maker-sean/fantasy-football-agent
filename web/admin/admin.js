@@ -343,6 +343,66 @@ function el2(tag, cls, text) {
   return n;
 }
 
+// ---------------------------------------------------------------- cost ----
+
+/**
+ * Token spend per chat.
+ *
+ * Cost AND tokens, because tokens are the figure that cannot go out of date.
+ * The cache hit rate is here because a zero on a busy league is the single most
+ * expensive thing that can silently go wrong: it means the prefix stopped
+ * matching and every call is paying full price for context it used to get at a
+ * tenth.
+ */
+async function renderCost() {
+  const body = $('cost').querySelector('tbody');
+  let data;
+  try {
+    data = await api('GET', '/api/admin/cost?days=7');
+  } catch (err) {
+    $('cost-sub').textContent = 'Could not load: ' + err.message;
+    return;
+  }
+
+  body.innerHTML = '';
+  const rows = data.leagues || [];
+  if (!rows.length) {
+    $('cost-sub').textContent = 'No model calls in the last 7 days.';
+    return;
+  }
+
+  for (const l of rows) {
+    const tr = document.createElement('tr');
+
+    const who = document.createElement('td');
+    who.textContent = l.leagueName;
+    const m = document.createElement('div');
+    m.className = 'muted small';
+    m.textContent = `${l.calls} replies · ${l.models.join(', ')}`;
+    who.appendChild(m);
+
+    const tokens = document.createElement('td');
+    tokens.className = 'muted small';
+    tokens.textContent = `${l.inputTokens.toLocaleString()} in · ${l.outputTokens.toLocaleString()} out`
+      + (l.cacheHitRate === null ? '' : ` · ${l.cacheHitRate}% cached`);
+
+    const money = document.createElement('td');
+    money.textContent = l.cost === null ? '—' : '$' + l.cost.toFixed(2);
+    const per = document.createElement('div');
+    per.className = 'muted small';
+    per.textContent = l.costPerReply === null ? '' : '$' + l.costPerReply.toFixed(4) + ' a reply';
+    money.appendChild(per);
+
+    for (const td of [who, tokens, money]) tr.appendChild(td);
+    body.appendChild(tr);
+  }
+
+  const t = data.total || {};
+  $('cost-sub').textContent =
+    `$${(t.cost || 0).toFixed(2)} over ${t.calls || 0} replies in ${data.days} days.`
+    + (t.caveat ? `  ⚠ ${t.caveat}` : '');
+}
+
 // ---------------------------------------------------------------- gaps ----
 
 /**
@@ -871,6 +931,7 @@ async function load() {
   renderTiles(funnel.tiles);
   renderWaitlist().catch(err => console.error('[admin] waitlist failed:', err));
   renderGaps().catch(err => console.error('[admin] gaps failed:', err));
+  renderCost().catch(err => console.error('[admin] cost failed:', err));
   renderVisits(funnel.visits.map(v => ({ hour: v.hour, count: v.views, views: v.views })));
   renderFunnel(funnel.funnel);
   renderTextFlow(funnel.textFlow);

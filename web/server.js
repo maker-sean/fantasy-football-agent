@@ -1255,6 +1255,16 @@ app.get('/api/admin/errors', admin, wrap(async (req, res) => {
  * A query, not a log. decisions holds every reply and messages holds every
  * question, so this works on history rather than only on what happens next.
  */
+/*
+ * Token spend per chat. A query over model_usage, not a scheduled pull: the
+ * table is written locally on every call, so there is nothing to fetch and
+ * nothing to be stale except the price, which pricing.js flags for itself.
+ */
+app.get('/api/admin/cost', admin, wrap(async (req, res) => {
+  const days = Math.min(Number(req.query.days) || 7, 90);
+  res.json(await require('../src/observe').costPerChat({ days }));
+}));
+
 app.get('/api/admin/gaps', admin, wrap(async (req, res) => {
   const gaps = require('../src/gaps');
   const days = Math.min(Number(req.query.days) || 30, 365);
