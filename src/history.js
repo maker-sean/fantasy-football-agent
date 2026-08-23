@@ -159,6 +159,45 @@ async function gamesFor(sleeperLeagueId, { weeks = 17, playoffWeekStart = 15 } =
 }
 
 /**
+ * Where everyone ACTUALLY finished, from the playoff bracket.
+ *
+ * Not the same thing as the regular season table, and 2025 is the argument:
+ * the top four in the table came out exactly reversed in the bracket. Whitlock
+ * topped the standings and finished fourth; Kellan was fourth and won it. A
+ * league cares about both and they answer different questions.
+ *
+ * Places 1 to 6 come from the winners bracket, where Sleeper marks the final
+ * round with p: p=1 decides first and second, p=3 third and fourth, p=5 fifth
+ * and sixth. Verified against champion_roster_id, which is derived separately.
+ *
+ * LAST comes from the losers bracket and NOTHING ELSE DOES. In this league the
+ * winner of that bracket's p=1 is the team that takes the punishment, confirmed
+ * against four seasons of the commissioner's own recollection. Whether the rest
+ * of that bracket runs 7-to-12 or 12-to-7 is not something the API states, so
+ * places 7 through 11 are left absent rather than guessed. An absent place is
+ * honest; a wrong one is an argument in the group chat.
+ */
+async function finalPlacements(sleeperLeagueId) {
+  const [win, lose] = await Promise.all([
+    sleeper.get(`/league/${sleeperLeagueId}/winners_bracket`).catch(() => null),
+    sleeper.get(`/league/${sleeperLeagueId}/losers_bracket`).catch(() => null),
+  ]);
+  const places = {};
+
+  for (const [p, first, second] of [[1, 1, 2], [3, 3, 4], [5, 5, 6]]) {
+    const m = (win || []).filter(x => x.p === p && x.w).sort((a, b) => (b.r || 0) - (a.r || 0))[0];
+    if (!m) continue;
+    places[first] = Number(m.w);
+    if (m.l != null) places[second] = Number(m.l);
+  }
+
+  const bottom = (lose || []).filter(x => x.p === 1 && x.w).sort((a, b) => (b.r || 0) - (a.r || 0))[0];
+  if (bottom?.w != null) places.last = Number(bottom.w);
+
+  return Object.keys(places).length ? places : null;
+}
+
+/**
  * Who took the toilet bowl.
  *
  * NOT the same thing as finishing bottom of the regular season table, and in
@@ -211,6 +250,7 @@ async function captureSeason(lg, { week = 17 } = {}) {
   } catch { /* older seasons may not expose one */ }
 
   const toilet = await toiletLoser(lg.league_id);
+  const finalPlaces = await finalPlacements(lg.league_id).catch(() => null);
   const moves = await movesByRoster(lg.league_id).catch(() => ({}));
   const games = await gamesFor(lg.league_id,
     { playoffWeekStart: payload.league?.settings?.playoff_week_start ?? 15 }).catch(() => []);
@@ -506,7 +546,7 @@ async function career(sleeperLeagueId) {
         name: users.get(s.userId)?.display_name || null,
         seasons: 0, wins: 0, losses: 0, ties: 0, points: 0, against: 0,
         best: null, worst: null, titles: 0, lasts: 0, toilets: 0, toiletSeasons: [],
-        moves: 0, movesBySeason: [], finishes: [],
+        moves: 0, movesBySeason: [], finishes: [], finalFinishes: [],
         titleSeasons: [], lastSeasons: [],
       };
       u.name = users.get(s.userId)?.display_name || u.name;
@@ -518,6 +558,19 @@ async function career(sleeperLeagueId) {
       if (mv !== null) { u.moves += mv; u.movesBySeason.push({ season, moves: mv }); }
       const place = i + 1;
       u.finishes.push({ season, place });
+
+      /*
+       * Where they ACTUALLY finished, which is a different fact from where they
+       * finished the regular season. In 2025 the top four of the table came out
+       * exactly reversed in the bracket. Only recorded where the bracket states
+       * it: places 1-6 and last. An absent place is honest, a guessed one is an
+       * argument in the group chat.
+       */
+      const fp = payload.final_places || {};
+      for (const key of Object.keys(fp)) {
+        if (Number(fp[key]) !== s.rosterId) continue;
+        u.finalFinishes.push({ season, place: key === 'last' ? 'last' : Number(key) });
+      }
       if (u.best === null || place < u.best) u.best = place;
       if (u.worst === null || place > u.worst) u.worst = place;
       if (place === standings.length) { u.lasts += 1; u.lastSeasons.push(season); }
@@ -554,6 +607,10 @@ async function career(sleeperLeagueId) {
        * printing both costs a few characters and removes the guess.
        */
       podiums: u.finishes.filter(f => f.place <= 3).length,
+      // The bracket version of the same question. Kept separate on purpose:
+      // a top-three table finish and a top-three actual finish are different
+      // achievements and this league's members care about both.
+      finalPodiums: u.finalFinishes.filter(f => typeof f.place === 'number' && f.place <= 3).length,
     }))
     .sort((a, b) => (b.wins / Math.max(1, b.wins + b.losses)) - (a.wins / Math.max(1, a.wins + a.losses)));
 }
@@ -761,11 +818,16 @@ function averageFinishBlock(rows, names = new Map()) {
     return known && r.name && known !== r.name ? `${known} (${r.name})` : known || r.name || r.userId;
   };
   return 'AVERAGE FINISH (mean REGULAR SEASON place across every season played, best first.'
-       + ' This order is computed, so it is safe to quote. Lower is better. The top-three'
-       + ' count is how often they finished 1st, 2nd or 3rd, which is a different question'
-       + ' from having a good average):\n'
+       + ' This order is computed, so it is safe to quote. "Highest" average finish means the'
+       + ' LOWEST number, closest to 1.\n  Two different top-three counts follow and they'
+       + ' disagree on purpose: the table one is the regular season, the playoff one is where'
+       + ' they actually ended up. In 2025 the top four of the table came out exactly reversed'
+       + ' in the bracket. Places are only listed where the bracket states them, 1-6 and last):\n'
        + ranked.map((r, i) => `  ${i + 1}. ${label(r)} ${r.avgFinish} over ${r.seasons} seasons`
-           + `, ${r.podiums} top-three finish${r.podiums === 1 ? '' : 'es'}`).join('\n');
+           + `, ${r.podiums} top-three in the table, ${r.finalPodiums} top-three after the playoffs`
+           + (r.finalFinishes?.length
+               ? ` (finished ${r.finalFinishes.map(f => f.season + ': ' + f.place).join(', ')})`
+               : '')).join('\n');
 }
 
 /**
@@ -827,8 +889,11 @@ function careerExtremes(rows, names = new Map()) {
    * fact, which is why every other superlative here is computed. This one was
    * left out and immediately proved the rule.
    */
-  const podium = top(r => r.podiums, r => `${r.podiums}`, 'most top-three finishes');
+  const podium = top(r => r.podiums, r => `${r.podiums}`, 'most top-three REGULAR SEASON finishes');
   if (podium && Math.max(...rows.map(r => r.podiums || 0)) > 0) L.push(podium);
+  const realPodium = top(r => r.finalPodiums || 0, r => `${r.finalPodiums}`,
+    'most top-three ACTUAL finishes (after the playoffs)');
+  if (realPodium && Math.max(...rows.map(r => r.finalPodiums || 0)) > 0) L.push(realPodium);
   const withAvg = rows.filter(r => r.avgFinish != null);
   if (withAvg.length > 1) {
     // Negated, because for a finish lower is better and top() takes a maximum.
@@ -847,5 +912,5 @@ const ordinal = n => {
 };
 
 module.exports = { chain, archiveLeague, captureSeason, career, careerBlock, careerExtremes,
-  championBlock, averageFinishBlock, toiletLoser, movesByRoster, gamesFor, gameRecords, gameRecordsBlock,
+  championBlock, averageFinishBlock, finalPlacements, toiletLoser, movesByRoster, gamesFor, gameRecords, gameRecordsBlock,
   benchMistakes, benchBlock, luck, luckBlock, toiletBlock, activityBlock, ordinal };
