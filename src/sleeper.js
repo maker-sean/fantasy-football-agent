@@ -217,8 +217,68 @@ async function projections(season, week) {
   return byPlayer;
 }
 
+
+/*
+ * Season-long actual stats, by position. Same undocumented host as projections,
+ * so it also cannot go through get().
+ *
+ * The field that matters here is pos_rank_half_ppr, which is Sleeper's own
+ * end-of-season positional finish — "ended WR5". Computing that ourselves from
+ * raw stat lines would mean reimplementing a scoring engine to arrive at a
+ * number Sleeper already publishes.
+ *
+ * WHY HALF PPR IS A PARAMETER AND NOT A CONSTANT. It is the right default for
+ * a league scoring rec = 0.5, and wrong for the other two. The caller knows
+ * the league's scoring settings; this does not.
+ *
+ * CACHING. A finished season is immutable, so its entry never expires — six
+ * seasons of history are fetched once per process and then free. Only the
+ * current season gets a TTL, because its ranks move every Sunday. Passing
+ * `live` is how a caller says "this one is still being played".
+ */
+const STATS_TTL_MS = Number(process.env.SEASON_STATS_TTL_MS || 6 * 60 * 60 * 1000);
+const statsCache = new Map();
+
+async function seasonStats(season, { scoring = 'half_ppr', live = false } = {}) {
+  const key = `${season}:${scoring}`;
+  const hit = statsCache.get(key);
+  if (hit && (!hit.live || Date.now() - hit.at < STATS_TTL_MS)) return hit.byPlayer;
+
+  const byPlayer = new Map();
+  for (const position of ['QB', 'RB', 'WR', 'TE']) {
+    const url = `https://api.sleeper.app/stats/nfl/${season}`
+              + `?season_type=regular&position[]=${position}&order_by=pts_ppr`;
+    const res = await fetch(url, { headers: { accept: 'application/json' } });
+    if (!res.ok) {
+      const err = new Error(`Sleeper season stats ${season}/${position} -> ${res.status}`);
+      err.status = res.status;
+      require('./errorlog').record({
+        system: 'sleeper', operation: 'seasonStats', status: res.status, message: err.message,
+      });
+      throw err;
+    }
+    for (const row of await res.json()) {
+      const st = row?.stats || {};
+      if (!row.player_id) continue;
+      byPlayer.set(String(row.player_id), {
+        position,
+        // Null for a player who never ranked at the position all year. That is
+        // a real state, not a zero, and the callers distinguish them.
+        rank: st[`pos_rank_${scoring}`] ?? null,
+        points: st[`pts_${scoring}`] ?? 0,
+        // The injury column. Everything that separates "wrong" from "hurt"
+        // downstream keys on this.
+        gamesPlayed: st.gp ?? 0,
+        name: [row.player?.first_name, row.player?.last_name].filter(Boolean).join(' ') || null,
+      });
+    }
+  }
+  statsCache.set(key, { at: Date.now(), live, byPlayer });
+  return byPlayer;
+}
+
 module.exports = {
-  projections,
+  projections, seasonStats,
   BASE, get, state, league, rosters, users, matchups, transactions,
   allPlayers, weekSnapshot, rosterOwners, draft,
 };

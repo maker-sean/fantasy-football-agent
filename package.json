@@ -46,6 +46,7 @@
     "ballot": "node scripts/ballot.js",
     "invite": "node scripts/invite.js",
     "history": "node scripts/history.js",
+    "welcome": "node scripts/welcome.js",
     "make-logo": "node scripts/make-logo.js"
   },
   "dependencies": {
