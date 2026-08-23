@@ -34,9 +34,29 @@ it('it names the configured trigger, not the brand', () => {
   assert.ok(!/called "Commish"/.test(text(league({ botNames: ['bot'] }))));
 });
 
-it('it falls back to a name rather than saying undefined', () => {
-  assert.match(text(league({})), /called "Commish"/);
-  assert.match(text(league(null)), /called "Commish"/);
+it('it falls back to the name the GATE actually answers to', () => {
+  // This asserted "Commish" and was wrong in the way this file exists to catch.
+  // decide.DEFAULT_BOT_NAMES is ['bot'] and mentionsBot returns null for
+  // "Commish" on an unconfigured league, so announcing Commish advertised a
+  // trigger nothing listened for. welcome.js hit the same bug and fixed it by
+  // routing through botNames(); this now does the same.
+  assert.match(text(league({})), /called "bot"/);
+  assert.match(text(league(null)), /called "bot"/);
+  assert.ok(!/called "Commish"/.test(text(league({}))));
+});
+
+it('it announces EVERY name it answers to, not just the first', () => {
+  // A league with four triggers had the gate reply to "jarvis" and the persona
+  // correct the person for saying it, so nearly every answer opened with
+  // "wrong bot".
+  const t = text(league({ botNames: ['bot', 'commish', 'jarvis'] }));
+  for (const n of ['bot', 'commish', 'jarvis']) {
+    assert.ok(t.includes(`"${n}"`), `${n} is accepted by the gate but never mentioned`);
+  }
+});
+
+it('it is told not to correct somebody for using one of its own names', () => {
+  assert.match(text(league({ botNames: ['bot', 'jarvis'] })), /[Nn]ever correct/);
 });
 
 console.log('\nevery line is true of the code');

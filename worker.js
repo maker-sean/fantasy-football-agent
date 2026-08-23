@@ -140,9 +140,34 @@ async function generateReply({ burst, league }) {
        where league_id = $1 order by occurred_at desc limit 6`,
       [league.id]
     );
+
+    /*
+     * WHO said it, by name.
+     *
+     * This labelled every speaker with a raw phone number, and KNOWN PEOPLE
+     * carries names without phones, so there was no join available: the model
+     * could not tell one person asking twice from two people asking once. It
+     * told a league member he was "repeating it a third time" when he had asked
+     * twice, because it was counting messages rather than people.
+     */
+    const { rows: who } = await db.query(
+      'select phone, display_name from members where league_id = $1 and phone is not null',
+      [league.id]
+    );
+    const nameFor = new Map(who.map(m => [m.phone, m.display_name]));
+
     const recentChat = recent.reverse().map(r => ({
-      who: r.direction === 'outbound' ? 'bot' : (r.sender_phone || 'someone'),
-      text: String(r.body || '').slice(0, 120),
+      who: r.direction === 'outbound'
+        ? 'bot'
+        : (nameFor.get(r.sender_phone) || r.sender_phone || 'someone'),
+      /*
+       * Long enough for the bot to read its OWN last reply.
+       *
+       * At 120 characters its previous answers arrived cut mid sentence, so
+       * asked whether it had already said something it was reconstructing from
+       * fragments of itself, and got the count wrong out loud.
+       */
+      text: String(r.body || '').slice(0, 400),
     }));
 
     const out = await generateAnswer(asked, ctx, { recentChat, spice: league.config?.spice ?? 1 });

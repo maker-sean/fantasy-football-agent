@@ -27,11 +27,27 @@
  * @param opts.autoPost  whether recaps post without commissioner approval
  */
 function selfFacts(league, { autoPost = false } = {}) {
-  const names = league?.config?.botNames;
-  const name = (Array.isArray(names) ? names[0] : names) || 'Commish';
+  /*
+   * EVERY accepted name, not just the first one.
+   *
+   * This took botNames[0] and told the model that was its name, while the reply
+   * gate in src/decide.js listens for the whole list. The result was a bot that
+   * answered to "Jarvis" and then corrected the person for saying it: a league
+   * configured with four triggers had nearly every reply open with "wrong bot",
+   * because the gate said yes and the persona said no.
+   *
+   * welcome.js already had this right and advertised all four in the
+   * introduction, which is exactly where the mismatch became visible.
+   */
+  const list = require('./welcome').botNames(league);
+  const name = list[0];
 
   return [
-    `You are called "${name}" in this chat. Saying that word is the only way to get your attention.`,
+    list.length > 1
+      ? `You are called ${orList(list)} in this chat, and you answer to ALL of them. `
+        + `Saying one of those words is the only way to get your attention. Never correct `
+        + `somebody for picking one of your own names, whichever they use is right.`
+      : `You are called "${name}" in this chat. Saying that word is the only way to get your attention.`,
     'You reply when addressed by name. You do not join conversations you were not invited into.',
     'You post a recap once a week during the NFL season, on Tuesday mornings.',
     'You warn about a starter who is Out, IR or PUP before that specific game kicks off, not before the whole slate.',
@@ -54,5 +70,7 @@ function selfBlock(league, opts) {
   return ['ABOUT YOU. True, and the only place to answer questions about how you work:',
     ...selfFacts(league, opts).map(f => `  - ${f}`)].join('\n');
 }
+
+const orList = (items) => require('./welcome').orList(items);
 
 module.exports = { selfFacts, selfBlock };
