@@ -774,3 +774,27 @@ input[type="range"] { accent-color: var(--turf); }
   }
   .plan-bar-note { flex-basis: 100%; }
 }
+
+/* The "what's included" disclosure inside the plan bar. Full width so it opens
+   underneath the options rather than squeezing in beside them. */
+.plan-more { flex-basis: 100%; margin-top: 2px; }
+.plan-more summary {
+  cursor: pointer; font-size: .82rem; color: var(--turf);
+  /* The default triangle is tiny and grey and reads as decoration; a visible
+     affordance matters more here than matching the browser. */
+  list-style: none; display: inline-flex; align-items: center; gap: 6px;
+}
+.plan-more summary::-webkit-details-marker { display: none; }
+.plan-more summary::before { content: "+"; font-weight: 700; }
+.plan-more[open] summary::before { content: "–"; }
+.plan-more summary:hover { text-decoration: underline; }
+.plan-more-h {
+  margin: 12px 0 6px; font-size: .8rem; font-weight: 700; color: var(--text);
+}
+.plan-more-h:first-child { margin-top: 10px; }
+.plan-more ul { list-style: none; padding: 0; margin: 0; }
+.plan-more li {
+  padding-left: 18px; position: relative; margin-bottom: 6px;
+  font-size: .84rem; color: var(--muted); line-height: 1.45;
+}
+.plan-more li::before { content: "✓"; position: absolute; left: 0; color: var(--turf); }

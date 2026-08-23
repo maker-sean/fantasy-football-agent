@@ -51,6 +51,17 @@
         </button>
       </div>
       <span class="plan-bar-note" id="plan-note">Free for the first week either way.</span>
+
+      <!-- What each plan actually includes, without leaving the signup.
+           
+           The only way to see this used to be the pricing page, which means
+           abandoning the flow to answer a question the flow created. Closed by
+           default: somebody who arrived from a tile has already read the
+           bullets and does not need them again. -->
+      <details class="plan-more">
+        <summary id="plan-more-summary">What's included?</summary>
+        <div id="plan-more-body"></div>
+      </details>
     </div>
 
     <!-- Step 1 --------------------------------------------------------------->
@@ -472,6 +483,68 @@ function profileBody() {
  * nothing selected and they choose for themselves. state.plan is the record;
  * the query string only decides what it starts on.
  */
+/*
+ * What each plan includes.
+ *
+ * THIS IS THE THIRD COPY. The same bullets are in the pricing tiles on
+ * website/pricing.html and website/index.html, which already carry a comment
+ * warning that the two of them drift. Change a feature and change it in all
+ * three, or the signup promises something the pricing page does not.
+ *
+ * Dynasty spells out the Season list rather than saying "everything in Season",
+ * because this panel exists for somebody deciding between them and "everything
+ * in the other one" is the answer that sends them to the pricing page — the
+ * exact trip this is here to save.
+ */
+const SEASON_FEATURES = [
+  'The Tuesday recap, every week',
+  'Pre-kickoff injury alerts',
+  'Trades, waivers and roster teardowns',
+  'Answers when someone actually asks it',
+  'iPhone and Android in the same chat',
+];
+const DYNASTY_EXTRA = [
+  'It does not switch off in January',
+  "Your league's offseason trades, still announced and graded",
+  'NFL signings and trades, and whose roster they just changed',
+];
+
+function renderPlanMore() {
+  const body = $('plan-more-body');
+  body.innerHTML = '';
+  const list = (title, items) => {
+    if (title) {
+      const h = document.createElement('p');
+      h.className = 'plan-more-h';
+      h.textContent = title;
+      body.appendChild(h);
+    }
+    const ul = document.createElement('ul');
+    for (const t of items) {
+      const li = document.createElement('li');
+      li.textContent = t;
+      ul.appendChild(li);
+    }
+    body.appendChild(ul);
+  };
+
+  if (state.plan === 'dynasty') {
+    list(null, SEASON_FEATURES);
+    list('And because it is dynasty:', DYNASTY_EXTRA);
+  } else if (state.plan === 'season') {
+    list(null, SEASON_FEATURES);
+  } else {
+    // Nothing picked yet: show both, so the panel can be used to decide rather
+    // than only to confirm.
+    list('Season — $5/manager', SEASON_FEATURES);
+    list('Dynasty — $8/manager, everything above plus:', DYNASTY_EXTRA);
+  }
+
+  $('plan-more-summary').textContent = state.plan
+    ? `What's included in ${state.plan === 'dynasty' ? 'Dynasty' : 'Season'}?`
+    : "What's included?";
+}
+
 function setPlan(plan, { silent = false } = {}) {
   state.plan = ['season', 'dynasty'].includes(plan) ? plan : null;
   for (const b of document.querySelectorAll('.plan-opt')) {
@@ -484,6 +557,7 @@ function setPlan(plan, { silent = false } = {}) {
         ? 'Runs all twelve months. Free for the first week.'
         : 'Runs through the championship. Free for the first week.')
     : 'Pick one — free for the first week either way.';
+  renderPlanMore();
   if (!silent) refreshProfileGate();
 }
 
