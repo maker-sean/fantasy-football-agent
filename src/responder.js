@@ -369,6 +369,47 @@ class Responder {
       }
     }
 
+    /*
+     * Telling us something, ahead of the reply gate.
+     *
+     * Feedback from an unbound person is still feedback, and decide() silences
+     * unbound senders by design — the same reason claims sits up here. It also
+     * must not be rate limited: the one message you actually want is the one a
+     * busy hour would drop.
+     */
+    if (db && league) {
+      const fb = require('./feedback');
+      const botNames = (league.config?.botNames || []).map(String);
+      for (const m of burst) {
+        const parsed = fb.parse(m.text, { botNames, isGroup: Boolean(m.isGroup) });
+        if (!parsed) continue;
+
+        const saidBy = m.senderName
+          || (await db.query('select display_name from members where league_id=$1 and phone=$2',
+               [league.id, db.normalizePhone(m.senderId)]).then(r => r.rows[0]?.display_name).catch(() => null));
+
+        const row = await fb.record({
+          leagueId: league.id, phone: m.senderId, saidBy,
+          kind: parsed.kind, body: parsed.body, inGroup: Boolean(m.isGroup),
+        }).catch(err => { console.error('[feedback] could not store:', err.message); return null; });
+
+        if (!row) break;
+
+        // Straight to the operator's phone. A dashboard nobody opens loses the
+        // signal, and this is worth most while the context is fresh.
+        await require('./notify').operator(this.provider,
+          fb.alertText({ ...parsed, saidBy, inGroup: Boolean(m.isGroup), leagueName: league.name }),
+          { dryRun: this.dryRun }).catch(() => {});
+
+        const reply = fb.thanks(parsed.kind);
+        await this.sendUnlessPaused(chatId, reply, 'feedback');
+        const verdict = { layer: 'feedback', reply: true, reason: parsed.kind,
+          messageCount: burst.length, triggerMessageId: m.messageId };
+        await this.log(chatId, league, verdict, reply).catch(() => {});
+        return { verdict, replied: reply };
+      }
+    }
+
     if (db && league && burst.some(m => !m.bound)) {
       const handled = await this.handleClaims(chatId, burst, league)
         .catch(err => { console.error('[claims] failed:', err.message); return null; });

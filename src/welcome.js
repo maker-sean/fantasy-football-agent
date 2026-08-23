@@ -152,7 +152,14 @@ function welcomeText(league, { needsBinding = false, known = [], unknown = 0, me
      * silence as open. src/signup.js and src/invites.js both advertise it and
      * should not until it answers.
      */
-    `Msg & data rates may apply. Reply STOP and you will never hear from me again.`;
+    /*
+     * The feedback line, because a channel nobody knows about is not a channel.
+     * This is the only message everybody in the league reads, so it is the only
+     * place worth spending a sentence on it.
+     */
+    `Something wrong or missing? Say "${name} bug ..." or "${name} idea ..." and it goes `
+    + `straight to the people building this.\n\n`
+    + `Msg & data rates may apply. Reply STOP and you will never hear from me again.`;
 
   return `${first}\n---\n${second}`;
 }
