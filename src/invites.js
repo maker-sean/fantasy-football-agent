@@ -75,13 +75,43 @@ function messageFor({ leagueName, url, days }) {
  * to live here rather than in the script, because the dashboard and the text
  * reply run on the worker and web service and would otherwise skip it.
  */
-async function send(signupId, { provider, days = onboardlink.DEFAULT_TTL_DAYS, dryRun = false } = {}) {
+async function send(signupId, { provider, days = onboardlink.DEFAULT_TTL_DAYS,
+  dryRun = false, force = false } = {}) {
   const { rows: [signup] } = await db.query('select * from signups where id = $1', [signupId]);
   if (!signup) return { sent: false, error: 'not_found' };
   if (!signup.phone) return { sent: false, error: 'no_phone' };
 
   const url = onboardlink.linkFor(signup.id, { days });
   if (/localhost|127\.0\.0\.1/.test(url)) return { sent: false, error: 'localhost_base_url', url };
+
+  /*
+   * The onboarding pre-flight, checked HERE rather than on the dashboard button.
+   *
+   * Three callers decide to invite — the button, INVITE from the operator
+   * phone, and the CLI — and a rule enforced at one call site is a rule the
+   * other two skip. That is not a hypothetical: the welcome, the mute, the
+   * operator alert and this module's own existence all trace to exactly that
+   * shape.
+   *
+   * What it buys: the link is minted for a stranger who will hand the bot to
+   * eleven friends, and the failure it prevents is the bot answering their
+   * first six questions with "no data has been captured yet" while six seasons
+   * sit one code path away.
+   *
+   * `force` is real and deliberate. A first-season league legitimately has no
+   * history — that is `thin`, not broken — and whether to invite them anyway is
+   * a product judgement the operator makes. It is a parameter rather than an
+   * env var so that choosing it is per-invite and visible.
+   */
+  // After the localhost refusal on purpose: a broken deployment outranks a
+  // readiness check, and reporting the gate first would hide it.
+  if (!force) {
+    const check = await require('./preflight').gate(signupId);
+    if (!check.ok) {
+      return { sent: false, error: 'preflight_' + check.reason,
+        overridable: Boolean(check.overridable), run: check.run || null };
+    }
+  }
 
   const text = messageFor({ leagueName: signup.league_name, url, days });
   if (dryRun) return { sent: false, dryRun: true, text, url, signup };

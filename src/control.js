@@ -110,6 +110,28 @@ async function handleControl({ burst, provider, providerName = 'sendblue', dryRu
       return { handled: true, action: 'invite_failed',
         reply: await say('PUBLIC_BASE_URL is localhost on this worker, so the link would be dead. Not sending.') };
     }
+    /*
+     * The pre-flight gate, said in a sentence rather than an error code.
+     *
+     * This path is somebody standing in a kitchen with a phone. "preflight_no_run"
+     * is a correct answer to the wrong question; what they need is which of the
+     * two things to do next, and neither is doable from here — the run and the
+     * override both live on /admin.
+     */
+    if (!res.sent && String(res.error || '').startsWith('preflight_')) {
+      const why = {
+        preflight_no_run: 'I have not checked whether I can answer questions about their league yet.',
+        preflight_running: 'The onboarding check on their league is still running.',
+        preflight_stale: 'The onboarding check on their league died partway through.',
+        preflight_thin: 'Their league has no completed seasons, so I would have nothing historical to say.',
+        preflight_failed: 'The onboarding check on their league failed.',
+      }[res.error] || 'The onboarding check has not passed.';
+      const next = res.overridable
+        ? 'Send it anyway from /admin if that is fine with you.'
+        : 'Run Onboard league on /admin first.';
+      return { handled: true, action: 'invite_blocked', reply: await say(`${why} ${next}`) };
+    }
+
     if (!res.sent) {
       return { handled: true, action: 'invite_failed',
         reply: await say(`Could not send that: ${res.error || 'unknown'}.`) };

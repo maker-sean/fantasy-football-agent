@@ -451,6 +451,191 @@ async function renderGaps() {
 
 // ------------------------------------------------------------ waitlist ----
 
+/*
+ * The onboarding pre-flight, on the row where the invite happens.
+ *
+ * Two buttons that must not be confused. One walks the league's Sleeper chain,
+ * ingests every completed season and asks the bot seven questions about it. The
+ * other texts a stranger a link that signs them into an account. So the check
+ * renders as STATE and the send renders as an ACTION, and the send stays
+ * visible-but-dimmed rather than hidden while the check has not passed: a
+ * missing button reads as a bug, a dimmed one with a reason beside it reads as
+ * a rule.
+ *
+ * The server decides whether the gate is open — this only draws the answer.
+ * A screen that computed its own verdict would eventually disagree with
+ * invites.send(), and the disagreement would look like a broken button.
+ */
+const PF_LOOK = {
+  no_run:  { cls: '',     text: 'not checked', note: 'Nobody has confirmed the bot can answer questions about this league.' },
+  running: { cls: 'warn', text: 'checking…',   note: 'Walking the Sleeper chain, then asking the standard questions. About 90 seconds.' },
+  stale:   { cls: 'bad',  text: 'check died',  note: 'The run stopped without finishing — most likely a deploy landed on it. Run it again.' },
+  passed:  { cls: 'ok',   text: '\u2713 ready',  note: null },
+  thin:    { cls: 'warn', text: 'no history',  note: 'A real league with no completed seasons, so there is nothing historical to say. Not broken — your call whether that is worth inviting.' },
+  failed:  { cls: 'bad',  text: '\u2717 failed', note: 'The check did not pass. Open the answers for what happened.' },
+};
+
+let pfPoll = null;
+
+function waitlistActions(s) {
+  const wrap = document.createElement('div');
+  wrap.className = 'pf';
+  const gate = s.gate || { ok: false, reason: 'no_run' };
+  const look = PF_LOOK[gate.reason] || PF_LOOK.no_run;
+  const pf = s.preflight;
+
+  const top = document.createElement('div');
+  top.className = 'pf-row';
+
+  const state = document.createElement('span');
+  state.className = 'pf-state ' + look.cls;
+  state.textContent = look.text;
+  top.appendChild(state);
+
+  const check = document.createElement('button');
+  check.className = 'btn btn-quiet';
+  check.textContent = pf ? 'Re-check' : 'Onboard league';
+  check.disabled = gate.reason === 'running';
+  check.onclick = async () => {
+    check.disabled = true;
+    check.textContent = 'Starting…';
+    try {
+      await api('POST', `/api/admin/signups/${s.id}/preflight`);
+      await renderWaitlist();
+    } catch (err) {
+      check.disabled = false;
+      check.textContent = pf ? 'Re-check' : 'Onboard league';
+      alert('Could not start the check: ' + err.message);
+    }
+  };
+  top.appendChild(check);
+
+  // Override lives next to the thing it overrides, and only appears for the one
+  // verdict that is a judgement rather than a fault.
+  let override = null;
+  if (gate.overridable) {
+    const label = document.createElement('label');
+    label.className = 'pf-override';
+    override = document.createElement('input');
+    override.type = 'checkbox';
+    override.onchange = () => { send.disabled = !override.checked; };
+    label.appendChild(override);
+    label.appendChild(document.createTextNode('send anyway'));
+    top.appendChild(label);
+  }
+
+  const send = document.createElement('button');
+  send.className = 'btn';
+  send.textContent = 'Send setup link';
+  send.disabled = !gate.ok;
+  send.onclick = async () => {
+    // Irreversible: the link signs whoever holds it into an account.
+    if (!confirm(`Text the setup link to ${s.league_name || 'this signup'}?`)) return;
+    send.disabled = true;
+    send.textContent = 'Sending…';
+    try {
+      await api('POST', `/api/admin/signups/${s.id}/invite`,
+        override?.checked ? { force: true } : undefined);
+      await renderWaitlist();
+    } catch (err) {
+      send.disabled = false;
+      send.textContent = 'Send setup link';
+      alert('Could not send: ' + err.message);
+    }
+  };
+  top.appendChild(send);
+
+  const no = document.createElement('button');
+  no.className = 'btn btn-quiet';
+  no.textContent = 'Decline';
+  no.onclick = async () => {
+    if (!confirm('Decline this signup? Nothing is sent to them.')) return;
+    try {
+      await api('POST', `/api/admin/signups/${s.id}/decline`);
+      await renderWaitlist();
+    } catch (err) { alert('Could not decline: ' + err.message); }
+  };
+  top.appendChild(no);
+  wrap.appendChild(top);
+
+  // What the run found, in the terms that decide whether to trust it.
+  if (pf) {
+    const bits = [];
+    if (pf.seasonsFound) bits.push(`${pf.seasonsCaptured}/${pf.seasonsFound} seasons captured`);
+    if (pf.seasonsFailed) bits.push(`${pf.seasonsFailed} failed`);
+    if (pf.contextChars) bits.push(`${pf.contextChars.toLocaleString()} chars of facts`);
+    if (pf.questions) bits.push(`${pf.questions} answers`);
+    if (bits.length) {
+      const line = document.createElement('div');
+      line.className = 'pf-note';
+      line.textContent = bits.join('  ·  ');
+      wrap.appendChild(line);
+    }
+  }
+
+  const note = pf?.error || look.note;
+  if (note) {
+    const n = document.createElement('div');
+    n.className = 'pf-note';
+    n.textContent = note;
+    wrap.appendChild(n);
+  }
+
+  if (pf && pf.questions) {
+    const toggle = document.createElement('button');
+    toggle.className = 'btn btn-quiet';
+    toggle.textContent = 'Read the answers';
+    const panel = document.createElement('div');
+    panel.hidden = true;
+    toggle.onclick = async () => {
+      if (!panel.hidden) { panel.hidden = true; toggle.textContent = 'Read the answers'; return; }
+      toggle.textContent = 'Loading…';
+      try {
+        const { run } = await api('GET', `/api/admin/signups/${s.id}/preflight`);
+        renderPreflightPanel(panel, run);
+        panel.hidden = false;
+        toggle.textContent = 'Hide the answers';
+      } catch (err) {
+        toggle.textContent = 'Read the answers';
+        alert('Could not load: ' + err.message);
+      }
+    };
+    wrap.appendChild(toggle);
+    wrap.appendChild(panel);
+  }
+
+  // A running check refreshes itself. One timer for the whole table, cleared on
+  // every render, so twelve waiting signups cannot start twelve pollers.
+  if (gate.reason === 'running' && !pfPoll) {
+    pfPoll = setTimeout(() => { pfPoll = null; renderWaitlist(); }, 5000);
+  }
+  return wrap;
+}
+
+/* Answers next to the facts they were given, which is the only way to check one. */
+function renderPreflightPanel(panel, run) {
+  panel.className = 'pf-panel';
+  panel.innerHTML = '';
+  for (const q of run.questions || []) {
+    const box = document.createElement('div');
+    box.className = 'pf-q';
+    const h = document.createElement('h4');
+    h.textContent = q.question;
+    const a = document.createElement('div');
+    a.className = 'pf-a' + (q.error ? ' err' : '');
+    a.textContent = q.error ? `failed: ${q.error}` : q.answer;
+    box.appendChild(h);
+    box.appendChild(a);
+    panel.appendChild(box);
+  }
+  if (run.context_block) {
+    const facts = document.createElement('div');
+    facts.className = 'pf-facts';
+    facts.textContent = run.context_block;
+    panel.appendChild(facts);
+  }
+}
+
 /**
  * The waitlist, with the one action on it.
  *
@@ -459,6 +644,7 @@ async function renderGaps() {
  * and "did that work" is the question this table exists to stop you asking.
  */
 async function renderWaitlist() {
+  if (pfPoll) { clearTimeout(pfPoll); pfPoll = null; }
   const body = $('waitlist').querySelector('tbody');
   let data;
   try {
@@ -506,36 +692,7 @@ async function renderWaitlist() {
 
     const act = document.createElement('td');
     if (s.status === 'new' && s.phone) {
-      const go = document.createElement('button');
-      go.className = 'btn';
-      go.textContent = 'Send setup link';
-      go.onclick = async () => {
-        // Irreversible: the link signs whoever holds it into an account.
-        if (!confirm(`Text the setup link to ${s.league_name || 'this signup'}?`)) return;
-        go.disabled = true;
-        go.textContent = 'Sending…';
-        try {
-          await api('POST', `/api/admin/signups/${s.id}/invite`);
-          await renderWaitlist();
-        } catch (err) {
-          go.disabled = false;
-          go.textContent = 'Send setup link';
-          alert('Could not send: ' + err.message);
-        }
-      };
-      act.appendChild(go);
-
-      const no = document.createElement('button');
-      no.className = 'btn btn-quiet';
-      no.textContent = 'Decline';
-      no.onclick = async () => {
-        if (!confirm('Decline this signup? Nothing is sent to them.')) return;
-        try {
-          await api('POST', `/api/admin/signups/${s.id}/decline`);
-          await renderWaitlist();
-        } catch (err) { alert('Could not decline: ' + err.message); }
-      };
-      act.appendChild(no);
+      act.appendChild(waitlistActions(s));
     } else if (s.redeemed_at) {
       act.className = 'muted small';
       act.textContent = 'opened the link';

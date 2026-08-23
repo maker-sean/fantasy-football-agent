@@ -30,6 +30,21 @@ const A = '+15558801111';
 const B = '+15558802222';
 const C = '+15559991111';   // shares A's last four, on purpose
 
+/*
+ * invites.send() is gated on a passing onboarding pre-flight, so anything here
+ * that expects a send to happen has to say the check passed. Stamped directly
+ * rather than run: these tests are about the localhost refusal and the
+ * invited_at bookkeeping, and a real run walks the Sleeper chain and spends
+ * seven model calls. The gate itself is pinned in preflight.test.js.
+ */
+async function preflightPassed(signupId) {
+  await db.query('delete from preflight_runs where signup_id = $1', [signupId]);
+  await db.query(
+    `insert into preflight_runs (signup_id, status, seasons_found, seasons_captured,
+                                 context_chars, finished_at)
+     values ($1, 'passed', 6, 6, 4200, now())`, [signupId]);
+}
+
 (async () => {
   await db.query('delete from signups where phone = any($1)', [[A, B, C]]);
   await db.query(
@@ -109,6 +124,7 @@ const C = '+15559991111';   // shares A's last four, on purpose
     process.env.PUBLIC_BASE_URL = 'https://example.invalid';
     try {
       const { rows: [s] } = await db.query('select id from signups where phone=$1', [A]);
+      await preflightPassed(s.id);
       const out = await invites.send(s.id, { provider: { send: async () => {} } });
       assert.strictEqual(out.sent, true, out.error);
       const { rows: [after] } = await db.query(
@@ -126,6 +142,7 @@ const C = '+15559991111';   // shares A's last four, on purpose
     await db.query(`update signups set status='new', invited_at=null where phone=$1`, [B]);
     try {
       const { rows: [s] } = await db.query('select id from signups where phone=$1', [B]);
+      await preflightPassed(s.id);
       const out = await invites.send(s.id, {
         provider: { send: async () => { throw new Error('sendblue down'); } } });
       assert.strictEqual(out.sent, false);

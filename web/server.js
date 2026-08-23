@@ -1285,12 +1285,69 @@ app.get('/api/admin/signups', admin, wrap(async (_req, res) => {
             source, created_at, invited_at, redeemed_at,
             first_name, last_name, email, platform, platform_other
        from signups order by created_at desc limit 50`);
+  /*
+   * The latest pre-flight per signup, in one query rather than N.
+   *
+   * The verdict is computed here rather than in the browser because
+   * invites.send() computes it from the same function — a screen that decides
+   * "green check" by its own rules would eventually disagree with the gate that
+   * actually blocks the send, and the disagreement would look like a bug in the
+   * button.
+   */
+  const preflight = require('../src/preflight');
+  const { rows: runs } = await db.query(
+    `select distinct on (signup_id) *
+       from preflight_runs order by signup_id, started_at desc`);
+  const bySignup = new Map(runs.map(r => [r.signup_id, r]));
+
+  const decorate = r => {
+    const run = bySignup.get(r.id) || null;
+    const v = preflight.verdict(run);
+    return {
+      ...r,
+      ref: r.phone ? String(r.phone).slice(-4) : null,
+      preflight: run && {
+        id: run.id, status: run.status, startedAt: run.started_at,
+        finishedAt: run.finished_at, seasonsFound: run.seasons_found,
+        seasonsCaptured: run.seasons_captured, seasonsFailed: run.seasons_failed,
+        contextChars: run.context_chars, questions: (run.questions || []).length,
+        error: run.error,
+      },
+      gate: { ok: v.ok, reason: v.reason, overridable: Boolean(v.overridable) },
+    };
+  };
+
   res.json({
-    pending: await invites.pending(),
+    pending: (await invites.pending()).map(decorate),
     // The whole list too, so an invited league does not vanish from the screen
     // the moment it is actioned and leave you wondering whether it worked.
-    recent: recent.map(r => ({ ...r, ref: r.phone ? String(r.phone).slice(-4) : null })),
+    recent: recent.map(decorate),
   });
+}));
+
+/*
+ * Start the onboarding pre-flight. Returns immediately with a run id.
+ *
+ * The work is a chain walk plus seven model calls — about ninety seconds — so
+ * this hands back a row to poll rather than holding a request open. A killed
+ * process leaves the row `running` and the verdict goes stale on its own after
+ * ten minutes, which is a visible state rather than a permanently spinning
+ * button.
+ */
+app.post('/api/admin/signups/:id/preflight', admin, wrap(async (req, res) => {
+  const preflight = require('../src/preflight');
+  const out = await preflight.start(req.params.id, { byEmail: req.account.email });
+  if (!out.run) return res.status(404).json({ error: out.reason || 'not_found' });
+  res.status(out.started ? 202 : 200).json({ run: out.run, started: out.started,
+    reason: out.reason || null });
+}));
+
+/* Poll one signup's latest run, answers and all. */
+app.get('/api/admin/signups/:id/preflight', admin, wrap(async (req, res) => {
+  const preflight = require('../src/preflight');
+  const run = await preflight.latest(req.params.id);
+  if (!run) return res.status(404).json({ error: 'no_run' });
+  res.json({ run, gate: preflight.verdict(run), questions: preflight.QUESTIONS });
 }));
 
 /*
@@ -1306,12 +1363,19 @@ app.post('/api/admin/signups/:id/invite', admin, wrap(async (req, res) => {
         { fromNumber: process.env.SENDBLUE_FROM_NUMBER })
     : null;
 
-  const out = await invites.send(req.params.id, { provider });
+  /*
+   * force comes from the operator ticking an override in the browser, and only
+   * moves a `thin` verdict. invites.send() decides what force is allowed to
+   * skip; this just carries the intent.
+   */
+  const out = await invites.send(req.params.id, { provider, force: req.body?.force === true });
   if (out.sent) return res.json({ sent: true, signup: out.signup });
 
   const status = out.error === 'not_found' ? 404
-    : out.error === 'localhost_base_url' ? 500 : 400;
-  res.status(status).json({ error: out.error, detail: out.detail || null });
+    : out.error === 'localhost_base_url' ? 500
+    : String(out.error).startsWith('preflight_') ? 409 : 400;
+  res.status(status).json({ error: out.error, detail: out.detail || null,
+    overridable: out.overridable || false, run: out.run || null });
 }));
 
 /* Decline a signup without texting them anything. */
