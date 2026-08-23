@@ -343,6 +343,101 @@ function el2(tag, cls, text) {
   return n;
 }
 
+// ------------------------------------------------------------ waitlist ----
+
+/**
+ * The waitlist, with the one action on it.
+ *
+ * Invited rows stay on screen rather than vanishing the moment they are
+ * actioned: a row disappearing is indistinguishable from a request that failed,
+ * and "did that work" is the question this table exists to stop you asking.
+ */
+async function renderWaitlist() {
+  const body = $('waitlist').querySelector('tbody');
+  let data;
+  try {
+    data = await api('GET', '/api/admin/signups');
+  } catch (err) {
+    $('waitlist-sub').textContent = 'Could not load the waitlist: ' + err.message;
+    return;
+  }
+
+  body.innerHTML = '';
+  const rows = data.recent || [];
+  if (!rows.length) {
+    $('waitlist-sub').textContent = 'Nobody has signed up yet.';
+    return;
+  }
+
+  for (const s of rows) {
+    const tr = document.createElement('tr');
+
+    const league = document.createElement('td');
+    league.textContent = s.league_name || 'no league on file';
+    if (s.total_rosters) {
+      const n = document.createElement('span');
+      n.className = 'muted small';
+      n.textContent = ` · ${s.total_rosters} teams`;
+      league.appendChild(n);
+    }
+
+    const when = document.createElement('td');
+    when.className = 'muted small';
+    when.textContent = new Date(s.created_at).toLocaleString();
+
+    const state = document.createElement('td');
+    state.textContent = s.status;
+
+    const act = document.createElement('td');
+    if (s.status === 'new' && s.phone) {
+      const go = document.createElement('button');
+      go.className = 'btn';
+      go.textContent = 'Send setup link';
+      go.onclick = async () => {
+        // Irreversible: the link signs whoever holds it into an account.
+        if (!confirm(`Text the setup link to ${s.league_name || 'this signup'}?`)) return;
+        go.disabled = true;
+        go.textContent = 'Sending…';
+        try {
+          await api('POST', `/api/admin/signups/${s.id}/invite`);
+          await renderWaitlist();
+        } catch (err) {
+          go.disabled = false;
+          go.textContent = 'Send setup link';
+          alert('Could not send: ' + err.message);
+        }
+      };
+      act.appendChild(go);
+
+      const no = document.createElement('button');
+      no.className = 'btn btn-quiet';
+      no.textContent = 'Decline';
+      no.onclick = async () => {
+        if (!confirm('Decline this signup? Nothing is sent to them.')) return;
+        try {
+          await api('POST', `/api/admin/signups/${s.id}/decline`);
+          await renderWaitlist();
+        } catch (err) { alert('Could not decline: ' + err.message); }
+      };
+      act.appendChild(no);
+    } else if (s.redeemed_at) {
+      act.className = 'muted small';
+      act.textContent = 'opened the link';
+    } else if (s.invited_at) {
+      act.className = 'muted small';
+      act.textContent = 'invited, not opened';
+    }
+
+    for (const td of [league, when, state, act]) tr.appendChild(td);
+    body.appendChild(tr);
+  }
+
+  const waiting = (data.pending || []).length;
+  $('waitlist-sub').textContent = waiting
+    ? `${waiting} waiting. You can also reply INVITE to the alert text.`
+    : 'Nobody waiting.';
+}
+
 // ------------------------------------------------------------- signups ----
 
 function renderTiles(tiles) {
@@ -718,6 +813,7 @@ async function load() {
   renderDrafts(drafts);
 
   renderTiles(funnel.tiles);
+  renderWaitlist().catch(err => console.error('[admin] waitlist failed:', err));
   renderVisits(funnel.visits.map(v => ({ hour: v.hour, count: v.views, views: v.views })));
   renderFunnel(funnel.funnel);
   renderTextFlow(funnel.textFlow);

@@ -75,17 +75,31 @@ const withEnv = async (val, fn) => {
     assert.match(t, /12 teams/);
   });
 
-  await it('it includes the invite command with the number filled in', async () => {
+  await it('it can be acted on by replying, not by opening a terminal', async () => {
     // The gap between finding out and acting was a terminal, a script name
     // nobody remembers, and a phone number that had to be looked up first.
     const t = notify.waitlistText({ leagueName: 'X', teams: 10, phone: '+15551234567' });
-    assert.match(t, /npm run invite -- \+15551234567 --send/);
+    assert.match(t, /Reply INVITE/);
+  });
+
+  await it('the ref is in every alert, before it is needed', async () => {
+    // Two signups landing close together makes a bare INVITE ambiguous, and by
+    // then the first alert has already gone out. Printing the ref always means
+    // the message you scroll back to is still actionable.
+    const t = notify.waitlistText({ leagueName: 'X', teams: 10, phone: '+15551234567' });
+    assert.match(t, /4567/);
+  });
+
+  await it('with several waiting it insists on the number', async () => {
+    const t = notify.waitlistText({ leagueName: 'X', teams: 10, phone: '+15551234567', pendingCount: 3 });
+    assert.match(t, /INVITE 4567/);
+    assert.match(t, /3 are waiting/);
   });
 
   await it('a signup with no league still produces a usable alert', async () => {
     const t = notify.waitlistText({ leagueName: null, teams: null, phone: '+15551234567' });
     assert.match(t, /no Sleeper id/);
-    assert.match(t, /npm run invite/);
+    assert.match(t, /Reply INVITE/);
   });
 
   console.log(`\n${pass} passing`);

@@ -57,15 +57,25 @@ function message({ leagueName, url, days }) {
   if (!signup.phone) throw new Error('that signup has no phone — it came in by email, so it cannot be texted');
 
   const days = Number(flag('days') || onboardlink.DEFAULT_TTL_DAYS);
-  const url = onboardlink.linkFor(signup.id, { days });
-  const text = message({ leagueName: signup.league_name, url, days });
+
+  /*
+   * Everything below runs through src/invites.js.
+   *
+   * The minting, the localhost refusal, the send and the invited_at bookkeeping
+   * used to live in this script, and there are now two other ways to invite: a
+   * text reply and a button on the dashboard. Three copies of the rules is how
+   * the welcome, the mute and the operator alert each broke today. One funnel.
+   */
+  const invites = require('../src/invites');
+  const preview = await invites.send(signup.id, { days, dryRun: true });
 
   console.log('');
   console.log('  to      ' + signup.phone);
   console.log('  league  ' + (signup.league_name || '(none recorded)'));
   console.log('  expires ' + new Date(Date.now() + days * 86400000).toLocaleString());
   console.log('');
-  console.log(text.split('\n').map(l => '  | ' + l).join('\n'));
+  if (preview.text) console.log(preview.text.split('\n').map(l => '  | ' + l).join('\n'));
+  else console.log('  cannot compose: ' + preview.error);
   console.log('');
 
   if (!has('send')) {
@@ -73,41 +83,19 @@ function message({ leagueName, url, days }) {
     return;
   }
 
-  // A localhost link in a real text is unrecoverable — it is already on
-  // somebody's phone by the time anyone notices. This has bitten the repo
-  // before, from the worker having no RENDER_EXTERNAL_URL to fall back on.
-  if (/localhost|127\.0\.0\.1/.test(url)) {
-    throw new Error('PUBLIC_BASE_URL is not set, so this link points at localhost. Refusing to send.');
-  }
-
   const provider = new SendblueProvider(
     process.env.SENDBLUE_API_KEY_ID,
     process.env.SENDBLUE_API_SECRET_KEY,
     { fromNumber: process.env.SENDBLUE_FROM_NUMBER }
   );
-  const res = await provider.send(signup.phone, text);
-  console.log('  sent — sendblue says ' + (res?.status || 'accepted'));
-  console.log('  An accepted response is not delivery. Confirm with: npm run sendblue-status\n');
 
-  /*
-   * invited_at, not just the status.
-   *
-   * Migration 0018 added this column and backfilled the rows that were already
-   * invited, and nothing has written it since: this line set status and left
-   * invited_at null. src/observe.js counts the "Sent a setup link" funnel stage
-   * as `where invited_at is not null`, so the next invite would have frozen
-   * that stage and shown a 100% drop-off between the waitlist and the link that
-   * did not happen. The tile read correctly only because the backfill had
-   * touched the one row that existed.
-   *
-   * coalesce so a re-invite does not overwrite first contact, matching how
-   * redeemed_at already behaves in web/server.js.
-   */
-  await db.query(
-    `update signups
-        set status = 'invited',
-            invited_at = coalesce(invited_at, now()),
-            updated_at = now()
-      where id = $1`, [signup.id]);
+  const res = await invites.send(signup.id, { days, provider });
+  if (res.error === 'localhost_base_url') {
+    throw new Error('PUBLIC_BASE_URL is not set, so this link points at localhost. Refusing to send.');
+  }
+  if (!res.sent) throw new Error('could not send: ' + (res.error || 'unknown'));
+
+  console.log('  sent.');
+  console.log('  An accepted response is not delivery. Confirm with: npm run sendblue-status\n');
 })().catch(e => { console.error('\n  ' + e.message + '\n'); process.exitCode = 1; })
     .finally(() => db.pool.end());

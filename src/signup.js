@@ -178,11 +178,13 @@ async function record({ phone, email = null, leagueId, rawText, source = 'sms' }
      * the alerts. Failure is swallowed inside notify: a signup recorded and not
      * announced is a missed notification, one that throws is a lost lead.
      */
+    const waiting = await require('./invites').pending().catch(() => []);
     await require('./notify').operator(null, require('./notify').waitlistText({
       leagueName: league?.name || rows[0].league_name,
       teams: league?.total_rosters,
       phone: rows[0].phone || normalized || mail,
       source,
+      pendingCount: waiting.length || 1,
     })).catch(() => {});
     return { signup: rows[0], created: true, league };
   }

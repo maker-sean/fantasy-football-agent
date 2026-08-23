@@ -19,6 +19,21 @@ const APPROVE = /^(send|send it|post|post it|yes|y|yep|yeah|ship|ship it|go|appr
 const REJECT  = /^(no|nope|n|kill|kill it|skip|reject|nah|don'?t|delete|👎)[.!]*$/i;
 const STATUS  = /^(status|pending|queue|what'?s pending|drafts?)[.!?]*$/i;
 
+/*
+ * Approving a SIGNUP, which is a different thing from approving a recap.
+ *
+ * A recap is approved by a league owner; a signup has no league yet, so this is
+ * scoped to OPERATOR_PHONE instead. Same shape otherwise: 1:1 only, a short
+ * command, ahead of the reply gate so it cannot be swallowed by mention rules
+ * or rate limits.
+ *
+ * The trailing ref is optional and becomes required when more than one signup
+ * is waiting. src/invites.js refuses rather than guessing, because inviting the
+ * wrong league sends a stranger a link that signs them into an account.
+ */
+const INVITE  = /^invite(?:\s+([0-9]{2,10}))?[.!]*$/i;
+const IGNORE  = /^(ignore|skip|no thanks|not yet)(?:\s+([0-9]{2,10}))?[.!]*$/i;
+
 /**
  * @param burst        normalized inbound events
  * @param provider     MessagingProvider, for sending
@@ -37,6 +52,71 @@ async function handleControl({ burst, provider, providerName = 'sendblue', dryRu
 
   const text = burst.map(m => m.text).filter(Boolean).join(' ').trim();
   if (!text) return null;
+
+  /*
+   * Signup approval, before recap approval.
+   *
+   * Checked first because INVITE cannot collide with the recap commands, and
+   * because it is scoped to a different person: OPERATOR_PHONE rather than a
+   * league owner. A signup has no league yet, so there is no owner to be.
+   */
+  const inviteHit = INVITE.exec(text);
+  const ignoreHit = IGNORE.exec(text);
+  if (inviteHit || ignoreHit) {
+    const notify = require('./notify');
+    const operator = notify.operatorPhone();
+    // Not the operator: fall through rather than claim the message, the same
+    // way a stranger texting "yes" gets the normal reply path.
+    if (!operator || sender !== operator) return null;
+
+    const invites = require('./invites');
+    const ref = (inviteHit || ignoreHit)[1] || null;
+    const found = await invites.resolve(ref).catch(() => ({ error: 'lookup_failed' }));
+
+    const say = async (msg) => {
+      if (!dryRun && provider) await provider.send(sender, msg).catch(() => {});
+      return msg;
+    };
+
+    if (found.error === 'none_pending') {
+      return { handled: true, action: 'invite_none', reply: await say('Nothing on the waitlist.') };
+    }
+    if (found.error === 'ambiguous') {
+      /*
+       * Refused, not guessed. Sean asked what happens when two land close
+       * together, and this is the answer: the last four digits of their number,
+       * which is stable no matter what else arrives, unlike a menu position.
+       */
+      const list = found.waiting
+        .map(s => `  ${s.ref}  ${s.league_name || 'no league'}${s.total_rosters ? `, ${s.total_rosters} teams` : ''}`)
+        .join('\n');
+      return { handled: true, action: 'invite_ambiguous',
+        reply: await say(`${found.waiting.length} waiting, so I need the number:\n\n${list}\n\ne.g. INVITE ${found.waiting[0].ref}`) };
+    }
+    if (found.error) {
+      return { handled: true, action: 'invite_no_match',
+        reply: await say(`Nothing on the waitlist matches ${ref}.`) };
+    }
+
+    if (ignoreHit) {
+      await db.query(`update signups set status = 'declined', updated_at = now() where id = $1`,
+        [found.signup.id]).catch(() => {});
+      return { handled: true, action: 'invite_ignored',
+        reply: await say(`Left ${found.signup.league_name || 'them'} on the shelf.`) };
+    }
+
+    const res = await invites.send(found.signup.id, { provider, dryRun });
+    if (res.error === 'localhost_base_url') {
+      return { handled: true, action: 'invite_failed',
+        reply: await say('PUBLIC_BASE_URL is localhost on this worker, so the link would be dead. Not sending.') };
+    }
+    if (!res.sent) {
+      return { handled: true, action: 'invite_failed',
+        reply: await say(`Could not send that: ${res.error || 'unknown'}.`) };
+    }
+    return { handled: true, action: 'invite_sent',
+      reply: await say(`Sent. ${found.signup.league_name || 'They'} have their setup link, good for 7 days.`) };
+  }
 
   const isApprove = APPROVE.test(text);
   const isReject = REJECT.test(text);
@@ -141,4 +221,4 @@ async function handleControl({ burst, provider, providerName = 'sendblue', dryRu
   }
 }
 
-module.exports = { handleControl, APPROVE, REJECT, STATUS };
+module.exports = { handleControl, APPROVE, REJECT, STATUS, INVITE, IGNORE };

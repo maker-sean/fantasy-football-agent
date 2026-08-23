@@ -1242,6 +1242,57 @@ app.get('/api/admin/errors', admin, wrap(async (req, res) => {
   res.json(await observe.errors({ days }));
 }));
 
+/*
+ * The waitlist, and the one action on it.
+ *
+ * The Signups tab showed COUNTS — last hour, 12, 24, total — so the evidence a
+ * league was waiting was a number going from 1 to 2, with no way to see who
+ * without opening a terminal. A signup sat unnoticed for eleven hours that way.
+ */
+app.get('/api/admin/signups', admin, wrap(async (_req, res) => {
+  const invites = require('../src/invites');
+  const { rows: recent } = await db.query(
+    `select id, phone, league_name, season, total_rosters, status,
+            source, created_at, invited_at, redeemed_at
+       from signups order by created_at desc limit 50`);
+  res.json({
+    pending: await invites.pending(),
+    // The whole list too, so an invited league does not vanish from the screen
+    // the moment it is actioned and leave you wondering whether it worked.
+    recent: recent.map(r => ({ ...r, ref: r.phone ? String(r.phone).slice(-4) : null })),
+  });
+}));
+
+/*
+ * Send the setup link. Same funnel as the text reply and the script, so the
+ * localhost refusal and the invited_at bookkeeping cannot be skipped by
+ * whichever path somebody happens to use.
+ */
+app.post('/api/admin/signups/:id/invite', admin, wrap(async (req, res) => {
+  const invites = require('../src/invites');
+  const { SendblueProvider } = require('../src/sendblue');
+  const provider = process.env.SENDBLUE_API_KEY_ID
+    ? new SendblueProvider(process.env.SENDBLUE_API_KEY_ID, process.env.SENDBLUE_API_SECRET_KEY,
+        { fromNumber: process.env.SENDBLUE_FROM_NUMBER })
+    : null;
+
+  const out = await invites.send(req.params.id, { provider });
+  if (out.sent) return res.json({ sent: true, signup: out.signup });
+
+  const status = out.error === 'not_found' ? 404
+    : out.error === 'localhost_base_url' ? 500 : 400;
+  res.status(status).json({ error: out.error, detail: out.detail || null });
+}));
+
+/* Decline a signup without texting them anything. */
+app.post('/api/admin/signups/:id/decline', admin, wrap(async (req, res) => {
+  const { rows } = await db.query(
+    `update signups set status = 'declined', updated_at = now()
+      where id = $1 returning id, league_name, status`, [req.params.id]);
+  if (!rows[0]) return res.status(404).json({ error: 'not_found' });
+  res.json({ declined: true, signup: rows[0] });
+}));
+
 app.get('/api/admin/leagues', admin, wrap(async (_req, res) => {
   res.json({ leagues: await observe.leagueList({ scope: null }) });
 }));

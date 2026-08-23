@@ -72,11 +72,24 @@ async function operator(provider, text, { dryRun = false } = {}) {
  * acting was a terminal, a script name nobody remembers, and a phone number
  * that had to be looked up first.
  */
-function waitlistText({ leagueName, teams, phone, source }) {
+function waitlistText({ leagueName, teams, phone, source, pendingCount = 1 }) {
   const who = leagueName || 'a league with no Sleeper id';
   const size = teams ? `, ${teams} teams` : '';
-  return `New signup: ${who}${size}${source === 'web' ? ' (from the website)' : ''}.\n\n`
-       + `Invite them:\nnpm run invite -- ${phone} --send`;
+  const ref = String(phone || '').slice(-4);
+
+  /*
+   * The ref is in the alert even when it is not needed yet.
+   *
+   * Two signups arriving close together makes a bare INVITE ambiguous, and by
+   * then the first alert has already been sent without one. Printing it always
+   * means the message you scroll back to is still actionable after a second
+   * league lands.
+   */
+  const how = pendingCount > 1
+    ? `Reply INVITE ${ref} to send the setup link. ${pendingCount} are waiting, so the number matters.`
+    : `Reply INVITE to send the setup link, or INVITE ${ref} to be explicit.`;
+
+  return `New signup: ${who}${size}${source === 'web' ? ' (from the website)' : ''}.\n\n${how}`;
 }
 
 module.exports = { operator, operatorPhone, waitlistText };
