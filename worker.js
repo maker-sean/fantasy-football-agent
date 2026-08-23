@@ -54,6 +54,24 @@ const sendblue = (process.env.SENDBLUE_API_KEY_ID && process.env.SENDBLUE_API_SE
 //
 // The fixed slate captures below are kept as a safety net in case ESPN is
 // unreachable; they are insert-only, so a duplicate costs nothing.
+/**
+ * Reconcile recent sends, and say so out loud when one did not arrive.
+ *
+ * The alert is the point. Writing the failure to send_log makes it findable
+ * later; texting the operator makes it findable NOW, which is the difference
+ * between a bot that looks broken to twelve people and one somebody fixes.
+ */
+async function auditDelivery() {
+  if (!sendblue) return;
+  const delivery = require('./src/delivery');
+  const out = await delivery.reconcile(sendblue);
+  if (out.checked) console.log(`[delivery] resolved ${out.checked}, ${out.failures.length} failed`);
+  const text = delivery.alertText(out.failures);
+  if (text) {
+    await require('./src/notify').operator(sendblue, text, { dryRun: DRY_RUN || !ECHO });
+  }
+}
+
 const JOBS = [
   ['gameday',        '*/15 * * * *', () => gameday.tick(sendblue, { dryRun: DRY_RUN })],
   ['schedule',       '0 5 * * *',    () => gameday.refreshSchedule()],
@@ -70,6 +88,19 @@ const JOBS = [
   ['lock_mon',       '10 20 * * 1', () => snapshots.captureAll('lock_mon')],
   // Final scores, after Monday night has settled.
   ['postscore',      '0 6 * * 2',   () => snapshots.captureAll('postscore')],
+  /*
+   * Did the last few messages actually land?
+   *
+   * send_log.ok means Sendblue accepted the request, and a reply to the league
+   * was accepted, recorded ok/QUEUED, and then failed at the device layer with
+   * "could not determine target service for group". Every record said it went
+   * out. It was found because somebody read the chat and asked.
+   *
+   * Every ten minutes, which is roughly how long a person takes to notice a bot
+   * has gone quiet, and cheap: it reads only recent rows that still have no
+   * terminal state, and one request finds nothing when nothing is wrong.
+   */
+  ['delivery',       '*/10 * * * *', () => auditDelivery()],
   // Housekeeping.
   ['players',        '0 4 * * *',   () => snapshots.refreshPlayers()],
   ['members',        '30 4 * * *',  () => snapshots.syncMembers()],

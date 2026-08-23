@@ -146,8 +146,13 @@ class SendblueProvider extends MessagingProvider {
     try {
       const res = await run();
       // Sendblue can answer HTTP 200 with {"status":"ERROR"}; request() already
-      // throws on that, so anything arriving here succeeded.
-      await this.logSend({ ...row, ok: true, status: res?.status || 'accepted' });
+      // throws on that, so anything arriving here was ACCEPTED. Accepted is not
+      // delivered: a group reply recorded here as ok/QUEUED later failed at the
+      // device layer with "could not determine target service for group", and
+      // nothing in this system knew. The handle is what makes the difference
+      // findable afterwards.
+      await this.logSend({ ...row, ok: true, status: res?.status || 'accepted',
+        messageHandle: res?.message_handle || res?.id || null });
       return res;
     } catch (err) {
       await this.logSend({ ...row, ok: false, status: null, error: err.message });
@@ -161,14 +166,14 @@ class SendblueProvider extends MessagingProvider {
     }
   }
 
-  async logSend({ chatId, isGroup, leagueId, ok, status, error }) {
+  async logSend({ chatId, isGroup, leagueId, ok, status, error, messageHandle = null }) {
     try {
       const db = require('./db');
       await db.query(
-        `insert into send_log (league_id, chat_id, is_group, ok, status, error)
-         values ($1,$2,$3,$4,$5,$6)`,
+        `insert into send_log (league_id, chat_id, is_group, ok, status, error, message_handle)
+         values ($1,$2,$3,$4,$5,$6,$7)`,
         [leagueId, chatId || null, Boolean(isGroup), ok, status || null,
-         error ? String(error).slice(0, 500) : null]
+         error ? String(error).slice(0, 500) : null, messageHandle]
       );
     } catch (err) {
       console.error('[sendblue] could not record send outcome:', err.message);
