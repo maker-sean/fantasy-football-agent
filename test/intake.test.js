@@ -55,6 +55,26 @@ it('the name typed out works too, since people answer in words', () => {
   assert.strictEqual(intake.parsePlatform('we use GroupMe'), 'groupme');
 });
 
+it('facebook on its own means Messenger', () => {
+  /*
+   * The option was relabelled from "Messenger" to "Facebook Messenger", and
+   * parsePlatform matches on the key or the FULL label — so without an explicit
+   * alias the shorter, more common answer would match nothing and somebody who
+   * types the brand rather than the app gets asked the question again.
+   */
+  for (const t of ['facebook', 'Facebook', 'FB', 'fb', 'we use facebook', 'facebook messenger']) {
+    assert.strictEqual(intake.parsePlatform(t), 'messenger', `not messenger: ${t}`);
+  }
+});
+
+it('the option is labelled Facebook Messenger, which is what people call it', () => {
+  const [, label] = intake.PLATFORMS.find(([k]) => k === 'messenger');
+  assert.strictEqual(label, 'Facebook Messenger');
+  // The numbered SMS list is built from these labels, so the text question and
+  // the website dropdown cannot disagree about what option 2 is.
+  assert.match(intake.askPlatform(), /2\) Facebook Messenger/);
+});
+
 it('text, sms and imessage are the same answer to a person', () => {
   for (const t of ['text', 'sms', 'we just use text', 'group chat']) {
     assert.strictEqual(intake.parsePlatform(t), 'imessage', `not imessage: ${t}`);

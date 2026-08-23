@@ -29,7 +29,7 @@ const db = require('./db');
 
 const PLATFORMS = [
   ['imessage',  'iMessage or text group'],
-  ['messenger', 'Messenger'],
+  ['messenger', 'Facebook Messenger'],
   ['whatsapp',  'WhatsApp'],
   ['groupme',   'GroupMe'],
   ['discord',   'Discord'],
@@ -97,6 +97,14 @@ function parsePlatform(text) {
   }
   // "text", "sms" and "imessage" are the same answer to a person.
   if (/\b(text|sms|imessage|group ?chat)\b/.test(clean)) return 'imessage';
+  /*
+   * "Facebook" on its own means Messenger. The loop above matches on the key or
+   * the full label, so relabelling this from "Messenger" to "Facebook
+   * Messenger" would otherwise leave the shorter, more common answer matching
+   * nothing — somebody who types the brand rather than the app gets asked
+   * again.
+   */
+  if (/\b(facebook|fb)\b/.test(clean)) return 'messenger';
   return null;
 }
 
