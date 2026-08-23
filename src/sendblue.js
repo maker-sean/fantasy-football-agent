@@ -142,7 +142,7 @@ class SendblueProvider extends MessagingProvider {
    * turn a failed send into a different error than the one that happened.
    */
   async recorded(chatId, isGroup, opts, run) {
-    const row = { chatId, isGroup, leagueId: opts.leagueId || null };
+    const row = { chatId, isGroup, leagueId: opts.leagueId || null, isRetry: Boolean(opts.isRetry) };
     try {
       const res = await run();
       // Sendblue can answer HTTP 200 with {"status":"ERROR"}; request() already
@@ -166,14 +166,14 @@ class SendblueProvider extends MessagingProvider {
     }
   }
 
-  async logSend({ chatId, isGroup, leagueId, ok, status, error, messageHandle = null }) {
+  async logSend({ chatId, isGroup, leagueId, ok, status, error, messageHandle = null, isRetry = false }) {
     try {
       const db = require('./db');
       await db.query(
-        `insert into send_log (league_id, chat_id, is_group, ok, status, error, message_handle)
-         values ($1,$2,$3,$4,$5,$6,$7)`,
+        `insert into send_log (league_id, chat_id, is_group, ok, status, error, message_handle, is_retry)
+         values ($1,$2,$3,$4,$5,$6,$7,$8)`,
         [leagueId, chatId || null, Boolean(isGroup), ok, status || null,
-         error ? String(error).slice(0, 500) : null, messageHandle]
+         error ? String(error).slice(0, 500) : null, messageHandle, Boolean(isRetry)]
       );
     } catch (err) {
       console.error('[sendblue] could not record send outcome:', err.message);

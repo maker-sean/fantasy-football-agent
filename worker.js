@@ -96,11 +96,17 @@ const JOBS = [
    * "could not determine target service for group". Every record said it went
    * out. It was found because somebody read the chat and asked.
    *
-   * Every ten minutes, which is roughly how long a person takes to notice a bot
-   * has gone quiet, and cheap: it reads only recent rows that still have no
-   * terminal state, and one request finds nothing when nothing is wrong.
+   * Every seven minutes. Cheap either way — it reads only recent rows with no
+   * terminal state, and one request finds nothing when nothing is wrong — and
+   * the tighter cadence buys margin against the retry window: a failure caught
+   * at seven minutes still has eight minutes of the fifteen minute resend
+   * budget left, where a ten minute sweep left only five.
+   *
+   * Seven does not divide into 60, so it fires at :00 :07 ... :56 and then the
+   * hour rolls, making that last gap four minutes rather than seven. Harmless:
+   * the MAXIMUM gap is still seven, which is the number that matters.
    */
-  ['delivery',       '*/10 * * * *', () => auditDelivery()],
+  ['delivery',       '*/7 * * * *', () => auditDelivery()],
   // Housekeeping.
   ['players',        '0 4 * * *',   () => snapshots.refreshPlayers()],
   ['members',        '30 4 * * *',  () => snapshots.syncMembers()],

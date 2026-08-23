@@ -31,11 +31,12 @@ const FAILED = new Set(['ERROR', 'DECLINED', 'FAILED']);
  * bounded: this reconciles the recent window rather than the whole table,
  * because a send nobody chased within the hour is history, not an incident.
  */
-async function reconcile(provider, { limit = 50, windowHours = 6 } = {}) {
+async function reconcile(provider, { limit = 50, windowHours = 6,
+  retryWithinMs = 15 * 60 * 1000 } = {}) {
   if (!provider) return { checked: 0, failures: [] };
 
   const { rows: unchecked } = await db.query(
-    `select id, message_handle, chat_id, is_group, at
+    `select id, message_handle, chat_id, is_group, at, is_retry, league_id
        from send_log
       where message_handle is not null
         and delivery is null
@@ -75,13 +76,52 @@ async function reconcile(provider, { limit = 50, windowHours = 6 } = {}) {
     checked++;
 
     if (FAILED.has(state)) {
-      failures.push({
+      const failure = {
         id: row.id, chatId: row.chat_id, isGroup: row.is_group, at: row.at,
         state, code: m.error_code || null,
         message: m.error_message || m.error_detail || null,
         service: m.service || null,
         preview: String(m.content || '').slice(0, 80),
-      });
+        retried: false,
+      };
+
+      /*
+       * One retry, and only for a failure young enough to still make sense.
+       *
+       * 5504 is Sendblue declining to guess the group's transport rather than
+       * rejecting the content: the identical message resent later went SENT
+       * over SMS. It does not retry on its own, so without this a reply simply
+       * never arrives.
+       *
+       * The age limit is the whole bargain. A reply landing a few minutes late
+       * is worth having; one landing an hour later drops into a conversation
+       * that has moved on and reads worse than silence.
+       *
+       * The TEXT COMES FROM SENDBLUE, not from us. send_log stores no body, and
+       * their record of what was attempted is the thing that failed, so it is
+       * also the right thing to send again.
+       *
+       * Never retries a retry. The row this creates is itself young and
+       * failable, and without is_retry a thread that cannot resolve its
+       * transport would resend every ten minutes forever.
+       */
+      const ageMs = Date.now() - new Date(row.at).getTime();
+      const eligible = !row.is_retry && ageMs <= retryWithinMs && m.content;
+      if (eligible) {
+        try {
+          await provider.send(row.chat_id, String(m.content),
+            { isRetry: true, leagueId: row.league_id });
+          failure.retried = true;
+          console.log(`[delivery] resent after ${state} on ${row.chat_id}`);
+        } catch (err) {
+          failure.retryError = err.message;
+          console.error('[delivery] retry failed:', err.message);
+        }
+        await db.query('update send_log set retried_at = now() where id = $1', [row.id])
+          .catch(() => {});
+      }
+
+      failures.push(failure);
       require('./errorlog').record({
         system: 'sendblue', operation: 'delivery',
         status: m.error_code || null,
@@ -97,7 +137,16 @@ function alertText(failures) {
   if (!failures?.length) return null;
   const one = failures[0];
   const rest = failures.length > 1 ? ` (and ${failures.length - 1} more)` : '';
-  return `A message to the league did NOT arrive${rest}.\n\n`
+  /*
+   * Says whether it was resent, because that changes what you do about it.
+   * "Did not arrive" and "did not arrive, sent again" are different problems
+   * and only one of them needs you.
+   */
+  const outcome = one.retried
+    ? 'I sent it again.'
+    : one.retryError ? `The resend also failed: ${one.retryError}`
+    : 'Too old to resend automatically.';
+  return `A message to the league did NOT arrive${rest}. ${outcome}\n\n`
        + `${one.state}${one.code ? ' ' + one.code : ''}: ${one.message || 'no detail'}\n`
        + `"${one.preview}"`;
 }
