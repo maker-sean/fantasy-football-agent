@@ -764,6 +764,67 @@ function luck(rows) {
  * rows of it invites the model to call somebody lucky on a rounding error.
  * Three places is the floor for saying it out loud.
  */
+/**
+ * Who actually scores, ranked here rather than left to the model.
+ *
+ * career() has summed points and points-against per manager since it was
+ * written, and careerBlock never printed either. So the fact sheet carried
+ * records, titles, finishes and the toilet bowl, and not one scoring number —
+ * and asked who scores the most every season the bot correctly said the maths
+ * was not in front of it. It was right. Nobody had given it to it.
+ *
+ * PER SEASON IS THE RANKING, total is the context. Managers here have played
+ * between one and six seasons, so a career total ranks tenure as much as
+ * scoring — the person with six mediocre years outscores the person with two
+ * excellent ones, and calling that "the highest scorer" is wrong in the way
+ * that sounds authoritative.
+ *
+ * The leader is stated outright on its own line. The recurring failure in this
+ * system is a model handed twelve rows and asked which is biggest: it answered
+ * the same question two different wrong ways minutes apart. A ranking nothing
+ * can check afterwards has to be computed.
+ */
+function scoringBlock(rows, names = new Map()) {
+  const ranked = rows
+    .filter(r => r.seasons > 0 && r.points > 0)
+    .map(r => {
+      const known = names.get(r.userId);
+      return {
+        who: known && r.name && known !== r.name ? `${known} (${r.name})` : known || r.name || r.userId,
+        perSeason: Math.round((r.points / r.seasons) * 10) / 10,
+        total: Math.round(r.points * 10) / 10,
+        against: Math.round(r.against * 10) / 10,
+        seasons: r.seasons,
+      };
+    })
+    .sort((a, b) => b.perSeason - a.perSeason);
+  if (!ranked.length) return '';
+
+  const n = x => x.toLocaleString('en-US', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+  const top = ranked[0];
+  // A tie is a tie and must be said as one, for the same reason the whiff
+  // counts are: crowning one of two equal managers is the kind of wrong that
+  // gets argued with in the chat.
+  const tied = ranked.filter(r => r.perSeason === top.perSeason);
+
+  const L = ['SCORING (points per season is the ranking; the career total is there for context'
+           + ' only, because these managers have not played the same number of years and a'
+           + ' total ranks tenure as much as scoring):'];
+  L.push(tied.length > 1
+    ? `  Highest scoring per season: ${tied.map(t => t.who).join(' and ')}, tied on ${n(top.perSeason)}.`
+    : `  Highest scoring per season: ${top.who}, ${n(top.perSeason)}.`);
+  const byTotal = [...ranked].sort((a, b) => b.total - a.total)[0];
+  if (byTotal.who !== top.who) {
+    L.push(`  Most points all told: ${byTotal.who}, ${n(byTotal.total)} over ${byTotal.seasons}`
+         + ` seasons — more years, not a better team.`);
+  }
+  for (const r of ranked) {
+    L.push(`  ${r.who} = ${n(r.perSeason)} per season, ${n(r.total)} across ${r.seasons}`
+         + ` season${r.seasons === 1 ? '' : 's'}, ${n(r.against)} against`);
+  }
+  return L.join('\n');
+}
+
 function luckBlock(rows, names = new Map()) {
   const notable = luck(rows).filter(l => Math.abs(l.luck) >= 3);
   if (!notable.length) return '';
@@ -943,6 +1004,6 @@ const ordinal = n => {
   return n + (s[(v - 20) % 10] || s[v] || s[0]);
 };
 
-module.exports = { chain, archiveLeague, captureSeason, career, careerBlock, careerExtremes,
+module.exports = { chain, archiveLeague, captureSeason, career, careerBlock, careerExtremes, scoringBlock,
   championBlock, averageFinishBlock, finalPlacements, toiletLoser, movesByRoster, gamesFor, gameRecords, gameRecordsBlock,
   benchMistakes, benchBlock, luck, luckBlock, toiletBlock, activityBlock, ordinal };

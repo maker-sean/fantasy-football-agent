@@ -350,6 +350,19 @@ function contextBlock(ctx) {
     const extremes = require('./history').careerExtremes(ctx.career, names);
     if (extremes) { L.push(''); L.push(extremes); }
 
+    /*
+     * Who scores. Absent entirely until now — career() had summed the points
+     * per manager since it was written and nothing ever printed them, so asked
+     * who scores most per season the bot said the maths was not in front of it,
+     * which was true.
+     *
+     * Ranked here rather than in the prompt, for the same reason as luck below:
+     * a model handed twelve rows and asked which is biggest answered the same
+     * question two different wrong ways minutes apart.
+     */
+    const scoring = require('./history').scoringBlock(ctx.career, names);
+    if (scoring) { L.push(''); L.push(scoring); }
+
     // Whether a record was earned or scheduled. Computed, because a model given
     // twelve rows of points will rank them itself and state the result as fact.
     const luck = require('./history').luckBlock(ctx.career, names);
