@@ -28,6 +28,31 @@
     <p class="lede">Type your Sleeper username. Not your email, not a league ID. The name your
     league knows you by.</p>
 
+    <!-- The plan, at the TOP and visible on every step.
+         
+         It used to be a dropdown on the last screen, three steps after the
+         Start trial button that was supposed to have chosen it. Pressing
+         Dynasty and then being asked to type a Sleeper username acknowledges
+         nothing — the choice had been made and the page never said so, and
+         somebody arriving from the hero button did not meet the question until
+         the very end.
+         
+         Two buttons rather than a select, because there are exactly two and a
+         dropdown hides the one you did not pick. The price is on them: it is
+         the number this whole decision is about. -->
+    <div class="plan-bar" id="plan-bar">
+      <span class="plan-bar-label">Plan</span>
+      <div class="plan-opts" role="group" aria-label="Season or dynasty">
+        <button type="button" class="plan-opt" data-plan="season" aria-pressed="false">
+          Season <span class="plan-price">$5/manager</span>
+        </button>
+        <button type="button" class="plan-opt" data-plan="dynasty" aria-pressed="false">
+          Dynasty <span class="plan-price">$8/manager</span>
+        </button>
+      </div>
+      <span class="plan-bar-note" id="plan-note">Free for the first week either way.</span>
+    </div>
+
     <!-- Step 1 --------------------------------------------------------------->
     <div id="step-user" class="step">
       <label class="field-label" for="username">Sleeper username</label>
@@ -77,24 +102,6 @@
       </div>
       <div class="row" style="margin-top:8px">
         <input id="email" type="email" autocomplete="email" placeholder="you@example.com">
-      </div>
-      <div class="row" style="margin-top:8px">
-        <!-- Season or dynasty.
-             
-             Both pricing tiles have a Start trial button and both used to land
-             here, so the choice somebody had just made was thrown away — and
-             there was no way to answer "does anyone pick dynasty", which is the
-             question that decides whether the offseason features get built.
-             
-             Preselected from ?plan when they arrived from a tile, and shown
-             rather than hidden, so they can see what they picked and change it.
-             Somebody arriving from the hero button has made no choice yet and
-             answers it here. -->
-        <select id="plan" aria-label="Season or dynasty?">
-          <option value="">Season or dynasty?</option>
-          <option value="season">Season — through the championship</option>
-          <option value="dynasty">Dynasty — all twelve months</option>
-        </select>
       </div>
       <div class="row" style="margin-top:8px">
         <!-- Where their league actually LIVES, which is not where onboarding
@@ -442,8 +449,6 @@ function watchForText(code) {
 }
 
 // The free-text box only exists once "Something else" is the answer.
-$('plan').addEventListener('change', refreshProfileGate);
-
 $('platform').addEventListener('change', () => {
   $('platform-other-row').style.display = $('platform').value === 'other' ? '' : 'none';
   refreshProfileGate();
@@ -453,23 +458,40 @@ function profileBody() {
   return {
     name: $('name').value.trim() || null,
     email: $('email').value.trim() || null,
-    plan: $('plan').value || null,
+    plan: state.plan || null,
     platform: $('platform').value || null,
     platformOther: $('platform-other').value.trim() || null,
   };
 }
 
 /*
- * Preselect the plan they clicked, if they came from a tile.
+ * The plan bar: set from ?plan when they arrived from a tile, changeable at any
+ * point, and visible on every step rather than waiting until the last one.
  *
- * Read rather than trusted: anything that is not one of the two we sell leaves
- * the field empty and they pick for themselves. The select is the record either
- * way — the query string only decides what it starts on.
+ * Read rather than trusted — anything that is not one of the two we sell leaves
+ * nothing selected and they choose for themselves. state.plan is the record;
+ * the query string only decides what it starts on.
  */
-(() => {
-  const wanted = new URLSearchParams(location.search).get('plan');
-  if (['season', 'dynasty'].includes(wanted)) $('plan').value = wanted;
-})();
+function setPlan(plan, { silent = false } = {}) {
+  state.plan = ['season', 'dynasty'].includes(plan) ? plan : null;
+  for (const b of document.querySelectorAll('.plan-opt')) {
+    const on = b.dataset.plan === state.plan;
+    b.classList.toggle('on', on);
+    b.setAttribute('aria-pressed', on ? 'true' : 'false');
+  }
+  $('plan-note').textContent = state.plan
+    ? (state.plan === 'dynasty'
+        ? 'Runs all twelve months. Free for the first week.'
+        : 'Runs through the championship. Free for the first week.')
+    : 'Pick one — free for the first week either way.';
+  if (!silent) refreshProfileGate();
+}
+
+for (const b of document.querySelectorAll('.plan-opt')) {
+  b.addEventListener('click', () => setPlan(b.dataset.plan));
+}
+
+setPlan(new URLSearchParams(location.search).get('plan'), { silent: true });
 
 /*
  * What is still missing, in the order the fields appear.
@@ -486,7 +508,7 @@ function missingField() {
   const b = profileBody();
   if (!b.name || !/[a-z]/i.test(b.name)) return 'your name';
   if (!b.email || !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(b.email)) return 'an email address';
-  if (!b.plan) return 'season or dynasty';
+  if (!b.plan) return 'a plan — pick Season or Dynasty at the top';
   if (!b.platform) return 'where your league chats';
   if (b.platform === 'other' && !b.platformOther) return 'where that is';
   return null;
@@ -495,6 +517,9 @@ function missingField() {
 function refreshProfileGate() {
   const missing = missingField();
   for (const id of ['profile-go', 'email-go']) $(id).disabled = Boolean(missing);
+  // Quiet until they are actually on the form. Changing the plan on step one
+  // should not announce that a name is missing from a screen not yet shown.
+  if ($('step-done').hidden) return;
   say($('profile-msg'), missing ? `Still need ${missing}.` : 'Ready.', missing ? '' : 'ok');
 }
 
