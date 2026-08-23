@@ -328,6 +328,11 @@ function contextBlock(ctx) {
     const luck = require('./history').luckBlock(ctx.career, names);
     if (luck) { L.push(''); L.push(luck); }
 
+    // Ordered, because "top 3 average finishes" is a ranking and a ranking is
+    // the one thing nothing can check after the fact.
+    const avg = require('./history').averageFinishBlock(ctx.career, names);
+    if (avg) { L.push(''); L.push(avg); }
+
     // Who took the punishment, by year. The counts above cannot answer "who
     // lost it in 2022", which is the shape the question actually takes.
     /*

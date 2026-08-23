@@ -532,7 +532,29 @@ async function career(sleeperLeagueId) {
   }
 
   return [...byUser.values()]
-    .map(u => ({ ...u, points: Math.round(u.points), against: Math.round(u.against) }))
+    .map(u => ({
+      ...u,
+      points: Math.round(u.points),
+      against: Math.round(u.against),
+      /*
+       * Average REGULAR SEASON finish, computed here because the model is told
+       * not to compute. Asked for the best average finishes it correctly
+       * refused — "not a stat I've got printed" — and it was right to:
+       * answer.js forbids arithmetic that nobody verified, which is the rule
+       * that keeps it from inventing numbers under pressure. The gap was mine.
+       * The places were already recorded; nothing added them up.
+       */
+      avgFinish: u.finishes.length
+        ? Math.round((u.finishes.reduce((n, f) => n + f.place, 0) / u.finishes.length) * 10) / 10
+        : null,
+      /*
+       * Seasons finishing in the top three. "Top 3 average finishes" is
+       * genuinely ambiguous — the three best averages, or how often somebody
+       * made the podium — and both readings come out of the same array, so
+       * printing both costs a few characters and removes the guess.
+       */
+      podiums: u.finishes.filter(f => f.place <= 3).length,
+    }))
     .sort((a, b) => (b.wins / Math.max(1, b.wins + b.losses)) - (a.wins / Math.max(1, a.wins + a.losses)));
 }
 
@@ -723,6 +745,30 @@ function careerBlock(rows, names = new Map()) {
 }
 
 /**
+ * Average finish, in order, best first.
+ *
+ * Ordered rather than left as twelve numbers on twelve lines, for the same
+ * reason the extremes exist: handed the raw values and asked for the top three,
+ * a model ranks them itself, and ranking is the operation nothing can check.
+ * Printing the order makes "who are the top 3" a lookup.
+ */
+function averageFinishBlock(rows, names = new Map()) {
+  const ranked = rows.filter(r => r.avgFinish != null)
+    .sort((a, b) => a.avgFinish - b.avgFinish);
+  if (ranked.length < 2) return '';
+  const label = r => {
+    const known = names.get(r.userId);
+    return known && r.name && known !== r.name ? `${known} (${r.name})` : known || r.name || r.userId;
+  };
+  return 'AVERAGE FINISH (mean REGULAR SEASON place across every season played, best first.'
+       + ' This order is computed, so it is safe to quote. Lower is better. The top-three'
+       + ' count is how often they finished 1st, 2nd or 3rd, which is a different question'
+       + ' from having a good average):\n'
+       + ranked.map((r, i) => `  ${i + 1}. ${label(r)} ${r.avgFinish} over ${r.seasons} seasons`
+           + `, ${r.podiums} top-three finish${r.podiums === 1 ? '' : 'es'}`).join('\n');
+}
+
+/**
  * The four superlatives, computed rather than left to be inferred.
  *
  * A model handed twelve individual lines and asked who is worst will rank them
@@ -768,6 +814,27 @@ function careerExtremes(rows, names = new Map()) {
   if (lasts && Math.max(...rows.map(r => r.lasts)) > 0) L.push(lasts);
   const toilets = top(r => r.toilets, r => `${r.toilets}`, 'most toilet bowls taken (the punishment bracket)');
   if (toilets && Math.max(...rows.map(r => r.toilets)) > 0) L.push(toilets);
+  /*
+   * Podiums and average finish, as computed extremes.
+   *
+   * Printing the twelve numbers was not enough. Asked who had the most
+   * top-three finishes, the model scanned the list and answered "Marek and
+   * Dermott, 3 each"; asked the same thing differently a moment later it said
+   * "Dermott and Tobias, 2 each". The truth is Marek and Whitlock at 3. Two wrong
+   * answers, disagreeing with each other, from a list sitting in front of it.
+   *
+   * Ranking twelve rows is exactly the operation nothing can verify after the
+   * fact, which is why every other superlative here is computed. This one was
+   * left out and immediately proved the rule.
+   */
+  const podium = top(r => r.podiums, r => `${r.podiums}`, 'most top-three finishes');
+  if (podium && Math.max(...rows.map(r => r.podiums || 0)) > 0) L.push(podium);
+  const withAvg = rows.filter(r => r.avgFinish != null);
+  if (withAvg.length > 1) {
+    // Negated, because for a finish lower is better and top() takes a maximum.
+    L.push(top(r => -(r.avgFinish ?? 99), r => `${r.avgFinish}`, 'best average finish'));
+  }
+
   L.push(top(r => pct(r), rec, 'best career record'));
   L.push(top(r => -pct(r), rec, 'worst career record'));
   return L.filter(Boolean).join('\n');
@@ -780,5 +847,5 @@ const ordinal = n => {
 };
 
 module.exports = { chain, archiveLeague, captureSeason, career, careerBlock, careerExtremes,
-  championBlock, toiletLoser, movesByRoster, gamesFor, gameRecords, gameRecordsBlock,
+  championBlock, averageFinishBlock, toiletLoser, movesByRoster, gamesFor, gameRecords, gameRecordsBlock,
   benchMistakes, benchBlock, luck, luckBlock, toiletBlock, activityBlock, ordinal };
