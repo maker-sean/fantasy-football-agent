@@ -135,12 +135,24 @@ function welcomeText(league, { needsBinding = false, known = [], unknown = 0, me
       ? `Which of you is which? Reply with your team's number and I will remember ` +
         `— add your name and I will use that too:\n\n${menu}\n\n`
       : '') +
-    // STOP only. An earlier draft promised "HELP brings this back", which is
-    // not true and could not be made true: src/signup.js deliberately never
-    // replies to a reserved keyword, because the provider suppresses outbound
-    // to that number as soon as it sees one. Promising a reply that the
-    // carrier swallows is worse than not offering it.
-    `Reply STOP and you will never hear from me again.`;
+    /*
+     * The rates line belongs HERE most of all.
+     *
+     * It was on the signup confirmation and on the invite and not on this one,
+     * which is exactly inverted: those two go to the commissioner, who has read
+     * the terms and ticked the box, and this goes to eleven people who signed up
+     * for nothing and are meeting the number for the first time. The only person
+     * getting the disclosure was the one who least needed it.
+     *
+     * STILL NO HELP. An earlier draft promised "HELP brings this back", which is
+     * not true and could not be made true: src/signup.js deliberately never
+     * replies to a reserved keyword, because the provider suppresses outbound to
+     * that number as soon as it sees one. Promising a reply the carrier swallows
+     * is worse than not offering it, and HANDOFF.md still lists HELP returning
+     * silence as open. src/signup.js and src/invites.js both advertise it and
+     * should not until it answers.
+     */
+    `Msg & data rates may apply. Reply STOP and you will never hear from me again.`;
 
   return `${first}\n---\n${second}`;
 }

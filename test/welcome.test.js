@@ -129,6 +129,25 @@ async function main() {
     assert.match(welcome.welcomeText(league({ config: null })), /I am Commish/);
   });
 
+  console.log('\nthe disclosure the group never otherwise gets');
+
+  await it('it carries the message rates line', async () => {
+    // The signup confirmation and the invite both had it and this did not,
+    // which is inverted: those go to the commissioner who read the terms, this
+    // goes to eleven people who signed up for nothing.
+    assert.match(welcome.welcomeText(league()), /rates may apply/i);
+  });
+
+  await it('it still carries STOP', async () => {
+    assert.match(welcome.welcomeText(league()), /Reply STOP/);
+  });
+
+  await it('it does NOT advertise HELP, which returns silence', async () => {
+    // Promising a reply the carrier swallows is worse than not offering it.
+    assert.ok(!/HELP/i.test(welcome.welcomeText(league())),
+      'advertising a keyword the provider suppresses');
+  });
+
   console.log('\nit says what this is, not just who it is');
 
   await it('the introduction leads with the product name', async () => {
