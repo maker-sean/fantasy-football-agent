@@ -299,7 +299,11 @@ anything beyond one league the author runs.
 
 - [ ] **Inbound correlation on Sendblue** — replies from both device types landing on one `group_id`. Phase 2 depends on it.
 - [ ] **Group size** — tested at 4 participants; leagues are 11–13, group MMS caps at 8–10.
-- [ ] Webhook signature verification. **Not implemented — do not run in production as-is.**
+- [x] Webhook signature verification. Done, and narrower than this line implied:
+      the only webhook route is `/webhooks/linq`, it verifies the HMAC and 503s
+      when no secret is set. Sendblue is `inboundMode: 'poll'`, so the transport
+      actually in production has no inbound endpoint to forge. The warning
+      outlived the design it was written against.
 - [ ] Per-league unit economics (MMS cost vs price) — the Phase 4 gate.
 
 ## Constraints (researched — don't re-derive)
