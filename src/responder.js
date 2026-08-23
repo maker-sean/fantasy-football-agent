@@ -328,6 +328,47 @@ class Responder {
      * return null for anything that is not unmistakably a claim. Silence is the
      * right answer to ordinary chat.
      */
+    /*
+     * Mute and wake, ahead of everything.
+     *
+     * A wake has to land while paused, which is the same rule control.js states
+     * for recap approval: the one message that must get through is the one a
+     * paused bot suppresses. So this sends through the provider directly rather
+     * than sendUnlessPaused, which consults the very flag it is clearing.
+     */
+    if (db && league) {
+      const mute = await require('./mute').handleMute({
+        burst, league,
+        send: text => (this.dryRun ? null : this.provider.send(chatId, text)),
+      }).catch(err => { console.error('[mute] failed:', err.message); return null; });
+
+      if (mute) {
+        const verdict = { layer: 'mute', reply: true,
+          reason: mute.paused ? 'muted' : 'woken',
+          messageCount: burst.length, triggerMessageId: mute.triggerMessageId };
+        await this.log(chatId, league, verdict, mute.reply).catch(() => {});
+        return { verdict, replied: mute.reply };
+      }
+
+      /*
+       * Muted means MUTED, including the paths that skip decide().
+       *
+       * league.config.paused is enforced in decide.js layer 0, but help and
+       * claims both return before decide is ever called and send through
+       * sendUnlessPaused, which consults the GLOBAL kill switch and knows
+       * nothing about this league's flag. Without this, a league that told the
+       * bot to be quiet would still get roster prompts and help replies, which
+       * is the same shape of bug as the welcome sitting below two early
+       * returns. Stopped here, once, above all of them.
+       */
+      if (league.config?.paused) {
+        const verdict = { layer: 'suppress', reply: false, reason: 'league_paused',
+          messageCount: burst.length, triggerMessageId: burst[0]?.messageId };
+        await this.log(chatId, league, verdict, null).catch(() => {});
+        return { verdict, replied: null };
+      }
+    }
+
     if (db && league && burst.some(m => !m.bound)) {
       const handled = await this.handleClaims(chatId, burst, league)
         .catch(err => { console.error('[claims] failed:', err.message); return null; });
