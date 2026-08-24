@@ -36,13 +36,19 @@ const fakeProvider = (message, sent = []) => ({
   sent,
 });
 
-const seed = async (handle, { minutesAgo = 1, isRetry = false } = {}) => {
+const seed = async (handle, { minutesAgo = 1, isRetry = false, retryCount = 0 } = {}) => {
   const { rows } = await db.query(
-    `insert into send_log (chat_id, is_group, ok, status, message_handle, is_retry, at)
-     values ($1, true, true, 'QUEUED', $2, $3, now() - ($4 || ' minutes')::interval)
-     returning id`, [CHAT, handle, isRetry, String(minutesAgo)]);
+    `insert into send_log (chat_id, is_group, ok, status, message_handle, is_retry, retry_count, at)
+     values ($1, true, true, 'QUEUED', $2, $3, $4, now() - ($5 || ' minutes')::interval)
+     returning id`, [CHAT, handle, isRetry, retryCount, String(minutesAgo)]);
   return rows[0].id;
 };
+
+/* A failure that is NOT the flapping group transport, so it gets one attempt. */
+const rejected = (handle, content = 'the reply that never arrived') => ({
+  message_handle: handle, status: 'ERROR', error_code: 4,
+  error_message: 'Message content was rejected', content, service: 'SMS',
+});
 
 const errored = (handle, content = 'the reply that never arrived') => ({
   message_handle: handle, status: 'ERROR', error_code: 5504,
@@ -91,12 +97,45 @@ const errored = (handle, content = 'the reply that never arrived') => ({
       'without this flag an unresolvable thread resends every ten minutes forever');
   });
 
-  await it('a row that IS a retry is never retried again', async () => {
-    await seed('h-isretry', { minutesAgo: 2, isRetry: true });
+  await it('a retry of the group transport failure IS tried again, because it flaps', async () => {
+    /*
+     * This used to assert the opposite, and the opposite was measured wrong.
+     * On 2026-08-24 a league's group sends failed 5504 at 01:45, 01:48 and
+     * 01:54 and one went through cleanly at 01:51 — an evenly flapping
+     * transport, not a dead one. Stopping after a single attempt is what left
+     * that league silent.
+     */
+    await seed('h-flap2', { minutesAgo: 2, isRetry: true, retryCount: 1 });
     const sent = [];
-    const out = await delivery.reconcile(fakeProvider(errored('h-isretry'), sent));
-    assert.strictEqual(sent.length, 0, 'a retry was retried, which is the loop');
+    const out = await delivery.reconcile(fakeProvider(errored('h-flap2'), sent));
+    assert.strictEqual(sent.length, 1, 'gave up on a transport known to recover');
+    assert.strictEqual(out.failures[0].retried, true);
+  });
+
+  await it('the chain still stops, so an unresolvable thread cannot loop forever', async () => {
+    await seed('h-budget', { minutesAgo: 2, isRetry: true, retryCount: 3 });
+    const sent = [];
+    const out = await delivery.reconcile(fakeProvider(errored('h-budget'), sent));
+    assert.strictEqual(sent.length, 0, 'resent past the budget, which is the loop');
     assert.strictEqual(out.failures[0].retried, false);
+  });
+
+  await it('a legacy retry row counts as an attempt even with no count on it', async () => {
+    // Every row written before retry_count existed defaults to 0. Without the
+    // is_retry floor they would all read as fresh and get a full new budget.
+    await seed('h-legacy', { minutesAgo: 2, isRetry: true });
+    const sent = [];
+    await delivery.reconcile(fakeProvider(rejected('h-legacy'), sent));
+    assert.strictEqual(sent.length, 0, 'a legacy retry was treated as a first attempt');
+  });
+
+  await it('a failure that is NOT the transport still gets exactly one attempt', async () => {
+    // The extra budget is bought by 5504 specifically recovering on its own.
+    // Rejected content will be rejected again however many times it is sent.
+    await seed('h-rejected', { minutesAgo: 2, isRetry: true, retryCount: 1 });
+    const sent = [];
+    await delivery.reconcile(fakeProvider(rejected('h-rejected'), sent));
+    assert.strictEqual(sent.length, 0, 'kept resending something the gateway refuses');
   });
 
   await it('the same failure is not resent on the next pass', async () => {
@@ -109,6 +148,70 @@ const errored = (handle, content = 'the reply that never arrived') => ({
     await delivery.reconcile(fakeProvider(errored('h-once'), second));
     assert.strictEqual(second.length, 0, 'resent twice');
   });
+
+  console.log('\nan introduction that never landed');
+
+  /*
+   * Sigma Chi Dynasty, 2026-08-24 01:45:29. welcomed_at was stamped on a send
+   * that failed at the device layer two seconds later, and welcomed_at is the
+   * guard against introducing a league twice — so it was never introduced once.
+   * Twelve people met a bot that said nothing about itself and then started
+   * answering questions.
+   */
+  const seedLeague = async (handle) => {
+    await db.query("delete from leagues where sleeper_league_id = 'zz-delivery-welcome'");
+    const { rows } = await db.query(
+      `insert into leagues (name, sleeper_league_id, provider, chat_id, active, welcomed_at,
+                            welcome_message_handle)
+       values ('ZZ Delivery Welcome', 'zz-delivery-welcome', 'sendblue', $1, true, now(), $2)
+       returning id`, [CHAT, handle]);
+    return rows[0].id;
+  };
+  const leagueState = async (id) => (await db.query(
+    'select welcomed_at, welcome_message_handle from leagues where id = $1', [id])).rows[0];
+
+  await it('a failed introduction un-welcomes the league so it goes again', async () => {
+    const id = await seedLeague('h-welcome');
+    await seed('h-welcome', { minutesAgo: 2 });
+    const out = await delivery.reconcile(fakeProvider(errored('h-welcome'), []));
+    const after = await leagueState(id);
+    assert.strictEqual(after.welcomed_at, null, 'the league is still marked introduced');
+    assert.strictEqual(after.welcome_message_handle, null);
+    assert.strictEqual(out.failures[0].unwelcomed, true);
+  });
+
+  await it('it is un-welcomed INSTEAD of resent, not as well as', async () => {
+    // Doing both sends the introduction twice: once from the stale copy
+    // Sendblue is holding, once from welcome.js rebuilding it next cycle.
+    const id = await seedLeague('h-welcome-once');
+    await seed('h-welcome-once', { minutesAgo: 2 });
+    const sent = [];
+    await delivery.reconcile(fakeProvider(errored('h-welcome-once'), sent));
+    assert.strictEqual(sent.length, 0, 'resent the introduction AND queued another one');
+    assert.strictEqual((await leagueState(id)).welcomed_at, null);
+  });
+
+  await it('a failed recap does not un-welcome a league introduced weeks ago', async () => {
+    // Scoped by handle, not by league. Otherwise any later failure erases a
+    // perfectly good introduction and the league is introduced all over again.
+    const id = await seedLeague('h-welcome-kept');
+    await seed('h-other-send', { minutesAgo: 2 });
+    await delivery.reconcile(fakeProvider(errored('h-other-send'), []));
+    assert.ok((await leagueState(id)).welcomed_at, 'an unrelated failure un-welcomed the league');
+  });
+
+  await it('a delivered introduction drops its handle, so it can never be undone later', async () => {
+    const id = await seedLeague('h-welcome-ok');
+    await seed('h-welcome-ok', { minutesAgo: 2 });
+    await delivery.reconcile(fakeProvider(
+      { message_handle: 'h-welcome-ok', status: 'DELIVERED', content: 'hello' }, []));
+    const after = await leagueState(id);
+    assert.ok(after.welcomed_at, 'a delivered introduction was thrown away');
+    assert.strictEqual(after.welcome_message_handle, null,
+      'the handle is still live and a later lookup could un-welcome them');
+  });
+
+  await db.query("delete from leagues where sleeper_league_id = 'zz-delivery-welcome'");
 
   console.log('\nage is the bargain');
 

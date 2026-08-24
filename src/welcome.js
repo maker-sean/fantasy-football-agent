@@ -233,14 +233,33 @@ async function ensureWelcomed(league, { send, needsBinding = false, known, unkno
     if (!/localhost|127\.0\.0\.1/.test(base)) mediaUrl = `${base}/contact.vcf`;
   } catch { /* no secret configured; the introduction still goes out */ }
 
+  let res;
   try {
-    await send(league.chat_id, text, { mediaUrl });
+    res = await send(league.chat_id, text, { mediaUrl });
   } catch (err) {
     console.error(`[welcome] send failed for ${league.name}:`, err.message);
     return { welcomed: false, sent: false };
   }
 
-  await db.query('update leagues set welcomed_at = now() where id = $1 and welcomed_at is null', [league.id]);
+  /*
+   * The handle, so this stamp can be TAKEN BACK.
+   *
+   * Not throwing means Sendblue answered 200, which is acceptance and not
+   * delivery — Sigma Chi Dynasty was stamped welcomed on 2026-08-24 at 01:45:29
+   * on a send that failed at the device layer seconds later, and because
+   * welcomed_at is the guard against introducing a league twice, it was never
+   * introduced at all.
+   *
+   * Blocking here on confirmed delivery is the wrong cure: reconciliation is a
+   * poll on a six minute cron, and holding the reply path open for that turns
+   * every first message into a timeout. So the stamp still goes down
+   * optimistically, and src/delivery.js lifts it when this handle comes back
+   * failed. Optimistic is fine as long as something is watching.
+   */
+  const handle = res?.message_handle || res?.id || null;
+  await db.query(
+    'update leagues set welcomed_at = now(), welcome_message_handle = $2 where id = $1 and welcomed_at is null',
+    [league.id, handle]);
   // Start the clock the moment the menu is actually in front of them, so a
   // bare "3" is read as an answer to a question they can still see.
   if (menu) await db.query('update leagues set claims_asked_at = now() where id = $1', [league.id]).catch(() => {});
