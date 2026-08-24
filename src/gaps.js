@@ -92,7 +92,41 @@ const isGap = text => {
  * Grouped by nothing: two people asking the same thing on different days is two
  * data points, and collapsing them hides that the second one asked again.
  */
-async function recent({ limit = 50, days = 30 } = {}) {
+/**
+ * @param opts.days   rolling window, when you just want "lately"
+ * @param opts.since  an explicit floor, when you want "since we shipped that"
+ *
+ * SINCE EXISTS BECAUSE A GAP IS NOT PERMANENT. Every one of these is a request,
+ * and requests get built: "the closest game in league history" was asked four
+ * times by four people in one evening, and it has been answerable since the
+ * next morning. Left in the window it reads as demand for something that
+ * already exists, and a report that lists satisfied requests trains you to skip
+ * it.
+ *
+ * A floor rather than a hardcoded "fixed at" date. The obvious version of this
+ * was a constant naming the commit that fixed the context bug, which would have
+ * been both a stale magic number and WRONG — those requests landed after that
+ * commit and before the archive was actually ingested, which is a different
+ * moment and not one any commit hash knows.
+ */
+async function recent({ limit = 50, days = 30, since = null } = {}) {
+  /*
+   * A bare date means LOCAL midnight, not UTC.
+   *
+   * new Date('2026-08-24') is parsed as UTC by spec, which in Eastern time is
+   * 8pm on the 23rd — so "--since 2026-08-24" would quietly include the
+   * previous evening, and this report prints its timestamps in local time. A
+   * filter and a display that disagree about what a day is will be trusted
+   * until the one time it matters. Anything carrying a time or a zone is left
+   * exactly as written.
+   */
+  const floor = since
+    ? new Date(/^\d{4}-\d{2}-\d{2}$/.test(String(since).trim())
+        ? `${String(since).trim()}T00:00:00`
+        : since)
+    : null;
+  if (floor && Number.isNaN(floor.getTime())) throw new Error(`bad --since date: ${since}`);
+
   const { rows } = await db.query(
     `select d.created_at, d.league_id, d.reason,
             m.body as question, m.sender_phone,
@@ -100,9 +134,11 @@ async function recent({ limit = 50, days = 30 } = {}) {
        from decisions d
        left join messages m on m.provider_message_id = d.trigger_message_id
       where d.replied_text is not null
-        and d.created_at > now() - ($1 || ' days')::interval
+        and ($2::timestamptz is null or d.created_at >= $2::timestamptz)
+        and ($2::timestamptz is not null
+             or d.created_at > now() - ($1 || ' days')::interval)
       order by d.created_at desc
-      limit 400`, [String(days)]);
+      limit 400`, [String(days), floor ? floor.toISOString() : null]);
 
   return rows.filter(r => isGap(r.answer)).slice(0, limit);
 }
