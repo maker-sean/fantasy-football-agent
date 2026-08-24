@@ -256,7 +256,23 @@ async function ensureWelcomed(league, { send, needsBinding = false, known, unkno
    * optimistically, and src/delivery.js lifts it when this handle comes back
    * failed. Optimistic is fine as long as something is watching.
    */
-  const handle = res?.message_handle || res?.id || null;
+  /*
+   * TWO SHAPES, because every real caller goes through drafts.sendRecap.
+   *
+   * The introduction is split into parts, so sendRecap returns { parts, sent }
+   * with an array of provider responses — not a response. Reading
+   * res.message_handle off that is undefined on every path that matters, which
+   * made the un-welcome mechanism dead code the first time it shipped: the
+   * handle stayed null, the sweep had nothing to match, and welcomed_at could
+   * never be taken back.
+   *
+   * The FIRST part is the one tracked. It carries the contact card, and if it
+   * landed the league has met the bot — a second part failing is a worse
+   * introduction, not an absent one, and resending the whole thing over the top
+   * would be worse still.
+   */
+  const first = Array.isArray(res?.sent) ? res.sent[0] : res;
+  const handle = first?.message_handle || first?.id || null;
   await db.query(
     'update leagues set welcomed_at = now(), welcome_message_handle = $2 where id = $1 and welcomed_at is null',
     [league.id, handle]);

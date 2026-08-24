@@ -266,6 +266,48 @@ console.log('\nthe precondition');
     assert.strictEqual(r.welcomed, false, 'a dry run must not clear the way for a real recap');
   });
 
+  /* What welcome.js stored alongside welcomed_at, for the two send shapes. */
+  const handleStoredBy = async (send) => {
+    const real = db.query;
+    let handle = 'NOT CALLED';
+    db.query = async (sql, params) => {
+      if (/welcomed_at = now/.test(sql)) handle = params[1];
+      return { rows: [] };
+    };
+    try { await welcome.ensureWelcomed(league(), { send }); } finally { db.query = real; }
+    return handle;
+  };
+
+  await it('the handle is recorded through sendRecap, not just a bare response', async () => {
+    /*
+     * Every real caller — the responder, control, weekly and the script — sends
+     * via drafts.sendRecap, which splits the introduction and returns
+     * { parts, sent } with an ARRAY of responses. The first version of this
+     * read res.message_handle straight off that and got undefined every time,
+     * so the handle stayed null, delivery.js had nothing to match, and
+     * welcomed_at could never be taken back. The mechanism was dead on the only
+     * paths that actually run, and it shipped that way.
+     *
+     * The FIRST part is the one tracked: it carries the contact card.
+     */
+    const handle = await handleStoredBy(async () => ({
+      parts: ['a', 'b'],
+      sent: [{ message_handle: 'h-first' }, { message_handle: 'h-second' }],
+    }));
+    assert.strictEqual(handle, 'h-first',
+      'the handle delivery.js matches on was never stored');
+  });
+
+  await it('a bare provider response still works, for a caller that does not split', async () => {
+    assert.strictEqual(await handleStoredBy(async () => ({ message_handle: 'h-bare' })), 'h-bare');
+  });
+
+  await it('a send that returns nothing stamps a null handle rather than throwing', async () => {
+    // dryRun paths and test doubles return undefined. Storing null is right —
+    // it just means the sweep has nothing to match, which is the old behaviour.
+    assert.strictEqual(await handleStoredBy(async () => {}), null);
+  });
+
   await it('a successful send stamps it exactly once', async () => {
     const real = db.query;
     let stamps = 0;
