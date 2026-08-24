@@ -59,14 +59,44 @@ async function sendLink() {
   }
 }
 
+/*
+ * The sign-in link comes back in the URL fragment, and it does not always carry
+ * a token.
+ *
+ * Supabase redirects here either way: on success with #access_token, on failure
+ * with #error=access_denied&error_code=otp_expired. This used to check only for
+ * the token and return false otherwise, so a failed sign-in silently re-rendered
+ * the sign-in form with no explanation — indistinguishable from having clicked
+ * nothing at all.
+ *
+ * The common cause is not a slow user. Corporate mail scanners and link
+ * previewers FETCH the link before anybody clicks it, and a magic link is
+ * single use, so the token is spent by the time it reaches a human. Saying so
+ * is the difference between "request another one" and "this is broken".
+ */
 function captureTokenFromHash() {
-  if (!location.hash.includes('access_token')) return false;
-  const t = new URLSearchParams(location.hash.slice(1)).get('access_token');
-  if (!t) return false;
-  localStorage.setItem(TOKEN_KEY, t);
-  history.replaceState(null, '', location.pathname);
-  return true;
+  const hash = new URLSearchParams(location.hash.slice(1));
+  const t = hash.get('access_token');
+  if (t) {
+    localStorage.setItem(TOKEN_KEY, t);
+    history.replaceState(null, '', location.pathname);
+    return true;
+  }
+
+  const err = hash.get('error_code') || hash.get('error');
+  if (err) {
+    // Kept off the URL so a refresh does not replay a stale complaint.
+    history.replaceState(null, '', location.pathname);
+    signinError = err === 'otp_expired'
+      ? 'That link had already been used or had expired. Request a fresh one and open it '
+        + 'in this browser — some mail apps and scanners follow links before you do, which '
+        + 'spends a single-use link before it reaches you.'
+      : (hash.get('error_description') || 'That sign-in link did not work.').replace(/\+/g, ' ');
+  }
+  return false;
 }
+
+let signinError = null;
 
 // --- rendering --------------------------------------------------------------
 function renderOverview(o) {
@@ -1166,7 +1196,15 @@ async function boot() {
   captureTokenFromHash();
   show('signin', false); show('denied', false); show('board', false);
 
-  if (!token()) { show('signin', true); return; }
+  if (!token()) {
+    show('signin', true);
+    if (signinError) {
+      const m = $('signin-msg');
+      m.textContent = signinError;
+      m.classList.add('err');
+    }
+    return;
+  }
   try {
     await load();
     show('board', true);
