@@ -131,17 +131,45 @@ const ALIASES = new Map(Object.entries({
   'gabriel davis': 'gabe davis',
 }));
 
-async function playerIndex() {
-  const { rows } = await db.query(
-    "select player_id, full_name, position, team from players where position in ('QB','RB','WR','TE')");
+/*
+ * Sleeper's own placeholders, which are not people and must never win a match.
+ */
+const JUNK = /^(player invalid|duplicate player)$/;
+
+/**
+ * Name to player, with the tie broken on purpose.
+ *
+ * The historical series is a date and a column of names — no position, no team
+ * — so the name is all there is to match on, and names are not unique. There
+ * are two Kenneth Walkers in Sleeper's database: a teamless WR and the Seattle
+ * running back. "First writer wins" picked the WR, and the bot would have
+ * offered a retired receiver as the most valuable asset on the board.
+ *
+ * A CURRENT TEAM IS THE TIEBREAK. Somebody on an NFL roster is overwhelmingly
+ * the one a trade-value list means; a teamless duplicate is a retired player
+ * keeping his row. Where both are teamed the collision is recorded rather than
+ * guessed at, because two active players sharing a name is a case worth seeing.
+ */
+function playerIndex(rows) {
   const byName = new Map();
+  const ambiguous = new Set();
   for (const p of rows) {
     const k = normalise(p.full_name);
-    // First writer wins: the players table carries retired duplicates and the
-    // active one sorts first often enough that guessing is worse than not.
-    if (!byName.has(k)) byName.set(k, p);
+    if (!k || JUNK.test(k)) continue;
+    const held = byName.get(k);
+    if (!held) { byName.set(k, p); continue; }
+    const heldTeamed = Boolean(held.team);
+    const nextTeamed = Boolean(p.team);
+    if (nextTeamed && !heldTeamed) byName.set(k, p);
+    else if (nextTeamed && heldTeamed) ambiguous.add(k);
   }
-  return byName;
+  return { byName, ambiguous };
+}
+
+async function loadPlayerIndex() {
+  const { rows } = await db.query(
+    "select player_id, full_name, position, team from players where position in ('QB','RB','WR','TE')");
+  return playerIndex(rows);
 }
 
 /**
@@ -155,8 +183,9 @@ async function ingest({ source = 'ktc', since = null, dryRun = false } = {}) {
   const spec = SOURCES[source];
   if (!spec) throw new Error(`unknown value source: ${source}`);
 
-  const index = await playerIndex();
-  const summary = { source, series: 0, rows: 0, matched: 0, picks: 0, unmatched: new Set(), written: 0 };
+  const { byName: index, ambiguous } = await loadPlayerIndex();
+  const summary = { source, series: 0, rows: 0, matched: 0, picks: 0,
+    unmatched: new Set(), ambiguous: new Set(), written: 0 };
 
   for (const s of spec.series) {
     const records = await spec.fetch(s, { since });
@@ -169,8 +198,9 @@ async function ingest({ source = 'ktc', since = null, dryRun = false } = {}) {
       let player = null;
       if (pick) summary.picks++;
       else {
-        const key = normalise(r.name);
-        player = index.get(ALIASES.get(key) || key) || null;
+        const key = ALIASES.get(normalise(r.name)) || normalise(r.name);
+        player = index.get(key) || null;
+        if (ambiguous.has(key)) summary.ambiguous.add(r.name);
         if (player) summary.matched++; else summary.unmatched.add(r.name);
       }
       batch.push({
@@ -200,7 +230,42 @@ async function ingest({ source = 'ktc', since = null, dryRun = false } = {}) {
   }
 
   summary.unmatched = [...summary.unmatched];
+  summary.ambiguous = [...summary.ambiguous];
   return summary;
+}
+
+/**
+ * Who is still on the board, ranked by what the community thinks they are
+ * worth.
+ *
+ * This is the question a draft actually asks, and projections cannot answer it:
+ * a 21-year-old who projects for 40 points this season can be the most valuable
+ * asset available in a DYNASTY league, and season projections rank him near
+ * nobody. Community value prices the future; projections price September.
+ *
+ * Availability is computed from the league's own rosters rather than from a
+ * draft's pick list, because a dynasty startup is not the only way players
+ * leave the board — anyone already rostered is gone whether they were drafted
+ * this week or three years ago.
+ *
+ * Names, not ids, on the exclusion. Roughly a third of the value list is
+ * unmatched to a Sleeper id in any given week (retired players keep their
+ * column), and excluding on id alone would offer those back as "available".
+ */
+async function bestAvailable(rosters, { superflex = false, source = 'ktc', limit = 8 } = {}) {
+  const ownedIds = new Set((rosters || []).flatMap(r => (r.players || []).map(String)));
+
+  const { rows } = await db.query(
+    `select name, position, team, sleeper_id, value
+       from player_values
+      where source = $1 and superflex = $2
+        and captured_on = (select max(captured_on) from player_values
+                            where source = $1 and superflex = $2)
+        and position <> 'PICK'
+      order by value desc`, [source, superflex]);
+
+  const open = rows.filter(r => !r.sleeper_id || !ownedIds.has(String(r.sleeper_id)));
+  return { asOf: null, players: open.slice(0, limit), considered: rows.length, open: open.length };
 }
 
 /** The most recent value we hold for a player, in one league's settings. */
@@ -212,4 +277,4 @@ async function valueFor(sleeperId, { superflex = false, source = 'ktc' } = {}) {
   return rows[0] || null;
 }
 
-module.exports = { ingest, valueFor, SOURCES, normalise, isPick, parseCsv };
+module.exports = { ingest, valueFor, bestAvailable, playerIndex, SOURCES, normalise, isPick, parseCsv };

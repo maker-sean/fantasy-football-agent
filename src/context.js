@@ -335,10 +335,33 @@ async function leagueContext(leagueId, opts = {}) {
         try {
           // One fetch, two analyses. The rosters and the projections are the
           // same for both and neither is small.
-          const [rows, proj] = await Promise.all([
+          const [rows, proj, settings] = await Promise.all([
             sleeper.rosters(league.sleeper_league_id),
             sleeper.seasonProjections(new Date().getFullYear()),
+            sleeper.league(league.sleeper_league_id).catch(() => null),
           ]);
+
+          /*
+           * Superflex is READ, not assumed. A quarterback is worth roughly
+           * twice as much where two can start, so handing 1QB prices to a
+           * superflex league is worse than handing it none.
+           */
+          const superflex = (settings?.roster_positions || []).includes('SUPER_FLEX');
+          ctx.valuesSuperflex = superflex;
+
+          /*
+           * What is still on the board, priced.
+           *
+           * Projections cannot answer this in a dynasty league: a 21-year-old
+           * who projects for forty points can be the most valuable asset
+           * available, and a season projection ranks him near nobody.
+           */
+          ctx.bestAvailable = await require('./playervalues')
+            .bestAvailable(rows, { superflex, limit: 8 })
+            .catch(err => {
+              console.error('[context] best available failed:', err.message);
+              return null;
+            });
 
           if (ctx.draftClock.rosterId != null) {
             ctx.onClockRoster = draftNeeds(rows, proj, ctx.draftClock.rosterId);
@@ -754,6 +777,26 @@ function contextBlock(ctx) {
           : `    THINNEST: ${needs.thinnest.pos}, where their best is only`
             + ` ${needs.thinnest.pos}${needs.thinnest.rank}`);
         L.push('    You may recommend a position from this. Say what it is based on.');
+      }
+
+      /*
+       * The board, priced. Ordered HERE so the model never ranks it itself —
+       * "best available" is a ranking, and a ranking it derives is the one
+       * thing nothing downstream can check.
+       */
+      const avail = ctx.bestAvailable;
+      if (avail?.players?.length) {
+        L.push('');
+        L.push('  BEST AVAILABLE, by community trade value'
+             + `${ctx.valuesSuperflex ? ' (superflex)' : ''} — nobody in this league rosters`
+             + ` these, and ${avail.open} valued players are still on the board:`);
+        for (const p of avail.players) {
+          const where = [p.position, p.team].filter(Boolean).join(', ');
+          L.push(`    ${p.name}${where ? ` (${where})` : ''} — ${p.value}`);
+        }
+        L.push('    This is a dynasty MARKET PRICE, not a projection for this season.'
+             + ' A young player can be worth more than a better one who is older,'
+             + ' and that is the point of it.');
       }
     } else if (d.status === 'complete') {
       L.push(when ? `  it is DONE. It was held ${when}` : '  it is DONE.');

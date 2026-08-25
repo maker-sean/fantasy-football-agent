@@ -74,6 +74,48 @@ it('quoted commas do not split a field', () => {
   assert.deepStrictEqual(rows[0], ['a', 'one, two', 'c']);
 });
 
+console.log('\nnames that belong to two different players');
+
+it('a rostered player beats a teamless one of the same name', () => {
+  /*
+   * Two Kenneth Walkers exist in Sleeper: a teamless WR and the Seattle
+   * running back. First-writer-wins picked the WR, and "best available" offered
+   * a retired receiver as the most valuable asset on the board. The historical
+   * series carries no position, so the name is all there is to match on — the
+   * tiebreak is the whole defence.
+   */
+  const { byName } = pv.playerIndex([
+    { player_id: '4634', full_name: 'Kenneth Walker', position: 'WR', team: null },
+    { player_id: '8151', full_name: 'Kenneth Walker', position: 'RB', team: 'SEA' },
+  ]);
+  assert.strictEqual(byName.get('kenneth walker').player_id, '8151');
+});
+
+it('order does not decide it', () => {
+  const { byName } = pv.playerIndex([
+    { player_id: '8151', full_name: 'Kenneth Walker', position: 'RB', team: 'SEA' },
+    { player_id: '4634', full_name: 'Kenneth Walker', position: 'WR', team: null },
+  ]);
+  assert.strictEqual(byName.get('kenneth walker').player_id, '8151');
+});
+
+it('two ACTIVE players sharing a name are recorded, not guessed at', () => {
+  const { ambiguous } = pv.playerIndex([
+    { player_id: '1', full_name: 'Josh Johnson', position: 'QB', team: 'CIN' },
+    { player_id: '2', full_name: 'Josh Johnson', position: 'WR', team: 'NE' },
+  ]);
+  assert.ok(ambiguous.has('josh johnson'), 'a real collision was silently resolved');
+});
+
+it("Sleeper's own placeholder rows never win a match", () => {
+  // 'Player Invalid' appears 56 times and 'Duplicate Player' 9 times.
+  const { byName } = pv.playerIndex([
+    { player_id: '9', full_name: 'Player Invalid', position: 'WR', team: null },
+    { player_id: '8', full_name: 'Duplicate Player', position: 'TE', team: 'CHI' },
+  ]);
+  assert.strictEqual(byName.size, 0);
+});
+
 console.log('\nswapping the source');
 
 it('ktc is one entry in a map, not a hardcoded assumption', () => {
