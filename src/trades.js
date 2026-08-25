@@ -212,6 +212,80 @@ async function backfill(sleeperLeagueId, { weeks = 17, onSeason = null } = {}) {
   return out;
 }
 
+/**
+ * Settle every trade in a season that is over.
+ *
+ * REDRAFT ONLY, and that is the whole reason this can be written to the row and
+ * never touched again. When a redraft season ends the answer is final: those
+ * players scored what they scored, nobody's opinion moves it, and the verdict is
+ * a fact rather than a snapshot of one. In dynasty a 2021 trade is still
+ * resolving in 2026 — grading it once would freeze an answer that is still
+ * moving, which is worse than having none.
+ *
+ * REST OF SEASON, not the live path's three weeks. Three weeks is right for a
+ * trade announced on Tuesday, where a verdict has to arrive while anyone still
+ * cares. Looking back, the honest window is everything that followed.
+ *
+ * The weekly matchups are FETCHED. Only one snapshot per season is stored, the
+ * final one, so the week-by-week scoring this needs does not exist locally —
+ * bounded and one-time, since a settled season never needs asking again.
+ */
+async function gradeClosedSeason(leagueRow, sleeperLeagueId, season, { lastWeek = 17 } = {}) {
+  const { rows: trades } = await db.query(
+    `select * from trades
+      where league_id = $1 and season = $2 and status = 'complete' and verdict is null
+      order by week`, [leagueRow.id, String(season)]);
+  if (!trades.length) return { graded: 0, trades: 0 };
+
+  const earliest = Math.min(...trades.map(t => Number(t.week) + 1));
+  const snapshotsByWeek = new Map();
+  for (let w = earliest; w <= lastWeek; w++) {
+    const matchups = await sleeper.matchups(sleeperLeagueId, w).catch(() => null);
+    if (matchups) snapshotsByWeek.set(w, { matchups });
+  }
+
+  const players = await playerMap();
+  let graded = 0;
+  for (const t of trades) {
+    // Rest of season, so the live path's revisit_week is deliberately ignored.
+    const verdict = scoreTrade({ ...t, revisit_week: lastWeek }, snapshotsByWeek, players,
+      { season: String(season) });
+    if (verdict.margin == null) continue;   // not a two-sided trade; nothing to grade
+    await db.query(
+      'update trades set verdict = $2, revisited_at = now() where id = $1',
+      [t.id, JSON.stringify({ ...verdict, basis: 'rest_of_season', gradedAt: new Date().toISOString() })]);
+    graded++;
+  }
+  return { graded, trades: trades.length };
+}
+
+/**
+ * Grade the history of a league whose seasons actually close.
+ *
+ * The CURRENT season is skipped: it has not finished, so its trades are still
+ * the live path's business and its three-week revisits are the right answer
+ * until the season ends.
+ */
+async function gradeHistory(sleeperLeagueId, { onSeason = null } = {}) {
+  const history = require('./history');
+  const seasons = await history.chain(sleeperLeagueId);
+  const out = { seasons: 0, graded: 0, skipped: [] };
+
+  for (const lg of seasons) {
+    if (lg.status !== 'complete') { out.skipped.push(lg.season); continue; }
+    const { rows: [row] } = await db.query(
+      "select id from leagues where sleeper_league_id = $1 and provider = 'archive' limit 1",
+      [lg.league_id]);
+    if (!row) { out.skipped.push(lg.season); continue; }
+
+    const r = await gradeClosedSeason(row, lg.league_id, lg.season);
+    out.seasons++;
+    out.graded += r.graded;
+    if (onSeason) onSeason(lg.season, r);
+  }
+  return out;
+}
+
 async function recordEvent(tradeId, from, to, { adopt = false } = {}) {
   const { rows } = await db.query(
     `insert into trade_events (trade_id, from_status, to_status, announced, announced_at)
@@ -283,7 +357,7 @@ function composeAnnouncement({ trade, from, to }, { names, players }) {
  * The distinction has to survive into the wording: "contributed 0.0 to your
  * lineup" is true where "scored 0.0" would not be.
  */
-function scoreTrade(trade, snapshotsByWeek, players) {
+function scoreTrade(trade, snapshotsByWeek, players, { season = null } = {}) {
   const from = Number(trade.week) + 1;
   const to = Number(trade.revisit_week);
   const sides = [];
@@ -324,15 +398,87 @@ function scoreTrade(trade, snapshotsByWeek, players) {
     sides.push({ rosterId, players: lines, startedPoints: Number(started.toFixed(2)) });
   }
 
+  /*
+   * A HANDCUFF is a defensive move, not a win or a loss.
+   *
+   * Trading for the back-up to a player you already own — same NFL team, same
+   * position — buys insurance, not points. He sits unless the starter gets
+   * hurt, so he scores nothing and the trade reads as a fleecing when it was
+   * a hedge that (happily) never paid out.
+   *
+   * Detected from the roster the manager actually held the week after the
+   * trade, which the matchups already carry: mu.players is everyone, not just
+   * the starters. Players arriving in this same trade are excluded, or a
+   * two-back package would flag itself.
+   */
+  /*
+   * ONLY FOR THE CURRENT SEASON, because players.team is today's team.
+   *
+   * The players table is refreshed nightly and carries no history, so asking
+   * whether two men were teammates in November 2025 gets an answer about
+   * August 2026. Free agency moves half the league every March; asserting a
+   * handcuff on a 2020 trade from today's rosters would be confidently wrong,
+   * which is worse than saying nothing.
+   *
+   * Historical team-by-season data exists — nflverse publishes rosters — and
+   * until it is ingested this claim stays inside the one window where it is
+   * true.
+   */
+  const currentSeason = String(new Date().getFullYear());
+  const firstWeek = snapshotsByWeek.get(from);
+  for (const side of season === currentSeason ? sides : []) {
+    const mu = (firstWeek?.matchups || []).find(m => m.roster_id === side.rosterId);
+    const heldIds = new Set(mu?.players || []);
+    const arriving = new Set(side.players.map(pl => pl.playerId));
+
+    for (const line of side.players) {
+      const got = players.get(line.playerId);
+      if (!got?.team || !got?.position) continue;
+      for (const otherId of heldIds) {
+        if (arriving.has(otherId)) continue;             // came in the same deal
+        const other = players.get(otherId);
+        if (!other || other.team !== got.team || other.position !== got.position) continue;
+        line.handcuffOf = other.full_name;
+        break;
+      }
+    }
+  }
+
   sides.sort((a, b) => b.startedPoints - a.startedPoints);
   const margin = sides.length === 2
     ? Number((sides[0].startedPoints - sides[1].startedPoints).toFixed(2))
     : null;
 
+  /*
+   * BEST AGAINST BEST, alongside the total.
+   *
+   * The total sums every player a side received, so three-for-one flatters
+   * whoever got three bodies — but only when they could actually field them
+   * all, since a benched player already scores zero here. Comparing the best N
+   * from each side, where N is the smaller side, removes the volume entirely.
+   *
+   * Both are reported because neither is the answer on its own: the total says
+   * what the trade did for the roster, best-against-best says who got the
+   * better player. On an even trade they agree, which is itself worth seeing.
+   */
+  let bestMargin = null;
+  if (sides.length === 2) {
+    const n = Math.min(sides[0].players.length, sides[1].players.length);
+    const topN = side => side.players
+      .map(pl => pl.startedPoints)
+      .sort((a, b) => b - a)
+      .slice(0, n)
+      .reduce((a, b) => a + b, 0);
+    bestMargin = Number((topN(sides[0]) - topN(sides[1])).toFixed(2));
+  }
+
   return {
     weeks: { from, to },
     sides,
     margin,
+    // Volume removed: the best N from each side, N being the smaller side.
+    bestMargin,
+    uneven: sides.length === 2 && sides[0].players.length !== sides[1].players.length,
     // Draft picks cannot be valued without projections, so they are excluded
     // from the arithmetic and disclosed rather than quietly ignored.
     hasPicks: Array.isArray(trade.draft_picks) && trade.draft_picks.length > 0,
@@ -492,7 +638,7 @@ async function markRevisited(tradeId, verdict) {
 }
 
 module.exports = {
-  poll, backfill, dueRevisits, markRevisited, playerMap,
+  poll, backfill, gradeHistory, gradeClosedSeason, dueRevisits, markRevisited, playerMap,
   isDue, leaguesDue, syncLeague, recordEvent, markAnnounced,
   composeAnnouncement, scoreTrade, gradeFor, composeVerdict, teamNames, receivedBy,
   isSettled, isRejected, isPending,

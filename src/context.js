@@ -340,6 +340,21 @@ async function leagueContext(leagueId, opts = {}) {
      * A failure here loses the colour and nothing else, so it must not take the
      * rest of the context down with it.
      */
+    /*
+     * Trades that have already settled, with the arithmetic done once.
+     *
+     * REDRAFT ONLY by construction — nothing writes a verdict for a dynasty
+     * league, because a 2021 trade there is still resolving and a frozen grade
+     * would be a stale opinion presented as a result.
+     */
+    ctx.gradedTrades = await db.query(
+      `select t.season, t.week, t.verdict
+         from trades t join leagues l on l.id = t.league_id
+        where l.sleeper_league_id = any($1::text[]) and t.verdict is not null
+        order by (t.verdict->>'margin')::numeric desc limit 5`, [chainIds])
+      .then(r => r.rows)
+      .catch(err => { console.error('[context] graded trades failed:', err.message); return []; });
+
     ctx.career = await require('./history').career(league.sleeper_league_id, { ids: chainIds }).catch(err => {
       console.error('[context] career lookup failed:', err.message);
       return [];
@@ -705,6 +720,76 @@ function contextBlock(ctx) {
              `${p.opponent ? ' vs ' + p.opponent : ''}) ${p.points}`);
     }
     L.push('  * = currently in their starting lineup. You have projections for NOBODY ELSE\'S roster.');
+  }
+
+  /*
+   * The most lopsided trades on record, computed.
+   *
+   * Started points only — what those players actually did IN THIS MANAGER'S
+   * LINEUP after the trade, not what they scored on a bench. Draft picks are
+   * disclosed and excluded, because pricing them needs projections we do not
+   * have for a season that has already happened.
+   *
+   * Ordered here, not by the model. "Worst trade" is a ranking, and a ranking
+   * derived in the prompt is the one thing nothing downstream can check.
+   */
+  if (ctx.gradedTrades?.length) {
+    const nameOf = rid => {
+      const m = (ctx.members || []).find(x => Number(x.rosterId) === Number(rid));
+      return m?.name || `roster ${rid}`;
+    };
+    L.push('');
+    L.push('TRADES, SETTLED (rest-of-season points scored IN THE LINEUP by what each side'
+         + ' received. Most lopsided first — this order is computed, do not re-rank it):');
+    for (const t of ctx.gradedTrades) {
+      const v = t.verdict;
+      if (!v?.sides || v.sides.length !== 2) continue;
+      const [win, lose] = v.sides;
+      const side = s2 => `${nameOf(s2.rosterId)} got `
+        + s2.players.map(p => `${p.name} (${p.startedPoints.toFixed(1)})`).join(', ');
+      L.push(`  ${t.season} week ${t.week}, margin ${v.margin}:`);
+      L.push(`    won  — ${side(win)} = ${win.startedPoints}`);
+      L.push(`    lost — ${side(lose)} = ${lose.startedPoints}`);
+      if (v.hasPicks) L.push('    draft picks were also involved and are NOT counted here');
+      /*
+       * An uneven trade is measured loosely and must say so.
+       *
+       * The margin sums every player a side received, so three-for-one favours
+       * the side getting three bodies. Started points blunt it — a player who
+       * could not crack the lineup contributes nothing — but a manager with
+       * holes everywhere starts all three, and the arithmetic then rewards
+       * volume rather than value. Stating the counts is the minimum; quoting
+       * the margin as if it settled the matter is overclaiming.
+       */
+      /*
+       * BOTH measures, because neither settles it alone. The total says what
+       * the trade did for the roster; best-against-best says who got the better
+       * player, with volume removed. On an even trade they agree, and that
+       * agreement is itself worth the model seeing.
+       */
+      if (v.bestMargin != null && v.bestMargin !== v.margin) {
+        L.push(`    best player against best player: ${v.bestMargin}`
+             + ` (the ${v.margin} above counts every player received;`
+             + ' this compares only the best of each side, so volume cannot flatter it)');
+      }
+      if (v.uneven) {
+        L.push(`    UNEVEN: ${win.players.length} players against ${lose.players.length}.`
+             + ' Quote both numbers, or say the counts.');
+      }
+      /*
+       * A handcuff is a hedge, not a loss. Only ever flagged for the current
+       * season — players.team is today's team and free agency moves half the
+       * league every spring, so a historical claim would be a guess.
+       */
+      for (const s2 of v.sides) {
+        for (const pl of s2.players) {
+          if (!pl.handcuffOf) continue;
+          L.push(`    ${pl.name} was the handcuff to ${pl.handcuffOf} — same team, same`
+               + ' position, bought as insurance. Scoring nothing is the hedge NOT paying'
+               + ' out, which is a neutral result and not a fleecing.');
+        }
+      }
+    }
   }
 
   if (ctx.draftSchedule && ctx.draftSchedule.status !== 'complete') {
