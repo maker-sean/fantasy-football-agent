@@ -235,6 +235,57 @@ async function ingest({ source = 'ktc', since = null, dryRun = false } = {}) {
 }
 
 /**
+ * Which price list a league is actually entitled to.
+ *
+ * The values are dimensioned, not universal. The same player is worth eight
+ * different numbers depending on settings, and a ninth thing decides whether
+ * any of them apply at all:
+ *
+ *   FORMAT      dynasty values price a 21-year-old above a 30-year-old star.
+ *               In a REDRAFT league that is not slightly off, it is inverted —
+ *               and Sleeper says which outright in settings.type, so nothing
+ *               here has to guess. Halcyon Kings is type 0 and would have
+ *               been handed dynasty prices without this.
+ *   SUPERFLEX   a quarterback is worth roughly double where two can start.
+ *   TEP         a tight-end premium lifts every TE, on the sheet's own scale.
+ *
+ * Returned rather than applied, so the caller can say "we do not hold prices
+ * for this league" instead of quietly serving the wrong ones — which is the
+ * only failure mode here that a chat would never catch.
+ */
+function leagueVariant(settings) {
+  const positions = settings?.roster_positions || [];
+  const scoring = settings?.scoring_settings || {};
+  const teSlots = positions.filter(p => p === 'TE').length;
+  const qbSlots = positions.filter(p => p === 'QB').length;
+  const teBonus = Number(scoring.bonus_rec_te || 0);
+
+  // The sheet's own thresholds: a mild bonus is TE+, an extreme one or a second
+  // TE slot is TE++, and both together is TE+++.
+  let tep = 'none';
+  if (teSlots >= 2 && teBonus > 0) tep = 'te+++';
+  else if (teSlots >= 2 || teBonus >= 1) tep = 'te++';
+  else if (teBonus > 0) tep = 'te+';
+
+  return {
+    // 2 is dynasty, 1 keeper, 0 redraft. Keeper is NOT treated as dynasty: it
+    // sits between the two and guessing which way costs the same either way.
+    dynasty: settings?.settings?.type === 2,
+    format: ({ 0: 'redraft', 1: 'keeper', 2: 'dynasty' })[settings?.settings?.type] ?? 'unknown',
+    superflex: positions.includes('SUPER_FLEX') || qbSlots >= 2,
+    tep,
+  };
+}
+
+/** Do we actually hold prices for this variant? */
+async function haveValuesFor({ superflex, tep = 'none', source = 'ktc' } = {}) {
+  const { rows } = await db.query(
+    `select count(*)::int n, max(captured_on) as latest from player_values
+      where source = $1 and superflex = $2 and tep = $3`, [source, superflex, tep]);
+  return { held: rows[0].n > 0, rows: rows[0].n, latest: rows[0].latest };
+}
+
+/**
  * Who is still on the board, ranked by what the community thinks they are
  * worth.
  *
@@ -277,4 +328,4 @@ async function valueFor(sleeperId, { superflex = false, source = 'ktc' } = {}) {
   return rows[0] || null;
 }
 
-module.exports = { ingest, valueFor, bestAvailable, playerIndex, SOURCES, normalise, isPick, parseCsv };
+module.exports = { ingest, valueFor, bestAvailable, leagueVariant, haveValuesFor, playerIndex, SOURCES, normalise, isPick, parseCsv };

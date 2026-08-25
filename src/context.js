@@ -342,26 +342,33 @@ async function leagueContext(leagueId, opts = {}) {
           ]);
 
           /*
-           * Superflex is READ, not assumed. A quarterback is worth roughly
-           * twice as much where two can start, so handing 1QB prices to a
-           * superflex league is worse than handing it none.
-           */
-          const superflex = (settings?.roster_positions || []).includes('SUPER_FLEX');
-          ctx.valuesSuperflex = superflex;
-
-          /*
-           * What is still on the board, priced.
+           * WHICH PRICE LIST THIS LEAGUE IS ENTITLED TO, read from its own
+           * settings rather than assumed.
            *
-           * Projections cannot answer this in a dynasty league: a 21-year-old
-           * who projects for forty points can be the most valuable asset
-           * available, and a season projection ranks him near nobody.
+           * Dynasty values price a 21-year-old above a 30-year-old star. In a
+           * redraft league that is not slightly off, it is inverted — and one
+           * of these two leagues IS redraft, so without this check it would
+           * have been handed dynasty prices and no one in the chat could have
+           * told from the answer.
            */
-          ctx.bestAvailable = await require('./playervalues')
-            .bestAvailable(rows, { superflex, limit: 8 })
-            .catch(err => {
-              console.error('[context] best available failed:', err.message);
-              return null;
-            });
+          const pvalues = require('./playervalues');
+          const variant = pvalues.leagueVariant(settings || {});
+          ctx.valueVariant = variant;
+
+          if (variant.dynasty) {
+            const have = await pvalues.haveValuesFor(variant).catch(() => ({ held: false }));
+            ctx.bestAvailable = have.held
+              ? await pvalues.bestAvailable(rows, { superflex: variant.superflex, limit: 8 })
+                  .catch(err => {
+                    console.error('[context] best available failed:', err.message);
+                    return null;
+                  })
+              : null;
+            // Held nothing for this exact combination — say so rather than
+            // reaching for the nearest list, which is how a TE-premium league
+            // gets base prices and never finds out.
+            if (!have.held) ctx.valuesMissing = variant;
+          }
 
           if (ctx.draftClock.rosterId != null) {
             ctx.onClockRoster = draftNeeds(rows, proj, ctx.draftClock.rosterId);
@@ -785,10 +792,20 @@ function contextBlock(ctx) {
        * thing nothing downstream can check.
        */
       const avail = ctx.bestAvailable;
-      if (avail?.players?.length) {
+      if (ctx.valueVariant && !ctx.valueVariant.dynasty) {
+        L.push('');
+        L.push(`  This is a ${ctx.valueVariant.format} league, so you have NO trade values for it.`
+             + ' Dynasty prices would be wrong here — they rate a young player above a better'
+             + ' older one — and you must not quote them. Say you do not have values if asked.');
+      } else if (ctx.valuesMissing) {
+        L.push('');
+        L.push('  No trade values are held for this league\'s exact settings'
+             + ` (${ctx.valuesMissing.superflex ? 'superflex' : '1QB'}, TE premium`
+             + ` ${ctx.valuesMissing.tep}). Say so rather than quoting a different setting\'s.`);
+      } else if (avail?.players?.length) {
         L.push('');
         L.push('  BEST AVAILABLE, by community trade value'
-             + `${ctx.valuesSuperflex ? ' (superflex)' : ''} — nobody in this league rosters`
+             + `${ctx.valueVariant?.superflex ? ' (superflex)' : ''} — nobody in this league rosters`
              + ` these, and ${avail.open} valued players are still on the board:`);
         for (const p of avail.players) {
           const where = [p.position, p.team].filter(Boolean).join(', ');

@@ -74,6 +74,57 @@ it('quoted commas do not split a field', () => {
   assert.deepStrictEqual(rows[0], ['a', 'one, two', 'c']);
 });
 
+console.log('\nwhich price list a league is entitled to');
+
+const league = (over = {}) => ({
+  roster_positions: ['QB', 'RB', 'RB', 'WR', 'WR', 'TE', 'FLEX', 'BN'],
+  scoring_settings: { rec: 0.5, bonus_rec_te: 0 },
+  settings: { type: 2 },
+  ...over,
+});
+
+it('a redraft league gets NO dynasty values', () => {
+  /*
+   * The failure this exists to stop. Dynasty prices rate a 21-year-old above a
+   * 30-year-old star; in redraft that is inverted, and nobody reading the
+   * answer could tell. Halcyon Kings is settings.type 0 and would have been
+   * served dynasty prices.
+   */
+  const v = pv.leagueVariant(league({ settings: { type: 0 } }));
+  assert.strictEqual(v.dynasty, false);
+  assert.strictEqual(v.format, 'redraft');
+});
+
+it('a keeper league is not quietly treated as dynasty', () => {
+  // It sits between the two, and guessing costs the same in both directions.
+  const v = pv.leagueVariant(league({ settings: { type: 1 } }));
+  assert.strictEqual(v.dynasty, false);
+  assert.strictEqual(v.format, 'keeper');
+});
+
+it('dynasty is recognised', () => {
+  assert.strictEqual(pv.leagueVariant(league()).dynasty, true);
+});
+
+it('superflex is read from the roster, however it is spelled', () => {
+  assert.strictEqual(pv.leagueVariant(league()).superflex, false);
+  assert.strictEqual(pv.leagueVariant(league({
+    roster_positions: ['QB', 'RB', 'WR', 'SUPER_FLEX'] })).superflex, true);
+  // Two literal QB slots is a 2QB league, which is the same thing priced.
+  assert.strictEqual(pv.leagueVariant(league({
+    roster_positions: ['QB', 'QB', 'RB', 'WR'] })).superflex, true);
+});
+
+it('the tight-end premium follows the sheet\'s own scale', () => {
+  const tep = over => pv.leagueVariant(league(over)).tep;
+  assert.strictEqual(tep({}), 'none');
+  assert.strictEqual(tep({ scoring_settings: { bonus_rec_te: 0.5 } }), 'te+');
+  assert.strictEqual(tep({ scoring_settings: { bonus_rec_te: 1 } }), 'te++');
+  assert.strictEqual(tep({ roster_positions: ['QB', 'TE', 'TE'] }), 'te++');
+  assert.strictEqual(tep({
+    roster_positions: ['QB', 'TE', 'TE'], scoring_settings: { bonus_rec_te: 1 } }), 'te+++');
+});
+
 console.log('\nnames that belong to two different players');
 
 it('a rostered player beats a teamless one of the same name', () => {
