@@ -43,15 +43,34 @@ const server = app.listen(0, async () => {
   };
 
   const account = await db.upsertAccount({ email: 'rostertest@example.invalid' });
+  /*
+   * A DISTINCT sleeper id for the local row.
+   *
+   * This used to insert the real league's id, which collides with
+   * leagues_one_live_per_sleeper_idx the moment that league actually exists —
+   * and it has since 2026-08-22. The insert threw before a single assertion
+   * ran, and because the runner counts "FAIL" lines a test that dies on its
+   * first statement is indistinguishable from one that passes. It reported
+   * nothing at all for days.
+   *
+   * A COMPLETED SEASON's id, not a made-up one. The roster route reads
+   * league.sleeper_league_id to fetch labels from Sleeper, so the fixture has
+   * to be a league that really exists — a placeholder makes those two tests
+   * fail on a 404 instead. A past season is real, fetchable, and its only row
+   * here is provider = 'archive', which the live-uniqueness index ignores.
+   */
+  const FIXTURE_LEAGUE = '1400000000000000002';   // Halcyon Kings, 2025
+  await db.query(
+    "delete from leagues where sleeper_league_id = $1 and provider <> 'archive'", [FIXTURE_LEAGUE]);
   const { rows: [league] } = await db.query(
     `insert into leagues (name, provider, account_id, sleeper_league_id)
-     values ('Roster Test','sendblue',$1,'1400000000000000001') returning *`, [account.id]);
+     values ('Roster Test','sendblue',$1,$2) returning *`, [account.id, FIXTURE_LEAGUE]);
 
   try {
     console.log('three names, three owners');
 
     await it('rosterOwners keeps the username and the team name apart', async () => {
-      const snap = await sleeper.weekSnapshot('1400000000000000001', 1);
+      const snap = await sleeper.weekSnapshot(FIXTURE_LEAGUE, 1);
       const o = sleeper.rosterOwners(snap).find(x => x.username);
       assert.ok(o.username, 'a username');
       assert.notStrictEqual(o.username, o.teamName, 'and it is not the team name');

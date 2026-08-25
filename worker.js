@@ -109,6 +109,21 @@ const JOBS = [
   ['delivery',       '*/6 * * * *', () => auditDelivery()],
   // Housekeeping.
   ['players',        '0 4 * * *',   () => snapshots.refreshPlayers()],
+  /*
+   * Community trade values, daily, after the players refresh so the names it
+   * matches against are the current ones.
+   *
+   * A narrow window on purpose. The source publishes a row per day back to
+   * 2020 and re-reading all of it nightly would be a million rows of `do
+   * nothing` conflicts to import three. Backfilling the history is a deliberate
+   * act: npm run values -- --since 2020-04-01 --save
+   */
+  ['values',         '30 4 * * *',  async () => {
+    const since = new Date(Date.now() - 5 * 864e5).toISOString().slice(0, 10);
+    const out = await require('./src/playervalues').ingest({ since });
+    console.log(`[values] ${out.written} new rows, ${out.unmatched.length} unmatched`);
+    if (out.unmatched.length) console.warn('[values] unmatched:', out.unmatched.slice(0, 10).join(', '));
+  }],
   ['members',        '30 4 * * *',  () => snapshots.syncMembers()],
   // The weekly recap — Tuesday morning, after Monday night has settled and the
   // postscore capture has run. Queues a draft and texts the owner; it does not

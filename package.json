@@ -49,7 +49,8 @@
     "welcome": "node scripts/welcome.js",
     "gaps": "node scripts/gaps.js",
     "feedback": "node scripts/feedback.js",
-    "make-logo": "node scripts/make-logo.js"
+    "make-logo": "node scripts/make-logo.js",
+    "values": "node scripts/values.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.117.1",
