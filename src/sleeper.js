@@ -141,14 +141,35 @@ async function draftClock(schedule) {
    * league-level call that gives us status and rounds cannot name a manager.
    * Both are fetched here, in parallel, and only while a draft is live.
    */
-  const [picks, detail] = await Promise.all([
+  /*
+   * TRADED PICKS ARE THE POINT, not a footnote.
+   *
+   * slot_to_roster_id names who OWNED the slot when the order was drawn. In a
+   * dynasty league picks are currency: this draft has fourteen of them traded,
+   * and the very pick on the clock had moved from Sean M. to Renshaw. Naming
+   * the original owner is naming the wrong person to a group chat that is
+   * looking at the draft board — the exact failure this function claimed to
+   * guard against and did not.
+   */
+  const [picks, detail, traded] = await Promise.all([
     get(`/draft/${encodeURIComponent(schedule.draftId)}/picks`).catch(() => null),
     schedule.slotToRoster
       ? Promise.resolve({ slot_to_roster_id: schedule.slotToRoster })
       : get(`/draft/${encodeURIComponent(schedule.draftId)}`).catch(() => null),
+    get(`/draft/${encodeURIComponent(schedule.draftId)}/traded_picks`).catch(() => null),
   ]);
   if (!Array.isArray(picks)) return null;
   const slotToRoster = detail?.slot_to_roster_id || schedule.slotToRoster || {};
+
+  /*
+   * Keyed season-round-originalRoster. Sleeper collapses a multi-hop trade to
+   * the FINAL owner_id, so one lookup is enough and previous_owner_id is only
+   * ever colour.
+   */
+  const tradedTo = new Map(
+    (Array.isArray(traded) ? traded : []).map(t =>
+      [`${t.season}-${t.round}-${t.roster_id}`, t.owner_id])
+  );
 
   const made = picks.length;
   const total = teams * rounds;
@@ -162,9 +183,17 @@ async function draftClock(schedule) {
     : indexInRound + 1;
 
   const last = picks[made - 1];
+  const originalRosterId = slotToRoster[slot] ?? null;
+  const owner = originalRosterId == null ? null
+    : tradedTo.get(`${schedule.season}-${round}-${originalRosterId}`) ?? originalRosterId;
+
   return {
     made, total, round, slot, overall,
-    rosterId: slotToRoster[slot] ?? null,
+    rosterId: owner,
+    // Kept so the block can say "on Sean M.'s original pick", which is the part
+    // a dynasty league actually enjoys.
+    originalRosterId,
+    wasTraded: owner != null && originalRosterId != null && Number(owner) !== Number(originalRosterId),
     lastPlayer: last?.metadata
       ? [last.metadata.first_name, last.metadata.last_name].filter(Boolean).join(' ')
         + (last.metadata.position ? ` (${last.metadata.position})` : '')

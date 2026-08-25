@@ -554,10 +554,22 @@ function contextBlock(ctx) {
         L.push(`  every pick is in (${clock.made} of ${clock.total}), Sleeper has not closed it yet`);
       } else if (clock) {
         const who = byRoster.get(Number(clock.rosterId));
+        const from = clock.wasTraded ? byRoster.get(Number(clock.originalRosterId)) : null;
         L.push(`  pick ${clock.overall} of ${clock.total} — round ${clock.round}, slot ${clock.slot}`);
         L.push(who
           ? `  ON THE CLOCK: ${who}`
           : `  on the clock: roster ${clock.rosterId ?? 'unknown'}, and you cannot say whose that is`);
+        /*
+         * Say whose it was. In a dynasty league picks are currency and the
+         * slot still carries the old owner's name on the board — leaving this
+         * out is how "why is Renshaw picking in Sean's spot" becomes a
+         * question the bot cannot answer about a fact it already used.
+         */
+        if (clock.wasTraded) {
+          L.push(from
+            ? `  this pick was traded: it was originally ${from}'s`
+            : '  this pick was traded to them, from a roster you cannot name');
+        }
         if (clock.lastPlayer) L.push(`  last pick was ${clock.lastPlayer}`);
         if (clock.onClockSinceMs != null) {
           const hours = Math.floor(clock.onClockSinceMs / 3600000);
