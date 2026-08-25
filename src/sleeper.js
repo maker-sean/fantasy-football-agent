@@ -182,6 +182,12 @@ async function draftClock(schedule) {
     ? teams - indexInRound
     : indexInRound + 1;
 
+  /*
+   * The last pick carries its own roster_id, which is the roster that ACTUALLY
+   * made it — trades already resolved by Sleeper. No slot arithmetic needed and
+   * none should be attempted: slot 8 made pick 20 and the roster was 3, not the
+   * 4 the slot map names.
+   */
   const last = picks[made - 1];
   const originalRosterId = slotToRoster[slot] ?? null;
   const owner = originalRosterId == null ? null
@@ -198,6 +204,15 @@ async function draftClock(schedule) {
       ? [last.metadata.first_name, last.metadata.last_name].filter(Boolean).join(' ')
         + (last.metadata.position ? ` (${last.metadata.position})` : '')
       : null,
+    lastPick: last ? {
+      playerId: last.player_id ? String(last.player_id) : null,
+      name: [last.metadata?.first_name, last.metadata?.last_name].filter(Boolean).join(' ') || null,
+      position: last.metadata?.position || null,
+      rosterId: last.roster_id ?? null,
+      pickNo: last.pick_no ?? null,
+      round: last.round ?? null,
+      isKeeper: Boolean(last.is_keeper),
+    } : null,
     onClockSinceMs: schedule.lastPickedAt ? Date.now() - Number(schedule.lastPickedAt) : null,
   };
 }

@@ -58,15 +58,20 @@ function standingsFrom(payload) {
  */
 const DRAFT_POSITIONS = ['QB', 'RB', 'WR', 'TE'];
 
-async function draftNeeds(league, rosterId) {
-  const [rows, proj] = await Promise.all([
-    sleeper.rosters(league.sleeper_league_id),
-    sleeper.seasonProjections(new Date().getFullYear()),
-  ]);
+function draftNeeds(rows, proj, rosterId, { without = null } = {}) {
   const roster = (rows || []).find(r => Number(r.roster_id) === Number(rosterId));
   if (!roster?.players?.length) return null;
 
+  /*
+   * `without` rewinds one pick.
+   *
+   * The roster already contains the player just taken, so asking what they were
+   * short of BEFORE the pick means removing him. That is the only honest way to
+   * ask whether a pick addressed a need: judging it against a roster that
+   * already includes it always says yes.
+   */
   const owned = roster.players
+    .filter(id => without == null || String(id) !== String(without))
     .map(id => proj.get(String(id)))
     .filter(Boolean);
 
@@ -96,7 +101,7 @@ async function draftNeeds(league, rosterId) {
   return {
     rosterId: Number(rosterId),
     counted: owned.length,
-    total: roster.players.length,
+    total: roster.players.length - (without == null ? 0 : 1),
     byPos,
     thinnest: thinnest.rank === Number.POSITIVE_INFINITY
       ? { pos: thinnest.pos, empty: true }
@@ -326,11 +331,37 @@ async function leagueContext(leagueId, opts = {}) {
        * more than any other. The thin position is arithmetic and is worked out
        * here.
        */
-      if (ctx.draftClock?.rosterId != null) {
-        ctx.onClockRoster = await draftNeeds(league, ctx.draftClock.rosterId).catch(err => {
-          console.error('[context] on-clock roster failed:', err.message);
-          return null;
-        });
+      if (ctx.draftClock) {
+        try {
+          // One fetch, two analyses. The rosters and the projections are the
+          // same for both and neither is small.
+          const [rows, proj] = await Promise.all([
+            sleeper.rosters(league.sleeper_league_id),
+            sleeper.seasonProjections(new Date().getFullYear()),
+          ]);
+
+          if (ctx.draftClock.rosterId != null) {
+            ctx.onClockRoster = draftNeeds(rows, proj, ctx.draftClock.rosterId);
+          }
+
+          /*
+           * The last pick, judged against the roster as it was BEFORE it.
+           *
+           * "Did that make sense" is the question a draft chat actually asks,
+           * and it is answerable from what we already have: what the player
+           * projects at, and what that manager was thin at a minute ago.
+           */
+          const lp = ctx.draftClock.lastPick;
+          if (lp?.rosterId != null) {
+            ctx.lastPickAnalysis = {
+              ...lp,
+              projected: lp.playerId ? proj.get(String(lp.playerId)) || null : null,
+              before: draftNeeds(rows, proj, lp.rosterId, { without: lp.playerId }),
+            };
+          }
+        } catch (err) {
+          console.error('[context] draft roster analysis failed:', err.message);
+        }
       }
     }
   }
@@ -650,7 +681,38 @@ function contextBlock(ctx) {
             ? `  this pick was traded: it was originally ${from}'s`
             : '  this pick was traded to them, from a roster you cannot name');
         }
-        if (clock.lastPlayer) L.push(`  last pick was ${clock.lastPlayer}`);
+        /*
+         * The last pick, and the material to judge it.
+         *
+         * Everything here is a fact — who picked, what he projects at, what
+         * they were thin at before it. Whether it was a GOOD pick is a take,
+         * and taking it is the point; the numbers are what stop the take being
+         * made up.
+         */
+        const lp = ctx.lastPickAnalysis;
+        if (lp) {
+          const picker = byRoster.get(Number(lp.rosterId)) || `roster ${lp.rosterId}`;
+          const proj = lp.projected;
+          L.push(`  LAST PICK: ${picker} took ${lp.name || 'someone'}`
+               + (proj ? ` — ${proj.position}${proj.posRank}, ${proj.points} projected` : '')
+               + (lp.pickNo ? ` (pick ${lp.pickNo})` : ''));
+          const before = lp.before;
+          if (before) {
+            const t = before.thinnest;
+            L.push(`    before that pick their thinnest was `
+                 + (t.empty ? `${t.pos} — they had none` : `${t.pos}, best only ${t.pos}${t.rank}`));
+            const at = proj && before.byPos[proj.position];
+            if (at) {
+              L.push(at.best
+                ? `    at ${proj.position} they already had ${at.best.name} at`
+                  + ` ${proj.position}${at.best.posRank}`
+                : `    they had no ${proj.position} at all before this`);
+            }
+            L.push('    Whether that was the right pick is yours to say. Base it on these numbers.');
+          }
+        } else if (clock.lastPlayer) {
+          L.push(`  last pick was ${clock.lastPlayer}`);
+        }
         if (clock.onClockSinceMs != null) {
           const hours = Math.floor(clock.onClockSinceMs / 3600000);
           const limit = d.pickSeconds ? Math.round(d.pickSeconds / 3600) : null;
