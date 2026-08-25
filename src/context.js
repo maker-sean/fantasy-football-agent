@@ -58,7 +58,55 @@ function standingsFrom(payload) {
  */
 const DRAFT_POSITIONS = ['QB', 'RB', 'WR', 'TE'];
 
-function draftNeeds(rows, proj, rosterId, { without = null } = {}) {
+/*
+ * What each lineup slot will accept.
+ *
+ * THE FLEX IS THE WHOLE POINT. Counting only dedicated slots says a league
+ * starting QB/RB/RB/WR/WR/TE needs two receivers, and it does not — it needs
+ * enough bodies to fill two more slots that RB, WR and TE all compete for. A
+ * roster with WR3 and WR6 and nothing behind them looks finished at receiver by
+ * that reading and starts a replacement-level player every Sunday.
+ */
+const SLOT_ELIGIBILITY = {
+  QB: ['QB'], RB: ['RB'], WR: ['WR'], TE: ['TE'],
+  FLEX: ['RB', 'WR', 'TE'],
+  WRRB_FLEX: ['RB', 'WR'],
+  REC_FLEX: ['WR', 'TE'],
+  SUPER_FLEX: ['QB', 'RB', 'WR', 'TE'],
+};
+
+/**
+ * Fill the lineup this league actually starts, best players first.
+ *
+ * Dedicated slots are filled before flex ones, because a quarterback cannot
+ * cover a running back slot and taking him first would strand it. Within that,
+ * greedy on projected points: it is not a perfect optimiser and does not need
+ * to be — the question is which slot is being filled by somebody who should not
+ * be starting, and that answer survives a slightly imperfect ordering.
+ */
+function fillLineup(owned, rosterPositions) {
+  const slots = (rosterPositions || []).filter(p => SLOT_ELIGIBILITY[p]);
+  const pool = [...owned].sort((a, b) => b.points - a.points);
+  const used = new Set();
+  const lineup = [];
+
+  const order = [...slots.entries()]
+    .sort((a, b) => SLOT_ELIGIBILITY[a[1]].length - SLOT_ELIGIBILITY[b[1]].length);
+
+  for (const [, slot] of order) {
+    const ok = SLOT_ELIGIBILITY[slot];
+    const pick = pool.find(p => !used.has(p.playerId) && ok.includes(p.position));
+    if (pick) used.add(pick.playerId);
+    lineup.push({ slot, player: pick || null });
+  }
+  return lineup;
+}
+
+async function draftNeedsFrom(rows, proj, rosterId, rosterPositions, { without = null } = {}) {
+  return draftNeeds(rows, proj, rosterId, { without, rosterPositions });
+}
+
+function draftNeeds(rows, proj, rosterId, { without = null, rosterPositions = null } = {}) {
   const roster = (rows || []).find(r => Number(r.roster_id) === Number(rosterId));
   if (!roster?.players?.length) return null;
 
@@ -78,34 +126,61 @@ function draftNeeds(rows, proj, rosterId, { without = null } = {}) {
   const byPos = {};
   for (const pos of DRAFT_POSITIONS) {
     const list = owned.filter(p => p.position === pos).sort((a, b) => a.posRank - b.posRank);
-    byPos[pos] = {
-      count: list.length,
-      best: list[0] || null,
-      // Two deep is what a lineup actually needs; a single good starter with
-      // nothing behind them is a different problem from having none at all.
-      second: list[1] || null,
-    };
+    byPos[pos] = { count: list.length, best: list[0] || null, second: list[1] || null };
   }
 
   /*
-   * Thinnest = worst best-player rank, with an empty position always worst.
-   * Stated outright because a ranking nothing can check afterwards has to be
-   * computed, and because "which position" is the entire question.
+   * The real need is the WEAKEST STARTER, measured against replacement.
+   *
+   * Position ranks are NOT comparable across positions and treating them as
+   * such is how "QB16" and "RB22" get ranked the wrong way round. In a twelve
+   * team league starting one quarterback, only twelve QBs start at all — QB16
+   * is four men below replacement and should not be in a lineup. RB22 with two
+   * flex slots is comfortably a starter, because up to forty-eight running
+   * backs start every week.
+   *
+   * So replacement level is computed per position from the league's own
+   * lineup: teams x dedicated slots, plus the flex slots every eligible
+   * position competes for. Generous to the flex on purpose — counting it in
+   * full for RB, WR and TE overstates each slightly and understates none,
+   * which keeps the comparison honest in the direction that matters.
    */
-  const scored = DRAFT_POSITIONS.map(pos => ({
-    pos,
-    rank: byPos[pos].best ? byPos[pos].best.posRank : Number.POSITIVE_INFINITY,
-  })).sort((a, b) => b.rank - a.rank);
-  const thinnest = scored[0];
+  const teams = (rows || []).length || 12;
+  const slots = (rosterPositions || []).filter(p => SLOT_ELIGIBILITY[p]);
+  const dedicated = pos => slots.filter(sl => sl === pos).length;
+  const flexFor = pos => slots.filter(sl => sl !== pos && SLOT_ELIGIBILITY[sl].includes(pos)).length;
+  const replacement = {};
+  for (const pos of DRAFT_POSITIONS) {
+    replacement[pos] = teams * (dedicated(pos) + flexFor(pos));
+  }
+
+  const lineup = fillLineup(owned, rosterPositions).map(s2 => ({
+    ...s2,
+    // Negative means below replacement: a player who should not be starting.
+    overReplacement: s2.player
+      ? (replacement[s2.player.position] || 0) - s2.player.posRank
+      : null,
+  }));
+
+  const empty = lineup.find(s2 => !s2.player);
+  const filled = lineup.filter(s2 => s2.player);
+  const weakest = filled.length
+    ? filled.reduce((w, s2) => (s2.overReplacement < w.overReplacement ? s2 : w))
+    : null;
 
   return {
     rosterId: Number(rosterId),
     counted: owned.length,
     total: roster.players.length - (without == null ? 0 : 1),
     byPos,
-    thinnest: thinnest.rank === Number.POSITIVE_INFINITY
-      ? { pos: thinnest.pos, empty: true }
-      : { pos: thinnest.pos, rank: thinnest.rank },
+    lineup,
+    replacement,
+    need: empty
+      ? { slot: empty.slot, empty: true }
+      : weakest && { slot: weakest.slot, pos: weakest.player.position,
+                     name: weakest.player.name, rank: weakest.player.posRank,
+                     replacement: replacement[weakest.player.position],
+                     overReplacement: weakest.overReplacement },
   };
 }
 
@@ -370,8 +445,9 @@ async function leagueContext(leagueId, opts = {}) {
             if (!have.held) ctx.valuesMissing = variant;
           }
 
+          const rosterPositions = settings?.roster_positions || null;
           if (ctx.draftClock.rosterId != null) {
-            ctx.onClockRoster = draftNeeds(rows, proj, ctx.draftClock.rosterId);
+            ctx.onClockRoster = draftNeeds(rows, proj, ctx.draftClock.rosterId, { rosterPositions });
           }
 
           /*
@@ -386,7 +462,7 @@ async function leagueContext(leagueId, opts = {}) {
             ctx.lastPickAnalysis = {
               ...lp,
               projected: lp.playerId ? proj.get(String(lp.playerId)) || null : null,
-              before: draftNeeds(rows, proj, lp.rosterId, { without: lp.playerId }),
+              before: draftNeeds(rows, proj, lp.rosterId, { without: lp.playerId, rosterPositions }),
             };
           }
         } catch (err) {
@@ -728,9 +804,11 @@ function contextBlock(ctx) {
                + (lp.pickNo ? ` (pick ${lp.pickNo})` : ''));
           const before = lp.before;
           if (before) {
-            const t = before.thinnest;
-            L.push(`    before that pick their thinnest was `
-                 + (t.empty ? `${t.pos} — they had none` : `${t.pos}, best only ${t.pos}${t.rank}`));
+            const t = before.need;
+            L.push('    before that pick their weakest starting slot was '
+                 + (t?.empty ? `an empty ${t.slot}`
+                    : t ? `${t.slot}, filled by ${t.name} at ${t.pos}${t.rank}`
+                    : 'not computable'));
             const at = proj && before.byPos[proj.position];
             if (at) {
               L.push(at.best
@@ -779,10 +857,40 @@ function contextBlock(ctx) {
                + ` (${p.best.points} projected)`
                + (p.second ? `, then ${p.second.name} at ${pos}${p.second.posRank}` : ', nothing behind him'));
         }
-        L.push(needs.thinnest.empty
-          ? `    THINNEST: ${needs.thinnest.pos} — they do not have one`
-          : `    THINNEST: ${needs.thinnest.pos}, where their best is only`
-            + ` ${needs.thinnest.pos}${needs.thinnest.rank}`);
+        /*
+         * The lineup they would actually start, flex included.
+         *
+         * Position counts alone say a two-receiver league is finished at
+         * receiver once it has two, which is wrong wherever a FLEX exists —
+         * RB, WR and TE all compete for those slots, so depth at any of them
+         * is starting depth.
+         */
+        if (needs.lineup?.length) {
+          L.push(`    STARTING LINEUP they would field (${needs.lineup.length} slots):`);
+          for (const s2 of needs.lineup) {
+            L.push(`      ${s2.slot.padEnd(10)} ${s2.player
+              ? `${s2.player.name} (${s2.player.position}${s2.player.posRank})`
+                + (s2.overReplacement < 0
+                  ? `  BELOW REPLACEMENT by ${Math.abs(s2.overReplacement)}`
+                  : '')
+              : 'EMPTY — nobody to start here'}`);
+          }
+          L.push('      How many of each start across the whole league: '
+               + Object.entries(needs.replacement).map(([p, n]) => `${p} ${n}`).join(', ')
+               + '. A rank worse than that number is a bench player in a starting slot.');
+        }
+        L.push(needs.need?.empty
+          ? `    BIGGEST NEED: an empty ${needs.need.slot} slot, which is a zero every week`
+          : needs.need
+            ? `    BIGGEST NEED: ${needs.need.slot}, started by ${needs.need.name} at`
+              + ` ${needs.need.pos}${needs.need.rank} when only ${needs.need.replacement}`
+              + ` ${needs.need.pos}s start league-wide`
+              + (needs.need.overReplacement < 0
+                ? ` — ${Math.abs(needs.need.overReplacement)} BELOW replacement`
+                : ' — the thinnest margin in their lineup')
+            : '    BIGGEST NEED: not computable, say so');
+        L.push('    A FLEX takes RB, WR or TE, so depth at any of those is STARTING depth.'
+             + ' Do not call a position finished because the dedicated slots are filled.');
         L.push('    You may recommend a position from this. Say what it is based on.');
       }
 
@@ -845,4 +953,4 @@ function contextBlock(ctx) {
   return L.join('\n');
 }
 
-module.exports = { leagueContext, contextBlock, standingsFrom };
+module.exports = { leagueContext, contextBlock, standingsFrom, draftNeeds };
