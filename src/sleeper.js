@@ -96,15 +96,81 @@ async function draftSchedule(leagueId) {
     type: d.type || null,                     // snake | auction | linear
     season: d.season || null,
     rounds: d.settings?.rounds ?? null,
+    teams: d.settings?.teams ?? null,
     pickSeconds: d.settings?.pick_timer ?? null,
     // Milliseconds since epoch, or null when the commissioner has not set one.
     startsAt: d.start_time || null,
+    // The clock only means something while status is 'drafting'.
+    lastPickedAt: d.last_picked || null,
+    draftId: d.draft_id || null,
+    slotToRoster: d.slot_to_roster_id || null,
     // An order exists only once it has been generated. Empty is a real state.
     orderSet: Boolean(d.draft_order && Object.keys(d.draft_order).length),
     scoring: d.metadata?.scoring_type || null,
   };
   scheduleCache.set(leagueId, { at: Date.now(), value });
   return value;
+}
+
+/**
+ * Who is on the clock, during a live draft.
+ *
+ * A 24-hour pick timer means a "draft night" can run for weeks — Sigma Chi
+ * Dynasty started theirs on 19 August and was on pick 20 of 48 six days later.
+ * For that whole stretch the interesting fact is not the start date, it is
+ * whose turn it is and how long they have been sitting on it.
+ *
+ * Only called while status is 'drafting', so a league between drafts pays
+ * nothing for this.
+ *
+ * SNAKE AND LINEAR PICK DIFFERENT PEOPLE and getting it wrong names the wrong
+ * manager in a group chat that can see the draft board. Linear repeats the same
+ * order every round; snake reverses on even rounds. Auction has no clock of
+ * this shape at all, so it returns null rather than inventing one.
+ */
+async function draftClock(schedule) {
+  if (!schedule?.draftId || schedule.status !== 'drafting') return null;
+  if (schedule.type === 'auction') return null;
+
+  const teams = Number(schedule.teams) || 0;
+  const rounds = Number(schedule.rounds) || 0;
+  if (!teams) return null;
+
+  /*
+   * The slot map is NOT on the drafts list, only on the draft detail — so the
+   * league-level call that gives us status and rounds cannot name a manager.
+   * Both are fetched here, in parallel, and only while a draft is live.
+   */
+  const [picks, detail] = await Promise.all([
+    get(`/draft/${encodeURIComponent(schedule.draftId)}/picks`).catch(() => null),
+    schedule.slotToRoster
+      ? Promise.resolve({ slot_to_roster_id: schedule.slotToRoster })
+      : get(`/draft/${encodeURIComponent(schedule.draftId)}`).catch(() => null),
+  ]);
+  if (!Array.isArray(picks)) return null;
+  const slotToRoster = detail?.slot_to_roster_id || schedule.slotToRoster || {};
+
+  const made = picks.length;
+  const total = teams * rounds;
+  if (rounds && made >= total) return { made, total, done: true };
+
+  const overall = made + 1;
+  const round = Math.floor((made) / teams) + 1;
+  const indexInRound = made % teams;                 // 0-based
+  const slot = schedule.type === 'snake' && round % 2 === 0
+    ? teams - indexInRound
+    : indexInRound + 1;
+
+  const last = picks[made - 1];
+  return {
+    made, total, round, slot, overall,
+    rosterId: slotToRoster[slot] ?? null,
+    lastPlayer: last?.metadata
+      ? [last.metadata.first_name, last.metadata.last_name].filter(Boolean).join(' ')
+        + (last.metadata.position ? ` (${last.metadata.position})` : '')
+      : null,
+    onClockSinceMs: schedule.lastPickedAt ? Date.now() - Number(schedule.lastPickedAt) : null,
+  };
 }
 
 /**
@@ -321,7 +387,7 @@ async function seasonStats(season, { scoring = 'half_ppr', live = false } = {}) 
 }
 
 module.exports = {
-  projections, seasonStats, draftSchedule,
+  projections, seasonStats, draftSchedule, draftClock,
   BASE, get, state, league, rosters, users, matchups, transactions,
   allPlayers, weekSnapshot, rosterOwners, draft,
 };

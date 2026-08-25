@@ -236,6 +236,23 @@ async function leagueContext(leagueId, opts = {}) {
       console.error('[context] draft schedule failed:', err.message);
       return null;
     });
+
+    /*
+     * Whose turn it is, while a draft is actually running.
+     *
+     * A 24-hour pick timer turns "draft night" into three weeks: Sigma Chi
+     * Dynasty started on 19 August and was on pick 20 of 48 six days later. For
+     * that whole stretch the start date is the least interesting fact available
+     * and the bot was quoting it as though the draft had not happened yet.
+     *
+     * Costs two extra calls and only while status is 'drafting'.
+     */
+    if (ctx.draftSchedule?.status === 'drafting') {
+      ctx.draftClock = await sleeper.draftClock(ctx.draftSchedule).catch(err => {
+        console.error('[context] draft clock failed:', err.message);
+        return null;
+      });
+    }
   }
 
   /*
@@ -509,10 +526,60 @@ function contextBlock(ctx) {
           hour: 'numeric', minute: '2-digit', timeZoneName: 'shortGeneric',
         })
       : null;
-    L.push('THE DRAFT (this season, live from Sleeper. Quote the date exactly as written):');
-    L.push(when
-      ? `  scheduled for ${when}`
-      : '  no date has been set yet, the commissioner picks it in Sleeper');
+    /*
+     * STATE FIRST, date second.
+     *
+     * This said "scheduled for {date}" whatever the draft was actually doing,
+     * so a draft that had started six days ago was announced to the league as
+     * upcoming — twice. Sleeper has told us the status all along and this block
+     * threw it away. A fixed date asserted as the future is wrong the moment it
+     * passes, and a commissioner can move it at any time.
+     */
+    const clock = ctx.draftClock;
+    /*
+     * Keyed on ROSTER id, not sleeper user id. The draft names a slot, the slot
+     * maps to a roster, and members carries both — naming the wrong manager in
+     * a chat that can see the draft board is the one mistake worth guarding.
+     */
+    const byRoster = new Map(
+      (ctx.members || [])
+        .filter(m => m.rosterId != null && m.name)
+        .map(m => [Number(m.rosterId), m.name])
+    );
+    L.push('THE DRAFT (this season, live from Sleeper — state first, and it is authoritative):');
+
+    if (d.status === 'drafting') {
+      L.push('  IT IS HAPPENING RIGHT NOW. Do not describe it as upcoming or scheduled.');
+      if (clock?.done) {
+        L.push(`  every pick is in (${clock.made} of ${clock.total}), Sleeper has not closed it yet`);
+      } else if (clock) {
+        const who = byRoster.get(Number(clock.rosterId));
+        L.push(`  pick ${clock.overall} of ${clock.total} — round ${clock.round}, slot ${clock.slot}`);
+        L.push(who
+          ? `  ON THE CLOCK: ${who}`
+          : `  on the clock: roster ${clock.rosterId ?? 'unknown'}, and you cannot say whose that is`);
+        if (clock.lastPlayer) L.push(`  last pick was ${clock.lastPlayer}`);
+        if (clock.onClockSinceMs != null) {
+          const hours = Math.floor(clock.onClockSinceMs / 3600000);
+          const limit = d.pickSeconds ? Math.round(d.pickSeconds / 3600) : null;
+          L.push(`  they have had it ${hours} hour${hours === 1 ? '' : 's'}`
+               + (limit ? ` of ${limit}` : ''));
+        }
+      }
+      if (when) L.push(`  it started ${when}`);
+    } else if (d.status === 'complete') {
+      L.push(when ? `  it is DONE. It was held ${when}` : '  it is DONE.');
+    } else if (when && Number(d.startsAt) < Date.now()) {
+      // pre_draft with a date in the past: the commissioner set a time and it
+      // came and went. Saying "scheduled for" here is the original bug.
+      L.push(`  it has NOT started, and the date set for it (${when}) has already passed.`
+           + ' Say that plainly rather than announcing it as upcoming.');
+    } else {
+      L.push(when
+        ? `  scheduled for ${when}`
+        : '  no date has been set yet, the commissioner picks it in Sleeper');
+    }
+
     L.push(`  ${d.type || 'unknown'} draft, ${d.rounds ?? '?'} rounds` +
            (d.pickSeconds ? `, ${d.pickSeconds} seconds a pick` : ''));
     L.push(d.orderSet
