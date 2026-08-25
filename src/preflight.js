@@ -181,6 +181,19 @@ async function execute(runId) {
     'update preflight_runs set seasons_captured = $2, seasons_failed = $3 where id = $1',
     [runId, captured, failed]);
 
+
+  /*
+   * TRADES ARE NOT PULLED HERE. A pre-flight runs on a league that has not
+   * agreed to anything — it may never accept the invite — and hoovering up
+   * seven years of its transactions to answer a question nobody asked is both
+   * wasted work and data we have no business holding yet. The seven questions
+   * this check asks do not touch trades; the seasons it does capture are the
+   * minimum needed to prove the bot has anything to say at all.
+   *
+   * The history arrives when they actually join. See the trade_history job in
+   * worker.js.
+   */
+
   // 3. Build the context the bot would actually be handed.
   const { league } = await contextLeague(seasons[0]);
   const ctx = await leagueContext(league.id);

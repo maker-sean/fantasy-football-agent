@@ -118,6 +118,49 @@ const JOBS = [
    * nothing` conflicts to import three. Backfilling the history is a deliberate
    * act: npm run values -- --since 2020-04-01 --save
    */
+  /*
+   * A league's trade history, pulled once, when it has actually joined.
+   *
+   * Deliberately NOT part of the pre-flight. That check runs against a league
+   * which has agreed to nothing and may never accept the invite, and pulling
+   * seven years of its transactions to answer a question nobody asked is both
+   * wasted work and data we have no business holding yet.
+   *
+   * Off the request path because it is roughly a hundred Sleeper calls per
+   * league — a league-creation handler doing that would time out. Here it costs
+   * one query a day for leagues already done, and runs exactly once per league
+   * because having any trade on file is the signal it has run.
+   *
+   * Adopted, never announced: a league joining in September must not be greeted
+   * by a hundred alerts about trades from 2021.
+   */
+  ['trade_history',  '0 5 * * *',   async () => {
+    const trades = require('./src/trades');
+    /*
+     * Keyed on a timestamp, not on "has any trades".
+     *
+     * Trades attach to the ARCHIVE row of the season they happened in, each
+     * carrying that season's own Sleeper id, so counting by the current id sees
+     * only this year — and a league that has genuinely never traded would look
+     * un-backfilled forever and re-walk seven years every night to find the
+     * same nothing.
+     */
+    const { rows: due } = await db.query(
+      `select id, name, sleeper_league_id from leagues
+        where provider <> 'archive' and active
+          and sleeper_league_id is not null
+          and trades_backfilled_at is null`);
+
+    for (const lg of due) {
+      const out = await trades.backfill(lg.sleeper_league_id).catch(err => {
+        console.error(`[trade_history] ${lg.name} failed:`, err.message);
+        return null;
+      });
+      if (!out) continue;   // left unstamped on purpose, so it is retried
+      await db.query('update leagues set trades_backfilled_at = now() where id = $1', [lg.id]);
+      console.log(`[trade_history] ${lg.name}: ${out.trades} trades, ${out.seasons} seasons`);
+    }
+  }],
   ['values',         '30 4 * * *',  async () => {
     const since = new Date(Date.now() - 5 * 864e5).toISOString().slice(0, 10);
     const out = await require('./src/playervalues').ingest({ since });

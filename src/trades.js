@@ -160,6 +160,58 @@ async function syncLeague(league, { season, week, adopt = false }) {
   return transitions;
 }
 
+/**
+ * Every trade a league has ever made, pulled in one pass.
+ *
+ * The poller only ever sees trades happening NOW — it reads the current week of
+ * a live season — so a league arrives with six years of history and none of it
+ * recorded. moves_by_roster stored a COUNT, which answers "who is busiest" and
+ * nothing about what was actually swapped.
+ *
+ * ADOPTED, NOT ANNOUNCED. Every one of these settled years ago; recording them
+ * must not fire a single message. `adopt` already exists on syncLeague for
+ * exactly this reason — it writes the row and the event and suppresses the
+ * transition — and reusing it means the backfill and the live path cannot
+ * disagree about what a trade row looks like.
+ *
+ * ATTACHED TO THE SEASON, not the current league. Each season is its own
+ * Sleeper league with its own id, and its archive row is where its snapshots
+ * already live. A trade belongs beside the games it was made during, and
+ * anything wanting the whole history walks the chain — the same walk career()
+ * and gameRecords() already do.
+ *
+ * Weeks 1-17 because Sleeper indexes transactions by week and offseason moves
+ * land in week 1. Empty weeks cost one request and return nothing.
+ */
+async function backfill(sleeperLeagueId, { weeks = 17, onSeason = null } = {}) {
+  const history = require('./history');
+  const seasons = await history.chain(sleeperLeagueId);
+  const out = { seasons: 0, trades: 0, detail: [] };
+
+  for (const lg of seasons) {
+    // The row this season's data hangs off. archiveLeague is idempotent and is
+    // what captureSeason already used, so this reuses rather than duplicates.
+    const row = await history.archiveLeague(lg);
+    let found = 0;
+    for (let week = 1; week <= weeks; week++) {
+      try {
+        await syncLeague({ id: row.id, sleeper_league_id: lg.league_id },
+          { season: lg.season, week, adopt: true });
+      } catch (err) {
+        console.error(`[trades] ${lg.season} wk${week} failed:`, err.message);
+      }
+    }
+    const { rows: [c] } = await db.query(
+      'select count(*)::int n from trades where league_id = $1', [row.id]);
+    found = c.n;
+    out.seasons++;
+    out.trades += found;
+    out.detail.push({ season: lg.season, trades: found });
+    if (onSeason) onSeason(lg.season, found);
+  }
+  return out;
+}
+
 async function recordEvent(tradeId, from, to, { adopt = false } = {}) {
   const { rows } = await db.query(
     `insert into trade_events (trade_id, from_status, to_status, announced, announced_at)
@@ -440,7 +492,7 @@ async function markRevisited(tradeId, verdict) {
 }
 
 module.exports = {
-  poll, dueRevisits, markRevisited, playerMap,
+  poll, backfill, dueRevisits, markRevisited, playerMap,
   isDue, leaguesDue, syncLeague, recordEvent, markAnnounced,
   composeAnnouncement, scoreTrade, gradeFor, composeVerdict, teamNames, receivedBy,
   isSettled, isRejected, isPending,

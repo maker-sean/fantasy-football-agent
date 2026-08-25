@@ -50,7 +50,8 @@
     "gaps": "node scripts/gaps.js",
     "feedback": "node scripts/feedback.js",
     "make-logo": "node scripts/make-logo.js",
-    "values": "node scripts/values.js"
+    "values": "node scripts/values.js",
+    "trades-backfill": "node scripts/trades-backfill.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.117.1",
