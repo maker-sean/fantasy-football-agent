@@ -310,6 +310,26 @@ async function bindMember(leagueId, { phone, sleeperUserId, sleeperRosterId, dis
   const fromAutomation = boundVia === 'legacy' || boundVia === 'sync';
   if (fromAutomation) displayName = null;
 
+  /*
+   * A row with NEITHER identifier can never be found again.
+   *
+   * The lookup below matches on phone OR sleeper_user_id. With both null it is
+   * `phone = NULL or sleeper_user_id = NULL` — two NULLs, never true — so it
+   * matched nothing and fell through to the insert. On an UNOWNED roster, which
+   * Sleeper genuinely returns and this league genuinely has, the nightly sync
+   * therefore created a fresh nameless member every single night: three had
+   * accumulated on roster 5 before anybody looked, one per run, growing
+   * forever.
+   *
+   * Refused rather than inserted, because the row is unreachable the moment it
+   * exists: nothing can ever match it, update it, or bind a person to it. An
+   * unowned roster is a real state and the honest response to it is to record
+   * nothing until a human claims the team.
+   */
+  if (!normalized && !sleeperUserId) {
+    return { member: null, outcome: 'no_identity' };
+  }
+
   const { rows: existingRows } = await query(
     `select * from members where league_id = $1 and (phone = $2 or sleeper_user_id = $3)`,
     [leagueId, normalized, sleeperUserId || null]
