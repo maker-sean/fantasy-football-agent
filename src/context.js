@@ -767,6 +767,32 @@ function contextBlock(ctx) {
        * player, with volume removed. On an even trade they agree, and that
        * agreement is itself worth the model seeing.
        */
+      /*
+       * VORP is the fairest of the three and is stated as such.
+       *
+       * Points above what a freely available player produced over the same
+       * weeks, floored at zero — a player who did worse than the waiver wire
+       * added nothing, because his equivalent was there for free. That floor is
+       * what stops a three-for-one being flattered by two bodies nobody would
+       * have rostered.
+       *
+       * It is not merely a smaller number: on an even trade for a genuine star
+       * it goes UP, because everything the other side got sat near replacement.
+       */
+      if (v.vorpMargin != null) {
+        const [w2, l2] = v.sides;
+        L.push(`    VALUE OVER REPLACEMENT: ${v.vorpMargin}`
+             + ` (${nameOf(w2.rosterId)} ${w2.vorp} against ${nameOf(l2.rosterId)} ${l2.vorp}).`
+             + ' Points above a freely available player at the same position, floored at zero.'
+             + ' THIS IS THE FAIREST OF THE THREE — prefer it when they disagree.');
+        for (const s2 of v.sides) {
+          const dead = s2.players.filter(pl => pl.vorp === 0);
+          if (dead.length) {
+            L.push(`      ${dead.map(pl => pl.name).join(', ')} scored BELOW replacement,`
+                 + ' so worth nothing — that side could have had their equal off waivers.');
+          }
+        }
+      }
       if (v.bestMargin != null && v.bestMargin !== v.margin) {
         L.push(`    best player against best player: ${v.bestMargin}`
              + ` (the ${v.margin} above counts every player received;`

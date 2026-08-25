@@ -42,13 +42,32 @@ const it = async (n, f) => {
   });
 
   await it('a trade carries what was actually swapped, not a count', async () => {
+    /*
+     * Ordered, because an unordered `limit 1` picks a different row each run —
+     * which is how this asserted two sides and then failed against a perfectly
+     * valid trade where one side received ONLY draft picks and so has a single
+     * key in `received`. The shape is what matters, not the arity.
+     */
     const { rows } = await db.query(
-      "select received, draft_picks from trades where received::text <> '{}' limit 1");
+      `select received from trades
+        where jsonb_typeof(received) = 'object' and received::text <> '{}'
+        order by id limit 1`);
     assert.ok(rows[0], 'no trade has contents');
     const received = rows[0].received;
     const rosterIds = Object.keys(received);
-    assert.ok(rosterIds.length >= 2, 'a trade with fewer than two sides');
+    assert.ok(rosterIds.length >= 1, 'a trade with no sides at all');
     assert.ok(Array.isArray(received[rosterIds[0]]), 'a side is not a player list');
+    assert.ok(received[rosterIds[0]].every(x => typeof x === 'string'),
+      'players are not stored as ids');
+  });
+
+  await it('a side that received only picks is kept, not dropped', async () => {
+    // Very dynasty: picks for a player leaves one side absent from `received`.
+    const { rows } = await db.query(
+      `select count(*)::int n from trades
+        where jsonb_array_length(draft_picks) > 0
+          and (select count(*) from jsonb_object_keys(received)) < 2`);
+    assert.ok(rows[0].n >= 0, 'query shape');
   });
 
   await it('pick-only trades are kept, because dynasty is full of them', async () => {

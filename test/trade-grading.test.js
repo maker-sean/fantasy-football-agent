@@ -185,4 +185,92 @@ it('no handcuff is claimed for a past season, because teams have changed since',
     'asserted a 2020 handcuff from 2026 rosters');
 });
 
+console.log('\nvalue over replacement');
+
+const bl = { QB: 100, RB: 50, WR: 40, TE: 20 };
+const withPos = new Map([
+  ['star', { full_name: 'Star', position: 'RB' }],
+  ['filler', { full_name: 'Filler', position: 'WR' }],
+  ['solid', { full_name: 'Solid', position: 'RB' }],
+]);
+
+it('a player who scored below replacement is worth nothing', () => {
+  /*
+   * The floor, and the whole reason VORP answers the uneven-trade question. If
+   * a freely available player at that position produced more, acquiring this
+   * one added nothing — his equal was on the waiver wire for free.
+   */
+  const snaps = new Map([week(2, [
+    mu(1, ['filler'], { filler: 25 }),     // WR replacement is 40
+    mu(2, ['solid'], { solid: 70 }),
+  ])]);
+  const v = trades.scoreTrade(
+    { week: 1, revisit_week: 2, received: { 1: ['filler'], 2: ['solid'] }, draft_picks: [] },
+    snaps, withPos, { baselines: bl });
+  const got = v.sides.find(s => s.rosterId === 1).players[0];
+  assert.strictEqual(got.vorp, 0, 'a below-replacement player carried value');
+  assert.strictEqual(v.sides.find(s => s.rosterId === 2).players[0].vorp, 20);
+});
+
+it('VORP deflates a two-for-one built on filler', () => {
+  /*
+   * The filler has to be genuinely below replacement or he legitimately counts.
+   * WR replacement is 40 here and he scored 30, so he is a man anybody could
+   * have had for nothing.
+   *
+   * Raw points: 100 against 70, a 30-point win. In value: 20 against 20, a
+   * wash — which is the honest reading of a star plus a body for a star.
+   */
+  const snaps = new Map([week(2, [
+    mu(1, ['star', 'filler'], { star: 70, filler: 30 }),
+    mu(2, ['solid'], { solid: 70 }),
+  ])]);
+  const v = trades.scoreTrade(
+    { week: 1, revisit_week: 2, received: { 1: ['star', 'filler'], 2: ['solid'] }, draft_picks: [] },
+    snaps, withPos, { baselines: bl });
+  assert.strictEqual(v.margin, 30);
+  assert.strictEqual(v.vorpMargin, 0, 'volume still flattered the bigger side');
+});
+
+it('and INFLATES a fair-looking trade for a genuine star', () => {
+  // Not a shrink factor. Everything the other side got sat near replacement.
+  const snaps = new Map([week(2, [
+    mu(1, ['star'], { star: 200 }),
+    mu(2, ['filler', 'solid'], { filler: 45, solid: 55 }),
+  ])]);
+  const v = trades.scoreTrade(
+    { week: 1, revisit_week: 2, received: { 1: ['star'], 2: ['filler', 'solid'] }, draft_picks: [] },
+    snaps, withPos, { baselines: bl });
+  assert.strictEqual(v.margin, 100);
+  // star 200 - 50 = 150; filler 45 - 40 = 5, solid 55 - 50 = 5, so 150 - 10.
+  assert.strictEqual(v.vorpMargin, 140, 'VORP failed to show the star was the whole trade');
+});
+
+it('a position with no baseline yields no VORP rather than a guess', () => {
+  // Too few rostered at that position to reach the replacement rank.
+  const snaps = new Map([week(2, [mu(1, ['star'], { star: 90 }), mu(2, ['solid'], { solid: 60 })])]);
+  const v = trades.scoreTrade(
+    { week: 1, revisit_week: 2, received: { 1: ['star'], 2: ['solid'] }, draft_picks: [] },
+    snaps, withPos, { baselines: { RB: null } });
+  assert.strictEqual(v.sides[0].players[0].vorp, null);
+  assert.strictEqual(v.vorpMargin, null, 'invented a margin from a missing baseline');
+});
+
+it('the baseline is the last STARTABLE player, set by the league lineup', () => {
+  /*
+   * Twelve teams starting one QB means QB12 is the last startable one and QB13
+   * is free. Two RB slots plus two flex means the rank runs far deeper.
+   */
+  const players = new Map();
+  const matchups = [];
+  for (let i = 1; i <= 30; i++) {
+    players.set('rb' + i, { full_name: 'RB' + i, position: 'RB' });
+    matchups.push({ roster_id: i, starters: [], players_points: { ['rb' + i]: 100 - i } });
+  }
+  const snaps = new Map([[1, { matchups }]]);
+  const base = trades.replacementBaselines(snaps, players, ['RB', 'RB'], 12, 1, 1);
+  // 12 teams x 2 dedicated RB slots = rank 24; the 24th best scored 100-24.
+  assert.strictEqual(base.RB, 76);
+});
+
 console.log(`\n${pass} passing`);

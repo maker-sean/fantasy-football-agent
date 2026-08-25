@@ -245,11 +245,19 @@ async function gradeClosedSeason(leagueRow, sleeperLeagueId, season, { lastWeek 
   }
 
   const players = await playerMap();
+
+  // The league's own lineup decides where replacement level sits, so it is read
+  // from the season being graded rather than assumed.
+  const settings = await sleeper.league(sleeperLeagueId).catch(() => null);
+  const teams = settings?.total_rosters || 12;
+  const baselines = replacementBaselines(
+    snapshotsByWeek, players, settings?.roster_positions, teams, earliest, lastWeek);
+
   let graded = 0;
   for (const t of trades) {
     // Rest of season, so the live path's revisit_week is deliberately ignored.
     const verdict = scoreTrade({ ...t, revisit_week: lastWeek }, snapshotsByWeek, players,
-      { season: String(season) });
+      { season: String(season), baselines });
     if (verdict.margin == null) continue;   // not a two-sided trade; nothing to grade
     await db.query(
       'update trades set verdict = $2, revisited_at = now() where id = $1',
@@ -357,7 +365,61 @@ function composeAnnouncement({ trade, from, to }, { names, players }) {
  * The distinction has to survive into the wording: "contributed 0.0 to your
  * lineup" is true where "scored 0.0" would not be.
  */
-function scoreTrade(trade, snapshotsByWeek, players, { season = null } = {}) {
+/**
+ * What a freely available player was worth over the same weeks.
+ *
+ * VORP's baseline: the last player at a position anybody actually starts.
+ * Beyond that rank you are on the waiver wire, so acquiring one adds nothing —
+ * which is exactly why a raw points total overrates a three-for-one. Two
+ * replacement-level bodies are not worth one real starter, and summing their
+ * points says they are.
+ *
+ * The rank comes from the league's own lineup: teams x dedicated slots, plus
+ * the flex slots that position competes for. Twelve teams starting one QB
+ * means QB12 is the last startable quarterback and QB13 is free.
+ *
+ * Computed over ROSTERED players only, which is the honest limit here — the
+ * matchups carry nobody else. That biases the baseline slightly high, since a
+ * genuinely free player is worse than the worst rostered one, and high is the
+ * safe direction: it understates every VORP rather than inventing value.
+ */
+function replacementBaselines(snapshotsByWeek, players, rosterPositions, teams, from, to) {
+  const SLOTS = {
+    QB: ['QB'], RB: ['RB'], WR: ['WR'], TE: ['TE'],
+    FLEX: ['RB', 'WR', 'TE'], WRRB_FLEX: ['RB', 'WR'],
+    REC_FLEX: ['WR', 'TE'], SUPER_FLEX: ['QB', 'RB', 'WR', 'TE'],
+  };
+  const slots = (rosterPositions || []).filter(x => SLOTS[x]);
+
+  const totals = new Map();
+  for (let w = from; w <= to; w++) {
+    for (const mu of snapshotsByWeek.get(w)?.matchups || []) {
+      for (const [pid, pts] of Object.entries(mu.players_points || {})) {
+        totals.set(pid, (totals.get(pid) || 0) + Number(pts || 0));
+      }
+    }
+  }
+
+  const byPos = {};
+  for (const [pid, pts] of totals) {
+    const pos = players.get(pid)?.position;
+    if (!pos || !['QB', 'RB', 'WR', 'TE'].includes(pos)) continue;
+    (byPos[pos] ||= []).push(pts);
+  }
+
+  const baselines = {};
+  for (const pos of ['QB', 'RB', 'WR', 'TE']) {
+    const dedicated = slots.filter(x => x === pos).length;
+    const flex = slots.filter(x => x !== pos && SLOTS[x].includes(pos)).length;
+    const rank = teams * (dedicated + flex);
+    const list = (byPos[pos] || []).sort((a, b) => b - a);
+    // Nothing that deep at the position: no baseline rather than a guessed one.
+    baselines[pos] = rank > 0 && list.length >= rank ? Number(list[rank - 1].toFixed(2)) : null;
+  }
+  return baselines;
+}
+
+function scoreTrade(trade, snapshotsByWeek, players, { season = null, baselines = null } = {}) {
   const from = Number(trade.week) + 1;
   const to = Number(trade.revisit_week);
   const sides = [];
@@ -461,6 +523,39 @@ function scoreTrade(trade, snapshotsByWeek, players, { season = null } = {}) {
    * what the trade did for the roster, best-against-best says who got the
    * better player. On an even trade they agree, which is itself worth seeing.
    */
+  /*
+   * VORP: points above a freely available player, floored at zero.
+   *
+   * The floor is the whole point. A player who produced below replacement level
+   * is worth NOTHING in a trade — you could have had his equivalent off waivers
+   * for free — so counting his raw points is counting something the manager did
+   * not actually gain. That is precisely what inflates a three-for-one, and
+   * flooring at zero removes it without any special case for uneven trades.
+   */
+  if (baselines) {
+    for (const side of sides) {
+      let total = 0;
+      let priced = 0;
+      for (const line of side.players) {
+        const pos = players.get(line.playerId)?.position;
+        const base = pos ? baselines[pos] : null;
+        if (base == null) { line.vorp = null; continue; }
+        line.vorp = Number(Math.max(0, line.startedPoints - base).toFixed(2));
+        line.replacementWas = base;
+        total += line.vorp;
+        priced++;
+      }
+      /*
+       * NULL, not zero, when nothing on this side could be priced.
+       *
+       * Zero means "worth exactly replacement", which is a finding. No baseline
+       * means we cannot say — and reporting that as a wash is the same class of
+       * mistake as a stale draft date: an absence rendered as a fact.
+       */
+      side.vorp = priced ? Number(total.toFixed(2)) : null;
+    }
+  }
+
   let bestMargin = null;
   if (sides.length === 2) {
     const n = Math.min(sides[0].players.length, sides[1].players.length);
@@ -478,6 +573,10 @@ function scoreTrade(trade, snapshotsByWeek, players, { season = null } = {}) {
     margin,
     // Volume removed: the best N from each side, N being the smaller side.
     bestMargin,
+    // Volume removed properly: a below-replacement player counts as zero.
+    vorpMargin: baselines && sides.length === 2 && sides.every(x => x.vorp != null)
+      ? Number((sides[0].vorp - sides[1].vorp).toFixed(2)) : null,
+    baselines: baselines || null,
     uneven: sides.length === 2 && sides[0].players.length !== sides[1].players.length,
     // Draft picks cannot be valued without projections, so they are excluded
     // from the arithmetic and disclosed rather than quietly ignored.
@@ -638,7 +737,7 @@ async function markRevisited(tradeId, verdict) {
 }
 
 module.exports = {
-  poll, backfill, gradeHistory, gradeClosedSeason, dueRevisits, markRevisited, playerMap,
+  poll, backfill, gradeHistory, gradeClosedSeason, replacementBaselines, dueRevisits, markRevisited, playerMap,
   isDue, leaguesDue, syncLeague, recordEvent, markAnnounced,
   composeAnnouncement, scoreTrade, gradeFor, composeVerdict, teamNames, receivedBy,
   isSettled, isRejected, isPending,
