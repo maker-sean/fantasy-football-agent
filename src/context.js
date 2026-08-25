@@ -355,6 +355,23 @@ async function leagueContext(leagueId, opts = {}) {
       .then(r => r.rows)
       .catch(err => { console.error('[context] graded trades failed:', err.message); return []; });
 
+    /*
+     * HOW MANY THERE ACTUALLY ARE, because the list above is the top five.
+     *
+     * Without this the model reports its list as the whole record and is
+     * correct to: asked to review 2022 it answered "no 2022 deal on record"
+     * when there were two, neither lopsided enough to make the cut. A truncated
+     * list presented as complete is an absence rendered as a fact — the same
+     * shape as a stale draft date announced as upcoming.
+     */
+    ctx.tradeCounts = await db.query(
+      `select t.season, count(*)::int n
+         from trades t join leagues l on l.id = t.league_id
+        where l.sleeper_league_id = any($1::text[]) and t.verdict is not null
+        group by 1 order by 1`, [chainIds])
+      .then(r => r.rows)
+      .catch(() => []);
+
     ctx.career = await require('./history').career(league.sleeper_league_id, { ids: chainIds }).catch(err => {
       console.error('[context] career lookup failed:', err.message);
       return [];
@@ -739,8 +756,20 @@ function contextBlock(ctx) {
       return m?.name || `roster ${rid}`;
     };
     L.push('');
+    const total = (ctx.tradeCounts || []).reduce((a, r) => a + r.n, 0);
     L.push('TRADES, SETTLED (rest-of-season points scored IN THE LINEUP by what each side'
          + ' received. Most lopsided first — this order is computed, do not re-rank it):');
+    if (total > ctx.gradedTrades.length) {
+      /*
+       * The truncation, said out loud. Listing five of sixteen without saying
+       * so is what made the bot deny two real 2022 trades existed.
+       */
+      L.push(`  THESE ARE THE ${ctx.gradedTrades.length} MOST LOPSIDED OF ${total} on record.`
+           + ' Others exist and are NOT listed here — if asked about a season or a trade you'
+           + ' cannot see, say it is not in your top five, never that it did not happen.');
+      L.push('  How many settled trades each season actually had: '
+           + (ctx.tradeCounts || []).map(r => `${r.season} ${r.n}`).join(', '));
+    }
     for (const t of ctx.gradedTrades) {
       const v = t.verdict;
       if (!v?.sides || v.sides.length !== 2) continue;
