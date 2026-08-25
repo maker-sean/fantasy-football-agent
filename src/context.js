@@ -46,6 +46,64 @@ function standingsFrom(payload) {
  * @param opts.includeArchive  pull last season too, so the bot has something to
  *                             say before the new season has any games
  */
+/**
+ * What one roster is short of, by season projection.
+ *
+ * Live from Sleeper because a draft changes rosters by the hour and there is no
+ * current-season snapshot to read. Only ever called while a draft is running.
+ *
+ * STARTING POSITIONS ONLY. Kickers and defences are not what anybody agonises
+ * over in round two, and including them would let "thinnest position" come back
+ * as K, which is true and useless.
+ */
+const DRAFT_POSITIONS = ['QB', 'RB', 'WR', 'TE'];
+
+async function draftNeeds(league, rosterId) {
+  const [rows, proj] = await Promise.all([
+    sleeper.rosters(league.sleeper_league_id),
+    sleeper.seasonProjections(new Date().getFullYear()),
+  ]);
+  const roster = (rows || []).find(r => Number(r.roster_id) === Number(rosterId));
+  if (!roster?.players?.length) return null;
+
+  const owned = roster.players
+    .map(id => proj.get(String(id)))
+    .filter(Boolean);
+
+  const byPos = {};
+  for (const pos of DRAFT_POSITIONS) {
+    const list = owned.filter(p => p.position === pos).sort((a, b) => a.posRank - b.posRank);
+    byPos[pos] = {
+      count: list.length,
+      best: list[0] || null,
+      // Two deep is what a lineup actually needs; a single good starter with
+      // nothing behind them is a different problem from having none at all.
+      second: list[1] || null,
+    };
+  }
+
+  /*
+   * Thinnest = worst best-player rank, with an empty position always worst.
+   * Stated outright because a ranking nothing can check afterwards has to be
+   * computed, and because "which position" is the entire question.
+   */
+  const scored = DRAFT_POSITIONS.map(pos => ({
+    pos,
+    rank: byPos[pos].best ? byPos[pos].best.posRank : Number.POSITIVE_INFINITY,
+  })).sort((a, b) => b.rank - a.rank);
+  const thinnest = scored[0];
+
+  return {
+    rosterId: Number(rosterId),
+    counted: owned.length,
+    total: roster.players.length,
+    byPos,
+    thinnest: thinnest.rank === Number.POSITIVE_INFINITY
+      ? { pos: thinnest.pos, empty: true }
+      : { pos: thinnest.pos, rank: thinnest.rank },
+  };
+}
+
 async function leagueContext(leagueId, opts = {}) {
   const { rows: lrows } = await db.query('select * from leagues where id = $1', [leagueId]);
   const league = lrows[0];
@@ -252,6 +310,28 @@ async function leagueContext(leagueId, opts = {}) {
         console.error('[context] draft clock failed:', err.message);
         return null;
       });
+
+      /*
+       * WHAT THE PERSON ON THE CLOCK IS SHORT OF.
+       *
+       * The bot has been able to recite what a manager did in 2023 and unable
+       * to say anything useful about the pick they are making right now. This
+       * is the input that lets it have an opinion — "no running back projected
+       * inside the top fifty, I would start there" — rather than another
+       * record.
+       *
+       * The gap is COMPUTED, not derived. Handed a roster and three thousand
+       * projections and asked which position is thinnest, a model produces a
+       * number that reads right and is not; that failure has cost this codebase
+       * more than any other. The thin position is arithmetic and is worked out
+       * here.
+       */
+      if (ctx.draftClock?.rosterId != null) {
+        ctx.onClockRoster = await draftNeeds(league, ctx.draftClock.rosterId).catch(err => {
+          console.error('[context] on-clock roster failed:', err.message);
+          return null;
+        });
+      }
     }
   }
 
@@ -579,6 +659,40 @@ function contextBlock(ctx) {
         }
       }
       if (when) L.push(`  it started ${when}`);
+
+      /*
+       * The roster behind the pick, so the bot can say something about the pick
+       * being made rather than about 2023.
+       *
+       * Every number here is computed. The thin position is stated outright
+       * because it is a ranking, and a ranking the model works out for itself
+       * is the one thing nothing downstream can check.
+       *
+       * HAVING A VIEW IS THE POINT. The facts are what must be right; what to
+       * do about them cannot be wrong, only disagreed with, and disagreement is
+       * the product. Recommending a position off these numbers is allowed and
+       * wanted; inventing a number to justify one is not.
+       */
+      const needs = ctx.onClockRoster;
+      if (needs) {
+        const owner = byRoster.get(needs.rosterId) || 'they';
+        L.push('');
+        L.push(`  WHAT ${owner.toUpperCase()} HAS, by season projection`
+             + ` (${needs.counted} of ${needs.total} rostered players are projected):`);
+        for (const pos of ['QB', 'RB', 'WR', 'TE']) {
+          const p = needs.byPos[pos];
+          if (!p) continue;
+          if (!p.best) { L.push(`    ${pos}: none at all`); continue; }
+          L.push(`    ${pos}: ${p.count} rostered, best is ${p.best.name} at ${pos}${p.best.posRank}`
+               + ` (${p.best.points} projected)`
+               + (p.second ? `, then ${p.second.name} at ${pos}${p.second.posRank}` : ', nothing behind him'));
+        }
+        L.push(needs.thinnest.empty
+          ? `    THINNEST: ${needs.thinnest.pos} — they do not have one`
+          : `    THINNEST: ${needs.thinnest.pos}, where their best is only`
+            + ` ${needs.thinnest.pos}${needs.thinnest.rank}`);
+        L.push('    You may recommend a position from this. Say what it is based on.');
+      }
     } else if (d.status === 'complete') {
       L.push(when ? `  it is DONE. It was held ${when}` : '  it is DONE.');
     } else if (when && Number(d.startsAt) < Date.now()) {

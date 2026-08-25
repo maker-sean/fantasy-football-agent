@@ -320,6 +320,77 @@ function rosterOwners(snapshotPayload) {
 const PROJ_TTL_MS = Number(process.env.PROJECTIONS_TTL_MS || 30 * 60 * 1000);
 const projCache = new Map();
 
+/**
+ * Season-long projections, ranked within position.
+ *
+ * The weekly call below answers "who should I start". This answers a different
+ * question — "what is this roster short of" — which is the one a league asks
+ * while a draft is running, and it is the input that lets the bot have an
+ * OPINION rather than recite a record.
+ *
+ * The rank is computed HERE. A model handed three thousand rows and asked where
+ * somebody's best running back sits will produce a number that looks right and
+ * is not; this codebase has paid for that lesson enough times. Position rank is
+ * arithmetic and belongs in arithmetic.
+ *
+ * Cached for an hour. These move when news breaks, not by the minute, and a
+ * live draft asks for them repeatedly.
+ */
+const SEASON_PROJ_TTL_MS = Number(process.env.SEASON_PROJECTIONS_TTL_MS || 60 * 60 * 1000);
+const seasonProjCache = new Map();
+
+async function seasonProjections(season) {
+  const hit = seasonProjCache.get(String(season));
+  if (hit && Date.now() - hit.at < SEASON_PROJ_TTL_MS) return hit.byPlayer;
+
+  const pos = ['QB', 'RB', 'WR', 'TE'].map(p => `position[]=${p}`).join('&');
+  const url = `https://api.sleeper.app/projections/nfl/${season}`
+            + `?season_type=regular&${pos}&order_by=pts_ppr`;
+  const res = await fetch(url, { headers: { accept: 'application/json' } });
+  if (!res.ok) {
+    const err = new Error(`Sleeper season projections ${season} -> ${res.status}`);
+    require('./errorlog').record({
+      system: 'sleeper', operation: 'season-projections', status: res.status, message: err.message,
+    });
+    throw err;
+  }
+
+  const rows = [];
+  for (const row of await res.json()) {
+    const pts = row?.stats?.pts_ppr;
+    const position = row?.player?.position;
+    if (!row.player_id || pts == null || !position) continue;
+    rows.push({
+      playerId: String(row.player_id),
+      name: [row.player.first_name, row.player.last_name].filter(Boolean).join(' '),
+      position,
+      team: row.team || null,
+      points: Math.round(Number(pts) * 10) / 10,
+    });
+  }
+
+  // Rank within position, best first. Ties share the lower rank rather than
+  // silently ordering by whatever the API happened to return first.
+  const byPosition = new Map();
+  for (const r of rows) {
+    if (!byPosition.has(r.position)) byPosition.set(r.position, []);
+    byPosition.get(r.position).push(r);
+  }
+  const byPlayer = new Map();
+  for (const [, list] of byPosition) {
+    list.sort((a, b) => b.points - a.points);
+    let rank = 0, lastPts = null, seen = 0;
+    for (const r of list) {
+      seen++;
+      if (r.points !== lastPts) { rank = seen; lastPts = r.points; }
+      byPlayer.set(r.playerId, { ...r, posRank: rank });
+    }
+  }
+
+  seasonProjCache.set(String(season), { at: Date.now(), byPlayer });
+  return byPlayer;
+}
+
 async function projections(season, week) {
   const key = `${season}:${week}`;
   const hit = projCache.get(key);
@@ -416,7 +487,7 @@ async function seasonStats(season, { scoring = 'half_ppr', live = false } = {}) 
 }
 
 module.exports = {
-  projections, seasonStats, draftSchedule, draftClock,
+  projections, seasonProjections, seasonStats, draftSchedule, draftClock,
   BASE, get, state, league, rosters, users, matchups, transactions,
   allPlayers, weekSnapshot, rosterOwners, draft,
 };
