@@ -64,6 +64,20 @@ const QUERIES = {
           who: r.verdict.sides.map(s2 => nameFor(ctx, s2.rosterId)),
         }));
 
+      /*
+       * A "manager" that is really the league name is not a filter.
+       *
+       * The router is told the difference, but it is a small model and this is
+       * the failure that costs most: filtering to a person who does not exist
+       * returns nothing, and nothing reads as "no such trades" rather than
+       * "bad filter". Dropping it here means the worst case is a league-wide
+       * answer to a league-wide question.
+       */
+      const leagueWords = String(ctx.leagueName || '').toLowerCase().split(/\s+/).filter(w => w.length > 2);
+      if (args.manager && leagueWords.includes(String(args.manager).toLowerCase())) {
+        delete args.manager;
+      }
+
       if (args.manager) {
         const want = String(args.manager).toLowerCase();
         items = items.filter(i => i.who.some(n => n.toLowerCase().includes(want)));
@@ -133,18 +147,31 @@ const QUERIES = {
        * zero, and a list that just happens to print one of them first reads as
        * a ranking it is not.
        */
+      /*
+       * A verdict line carries its own names.
+       *
+       * These used to read "CLOSEST BY VALUE: 2022 week 9, gap 0" and leave the
+       * who to the list above. Asked for Brennan's most even trade the reply
+       * came back "Marlow outscored Brennan by 17" when the row plainly says
+       * Brennan outscored Marlow — the model went back for the names and flipped
+       * them. Quoting one line is reliable, welding two together is not, so
+       * every line that could be quoted alone now says everything it means.
+       */
+      const full = i => `${i.season} week ${i.week}, ${nameFor(ctx, i.v.sides[0].rosterId)}`
+        + ` outscored ${nameFor(ctx, i.v.sides[1].rosterId)} by ${i.v.margin}`
+        + (i.v.vorpMargin != null ? `, value gap ${Math.abs(i.v.vorpMargin)}` : '');
+
       if (order === 'lopsided') {
         const byPoints = top[0];
         const priced = items.filter(i => i.v.vorpMargin != null);
         const byValue = priced.sort((a, b) => Math.abs(b.v.vorpMargin) - Math.abs(a.v.vorpMargin))[0];
-        L.push(`  MOST LOPSIDED BY POINTS: ${byPoints.season} week ${byPoints.week}, ${byPoints.v.margin}.`);
+        L.push(`  MOST LOPSIDED BY POINTS: ${full(byPoints)}.`);
         if (byValue) {
           const same = byValue.season === byPoints.season && byValue.week === byPoints.week;
           L.push(same
             ? '  BY VALUE it is the same trade, so both measures agree and you can call it outright.'
-            : `  MOST LOPSIDED BY VALUE: ${byValue.season} week ${byValue.week}, gap`
-              + ` ${Math.abs(byValue.v.vorpMargin)}. The two measures DISAGREE — name which one you mean,`
-              + ' or give both. Do not present either as the single worst.');
+            : `  MOST LOPSIDED BY VALUE: ${full(byValue)}. The two measures DISAGREE — name`
+              + ' which one you mean, or give both. Do not present either as the single worst.');
         }
       }
 
@@ -152,11 +179,25 @@ const QUERIES = {
         const zero = items.filter(i => i.v.vorpMargin === 0);
         if (zero.length > 1) {
           L.push(`  BY VALUE these ${zero.length} are exactly tied at a gap of 0, so none of them`
-               + ' is "the" most even on that measure: '
-               + zero.map(i => `${i.season} wk${i.week}`).join(', ') + '.');
+               + ' is "the" most even on that measure:');
+          for (const i of zero) L.push(`    ${full(i)}`);
         }
-        L.push(`  By raw points the closest is ${top[0].season} week ${top[0].week}`
-             + ` at ${top[0].v.margin}. Say which measure you mean if they disagree.`);
+        L.push(`  CLOSEST BY POINTS: ${full(top[0])}.`);
+        /*
+         * The value leader, named. Without it the even branch stated one
+         * measure and gestured at the other, and the reply came back as "value
+         * gap says otherwise though" — which tells nobody anything. If the two
+         * agree that is worth saying outright too.
+         */
+        const priced = items.filter(i => i.v.vorpMargin != null);
+        if (priced.length && zero.length <= 1) {
+          const byValue = priced.sort((a, b) => Math.abs(a.v.vorpMargin) - Math.abs(b.v.vorpMargin))[0];
+          const same = byValue.season === top[0].season && byValue.week === top[0].week;
+          L.push(same
+            ? '  BY VALUE it is the same trade, so both measures agree and you can call it outright.'
+            : `  CLOSEST BY VALUE: ${full(byValue)}. The measures DISAGREE — give both, or`
+              + ' say which you mean.');
+        }
       }
       return L.join('\n');
     },

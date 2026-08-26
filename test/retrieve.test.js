@@ -25,6 +25,18 @@ if (!process.env.DATABASE_URL) require('dotenv').config();
 const { route, NAMES } = require('../src/retrieve');
 const retrievers = require('../src/retrievers');
 
+/*
+ * A LIST ROW, as distinct from a verdict line.
+ *
+ * Both say "X outscored Y by N" now — deliberately, since a verdict line that
+ * needed the rows above for its names got them backwards once. Only the rows
+ * are the ordered list, so only they can be checked for ordering, and matching
+ * on "outscored" alone quietly pulled the verdicts in and made the ordering
+ * assertions fail against correct output.
+ */
+const rowsOf = out => out.split('\n').filter(l => /^\s{2,}\d{4} week \d+: /.test(l));
+const marginOf = line => Number(line.match(/ by ([\d.]+)/)[1]);
+
 let pass = 0;
 const it = async (n, f) => {
   try { await f(); console.log('  ok   ' + n); pass++; }
@@ -121,14 +133,14 @@ const dies = msg => ({ messages: { create: async () => { throw new Error(msg); }
 
     await it('the closest trade is the smallest margin, not merely an early row', async () => {
       const out = await retrievers.run(ctx, { name: 'trade_extremes', args: { order: 'even' } });
-      const nums = [...out.matchAll(/outscored .+? by ([\d.]+)/g)].map(m => Number(m[1]));
+      const nums = rowsOf(out).map(marginOf);
       assert.ok(nums.length > 1, 'expected several rows');
       assert.deepStrictEqual(nums, [...nums].sort((a, b) => a - b), 'rows must ascend by margin');
     });
 
     await it('the lopsided end descends by margin', async () => {
       const out = await retrievers.run(ctx, { name: 'trade_extremes', args: { order: 'lopsided' } });
-      const nums = [...out.matchAll(/outscored .+? by ([\d.]+)/g)].map(m => Number(m[1]));
+      const nums = rowsOf(out).map(marginOf);
       assert.deepStrictEqual(nums, [...nums].sort((a, b) => b - a));
     });
 
@@ -153,9 +165,39 @@ const dies = msg => ({ messages: { create: async () => { throw new Error(msg); }
       }
     });
 
+    await it('every verdict line names both managers, so none needs the list above', async () => {
+      /*
+       * The regression: verdict lines used to read "CLOSEST BY VALUE: 2022 week
+       * 9, gap 0" and leave the names to the rows above. Asked for Brennan's
+       * most even trade the reply said "Marlow outscored Brennan" when the row
+       * said the opposite — it went back for the names and flipped them.
+       */
+      for (const args of [{ order: 'even' }, { order: 'lopsided' }, { order: 'even', manager: 'Brennan' }]) {
+        const out = await retrievers.run(ctx, { name: 'trade_extremes', args });
+        const verdicts = out.split('\n').filter(l => /BY POINTS:|BY VALUE:/.test(l));
+        assert.ok(verdicts.length, `no verdict line for ${JSON.stringify(args)}`);
+        for (const line of verdicts) {
+          assert.ok(/outscored/.test(line), `verdict line lacks its own names: ${line}`);
+          assert.ok(/\d{4} week \d+/.test(line), `verdict line lacks its own date: ${line}`);
+        }
+      }
+    });
+
+    await it('the league name is not mistaken for a manager', async () => {
+      /*
+       * "The most even trade in Halcyon history" routed to manager=Halcyon,
+       * matched nobody, and answered that no trade involves anyone by that
+       * name. True, and useless: it is the league.
+       */
+      const out = await retrievers.run(ctx, { name: 'trade_extremes', args: { order: 'even', manager: 'Halcyon' } });
+      assert.ok(!/No settled trade on record/.test(out),
+        'the league name must be dropped as a filter, not filtered on');
+      assert.ok(/outscored/.test(out), out);
+    });
+
     await it('a manager filter only returns trades that manager was in', async () => {
       const out = await retrievers.run(ctx, { name: 'trade_extremes', args: { order: 'even', manager: 'Brennan' } });
-      for (const line of out.split('\n').filter(l => /outscored/.test(l))) {
+      for (const line of rowsOf(out)) {
         assert.ok(/Brennan/.test(line), `Brennan absent from: ${line}`);
       }
     });
@@ -167,8 +209,10 @@ const dies = msg => ({ messages: { create: async () => { throw new Error(msg); }
 
     await it('a season filter does not leak other seasons', async () => {
       const out = await retrievers.run(ctx, { name: 'trade_extremes', args: { order: 'even', season: '2022' } });
-      for (const line of out.split('\n').filter(l => /outscored/.test(l))) {
-        assert.ok(/^\s*2022 /.test(line), `not 2022: ${line}`);
+      for (const line of out.split('\n')) {
+        for (const [, year] of line.matchAll(/(\d{4}) week /g)) {
+          assert.strictEqual(year, '2022', `leaked a non-2022 season: ${line}`);
+        }
       }
     });
   }

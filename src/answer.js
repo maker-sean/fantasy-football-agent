@@ -74,7 +74,7 @@ async function generateAnswer(question, ctx, opts = {}) {
   let routing = null;
   let lookup = '';
   if (retrieve) {
-    const routed = await require('./retrieve').route(question, { recentChat, client });
+    const routed = await require('./retrieve').route(question, { recentChat, client, ctx });
     only = routed.sections;
     routing = { ...routed.meta, lookup: routed.lookup };
     if (routed.lookup) {

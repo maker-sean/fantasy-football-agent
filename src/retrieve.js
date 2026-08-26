@@ -82,7 +82,23 @@ Name a section when the answer would DRAW ON it, not only when the question name
  * @returns {sections, meta} — sections is an array for contextBlock's `only`
  */
 async function route(question, opts = {}) {
-  const { model = MODEL, recentChat = [], client = new Anthropic() } = opts;
+  const { model = MODEL, recentChat = [], client = new Anthropic(), ctx = null } = opts;
+
+  /*
+   * Who the people are, and what the LEAGUE is called.
+   *
+   * Without this the router cannot tell one from the other. "What is the most
+   * even trade in Halcyon history" came back as manager=Halcyon, the query
+   * filtered to trades involving a person by that name, and the bot reported
+   * that no trade on record involved anyone called Halcyon. Which was true,
+   * and useless: Halcyon Kings is the league.
+   */
+  const who = (ctx?.members || []).map(m => m.name).filter(Boolean);
+  const roster = who.length || ctx?.leagueName
+    ? `\n\nThis league is called "${ctx?.leagueName || 'unknown'}" — that is the LEAGUE, never a manager.`
+      + (who.length ? ` The managers are: ${who.join(', ')}. A manager argument must be one of those names,`
+                    + ' and if the question names nobody from that list, omit the argument.' : '')
+    : '';
 
   /*
    * Recent chat matters more here than it does when answering. "Was that a
@@ -99,7 +115,12 @@ async function route(question, opts = {}) {
     response = await client.messages.create({
       model,
       max_tokens: 64,
-      system: [{ type: 'text', text: SYSTEM, cache_control: { type: 'ephemeral' } }],
+      system: [
+        // Cached prefix first, per-league names after it, so one league's roster
+        // does not give every other league its own cache entry.
+        { type: 'text', text: SYSTEM, cache_control: { type: 'ephemeral' } },
+        ...(roster ? [{ type: 'text', text: roster }] : []),
+      ],
       messages: [{ role: 'user', content: `${chat}Someone said to the bot:\n"${question}"\n\nSections:` }],
     });
   } catch (err) {
