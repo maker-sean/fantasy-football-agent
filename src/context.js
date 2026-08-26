@@ -347,6 +347,10 @@ async function leagueContext(leagueId, opts = {}) {
      * league, because a 2021 trade there is still resolving and a frozen grade
      * would be a stale opinion presented as a result.
      */
+    // Kept on ctx so a retriever can run its own query over the same chain
+    // rather than re-walking it. See src/retrievers.js.
+    ctx.chainIds = chainIds;
+
     ctx.gradedTrades = await db.query(
       `select t.season, t.week, t.verdict
          from trades t join leagues l on l.id = t.league_id
@@ -566,8 +570,59 @@ async function leagueContext(leagueId, opts = {}) {
 }
 
 /** Render context as the fact sheet handed to the model. */
-function contextBlock(ctx) {
-  const L = [];
+/**
+ * @param opts.only  section names to include besides the always-on core. Null
+ *                   (the default) means everything, which is what every caller
+ *                   did before sections existed and what recaps still want.
+ */
+function contextBlock(ctx, opts = {}) {
+  /*
+   * L is not an array any more, and every L.push below is untouched.
+   *
+   * The whole block used to ship on every reply — all of it, whether someone
+   * asked about the draft or about the weather. That is fine at sixteen trades
+   * and impossible at a hundred and seventy-seven, so sections became something
+   * a caller can ask for by name.
+   *
+   * Rewriting six hundred push calls to target the right bucket would have been
+   * the obvious way and the wrong one: it touches every line that builds the
+   * context in order to change WHICH lines get sent. So L keeps its interface,
+   * pushes land in whichever section is currently open, and the only new lines
+   * in this function are the boundaries themselves.
+   */
+  const only = opts.only || null;
+  const buckets = [];
+  let cur = null;
+  const open = name => { cur = { name, lines: [] }; buckets.push(cur); };
+  const wanted = name => name === 'core' || !only || only.includes(name);
+  open('core');
+
+  const L = {
+    push: line => cur.lines.push(line),
+    section: open,
+    join(sep) {
+      const out = [];
+      const skipped = new Set();
+      for (const b of buckets) {
+        if (wanted(b.name)) { out.push(...b.lines); continue; }
+        /*
+         * A dropped section leaves a pointer, never silence.
+         *
+         * Silence reads to the model as "no such data", and it will say the
+         * league has no trades on record when it has a hundred. Saying the
+         * facts exist but are not loaded costs one line and is true.
+         */
+        if (b.lines.length) skipped.add(b.name);
+      }
+      if (skipped.size) {
+        out.push('');
+        out.push(`NOT LOADED for this question: ${[...skipped].join(', ')}. These facts EXIST`
+               + ' and are known. If the question turns out to need them, say you need to look'
+               + ' that up rather than saying there is nothing on record.');
+      }
+      return out.join(sep);
+    },
+  };
   L.push(`League: ${ctx.leagueName}. Season ${ctx.season || 'unknown'}, status ${ctx.status || 'unknown'}${ctx.teamCount ? `, ${ctx.teamCount} teams` : ''}.`);
 
   /*
@@ -618,6 +673,16 @@ function contextBlock(ctx) {
    * colour, and the block says so in its own header so the model does not
    * answer "who is winning" with somebody's 2021 record.
    */
+  /*
+   * History starts HERE, at the careers, not at last season's final table.
+   *
+   * Those two used to sit in one section, and dropping it took the last table
+   * with it — so with no current season captured, "what are the standings"
+   * answered "check back once games start" while the 2025 result sat right
+   * there unloaded. The table is twelve lines. The careers and extremes below
+   * it are 3,700 tokens. Only the second one is worth deciding about.
+   */
+  L.section('history');
   if (ctx.career?.length) {
     // The join. Without it the model cannot connect "Sean" in KNOWN PEOPLE to
     // "smeadows" in here, and it will correctly refuse to guess.
@@ -745,6 +810,7 @@ function contextBlock(ctx) {
     if (ctx.draft) { L.push(''); L.push(require('./draftiq').draftBlock(ctx.draft, names)); }
   }
 
+  L.section('roster');
   if (ctx.projections?.rows?.length) {
     L.push('');
     L.push(`SLEEPER PROJECTIONS for the person asking, week ${ctx.projections.week} ` +
@@ -768,6 +834,7 @@ function contextBlock(ctx) {
    * Ordered here, not by the model. "Worst trade" is a ranking, and a ranking
    * derived in the prompt is the one thing nothing downstream can check.
    */
+  L.section('trades');
   if (ctx.gradedTrades?.length) {
     const nameOf = rid => {
       const m = (ctx.members || []).find(x => Number(x.rosterId) === Number(rid));
@@ -946,6 +1013,7 @@ function contextBlock(ctx) {
     }
   }
 
+  L.section('draft');
   if (ctx.draftSchedule && ctx.draftSchedule.status !== 'complete') {
     const d = ctx.draftSchedule;
     L.push('');
@@ -1183,6 +1251,7 @@ function contextBlock(ctx) {
         + ' and the commissioner sets it in Sleeper. You do not set it.');
   }
 
+  L.section('core');
   if (ctx.unknowns.length) {
     L.push('');
     L.push('WHAT YOU DO NOT KNOW — say so plainly if asked about any of this:');

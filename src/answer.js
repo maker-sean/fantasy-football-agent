@@ -61,7 +61,29 @@ If the question cannot be answered from the context, say what you would need. Do
  */
 async function generateAnswer(question, ctx, opts = {}) {
   const { effort = 'medium', model = MODEL, recentChat = [], spice = 1,
-          client = new Anthropic() } = opts;
+          retrieve = process.env.RETRIEVE === '1', client = new Anthropic() } = opts;
+
+  /*
+   * Load only the sections the question needs, when asked to.
+   *
+   * Off by default while it is being measured. On, it costs a round trip to a
+   * small model and saves most of the block: the full context is 5,738 tokens
+   * for a mature league and the core everything shares is 635.
+   */
+  let only = null;
+  let routing = null;
+  let lookup = '';
+  if (retrieve) {
+    const routed = await require('./retrieve').route(question, { recentChat, client });
+    only = routed.sections;
+    routing = { ...routed.meta, lookup: routed.lookup };
+    if (routed.lookup) {
+      const text = await require('./retrievers').run(ctx, routed.lookup);
+      // Placed after the context and labelled as computed for THIS question, so
+      // it outranks the standing blocks when the two orderings differ.
+      if (text) lookup = `\n\nLOOKUP RUN FOR THIS QUESTION (computed just now, and more specific than anything above):\n${text}`;
+    }
+  }
 
   /*
    * Tone, which replies did not have.
@@ -94,7 +116,7 @@ async function generateAnswer(question, ctx, opts = {}) {
     messages: [
       {
         role: 'user',
-        content: `${toneNote}\n\nLEAGUE CONTEXT:\n${contextBlock(ctx)}${chatLines}\n\nSomeone in the group chat just said to you:\n"${question}"\n\nReply.`,
+        content: `${toneNote}\n\nLEAGUE CONTEXT:\n${contextBlock(ctx, { only })}${lookup}${chatLines}\n\nSomeone in the group chat just said to you:\n"${question}"\n\nReply.`,
       },
     ],
   });
@@ -114,6 +136,8 @@ async function generateAnswer(question, ctx, opts = {}) {
       usage: response.usage,
       unknowns: ctx.unknowns.length,
       identityLinked: ctx.identityLinked,
+      sections: only,
+      routing,
     },
   };
 }
