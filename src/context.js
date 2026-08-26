@@ -364,6 +364,24 @@ async function leagueContext(leagueId, opts = {}) {
      * list presented as complete is an absence rendered as a fact — the same
      * shape as a stale draft date announced as upcoming.
      */
+    /*
+     * EVERY trade, one line each, alongside the five told in full.
+     *
+     * Five itemised out of sixteen makes "who loses most" answerable only as
+     * "two of the five worst", which is a much weaker claim than the record
+     * supports — and it made the bot deny two real 2022 trades existed. The
+     * detail is what costs tokens: four or five lines a trade, paid on every
+     * reply whether anyone asks about trades or not. A single line each is
+     * cheap enough to carry all of them.
+     */
+    ctx.tradeIndex = await db.query(
+      `select t.season, t.week, t.verdict
+         from trades t join leagues l on l.id = t.league_id
+        where l.sleeper_league_id = any($1::text[]) and t.verdict is not null
+        order by t.season, t.week`, [chainIds])
+      .then(r => r.rows)
+      .catch(() => []);
+
     ctx.tradeCounts = await db.query(
       `select t.season, count(*)::int n
          from trades t join leagues l on l.id = t.league_id
@@ -770,12 +788,93 @@ function contextBlock(ctx) {
       L.push('  How many settled trades each season actually had: '
            + (ctx.tradeCounts || []).map(r => `${r.season} ${r.n}`).join(', '));
     }
+
+    /*
+     * The full record, one line each. Enough to count them, to say who loses
+     * most, and to answer about a season none of the top five touched — none of
+     * which the itemised five could support.
+     */
+    if (ctx.tradeIndex?.length) {
+      L.push('  EVERY settled trade, winner first, then margin and value over replacement:');
+      for (const t of ctx.tradeIndex) {
+        const v = t.verdict;
+        if (!v?.sides || v.sides.length !== 2) continue;
+        const [w2, l2] = v.sides;
+        /*
+         * "Winner" here means by RAW POINTS, because that is how the sides are
+         * sorted. A NEGATIVE vorp margin means value says the opposite — the
+         * side that scored more got the worse asset — and printing the two
+         * numbers side by side without saying so invites reading them as
+         * agreeing when they contradict.
+         */
+        const flipped = v.vorpMargin != null && v.vorpMargin < 0;
+        L.push(`    ${t.season} wk${String(t.week).padStart(2)}  ${nameOf(w2.rosterId)}`
+             + ` outscored ${nameOf(l2.rosterId)} by ${v.margin}`
+             + (v.vorpMargin != null
+                ? flipped
+                  ? `, but by VALUE ${nameOf(l2.rosterId)} won it, ${Math.abs(v.vorpMargin)}`
+                  : `, VORP ${v.vorpMargin}`
+                : ''));
+      }
+      L.push('  Counting across THIS list is safe — it is every one on record. But count by the'
+           + ' measure you name: outscoring and winning on value are different, and a few of'
+           + ' these split.');
+
+      /*
+       * The tally, COMPUTED.
+       *
+       * Asked who loses most, the bot refused — "I don't have a loss count" —
+       * with sixteen lines in front of it that plainly contain one. That is the
+       * over-refusal this codebase keeps correcting: it declined to have an
+       * opinion when what was actually needed was arithmetic.
+       *
+       * So the arithmetic is done here, both ways, because a manager who
+       * outscores and loses on value is a different story from one who just
+       * loses — and asking the model to tally sixteen rows is asking for the
+       * one mistake it reliably makes.
+       */
+      const tally = new Map();
+      const bump = (rid, key) => {
+        const k = nameOf(rid);
+        const e = tally.get(k) || { won: 0, lost: 0, valueWon: 0, valueLost: 0 };
+        e[key]++; tally.set(k, e);
+      };
+      for (const t of ctx.tradeIndex) {
+        const v = t.verdict;
+        if (!v?.sides || v.sides.length !== 2) continue;
+        const [w2, l2] = v.sides;
+        bump(w2.rosterId, 'won');
+        bump(l2.rosterId, 'lost');
+        if (v.vorpMargin == null) continue;
+        bump(v.vorpMargin < 0 ? l2.rosterId : w2.rosterId, 'valueWon');
+        bump(v.vorpMargin < 0 ? w2.rosterId : l2.rosterId, 'valueLost');
+      }
+      const ranked = [...tally].sort((a, b) => b[1].lost - a[1].lost);
+      L.push('  TRADE RECORD per manager (won-lost by points, then by value):');
+      for (const [who, r] of ranked) {
+        L.push(`    ${who}: ${r.won}-${r.lost} on points, ${r.valueWon}-${r.valueLost} on value`);
+      }
+    }
     for (const t of ctx.gradedTrades) {
       const v = t.verdict;
       if (!v?.sides || v.sides.length !== 2) continue;
       const [win, lose] = v.sides;
-      const side = s2 => `${nameOf(s2.rosterId)} got `
-        + s2.players.map(p => `${p.name} (${p.startedPoints.toFixed(1)})`).join(', ');
+      /*
+       * GOT and GAVE UP, both stated.
+       *
+       * Listing only what a side received leaves the other half of every trade
+       * sentence unwritten, and the model completes it by inference. It put
+       * Michael Thomas on the wrong side of the 2021 week 5 deal because he
+       * scored 0.0 — a zero looks like the throwaway you trade away rather than
+       * the dud you accept — then named a bundle "including" him that did not
+       * contain him. Printing both halves removes the slot being filled.
+       */
+      const side = s2 => {
+        const got = s2.players.map(p => `${p.name} (${p.startedPoints.toFixed(1)})`).join(', ');
+        const gave = (s2.gaveUp || []).map(p => p.name).join(', ');
+        return `${nameOf(s2.rosterId)} GOT ${got}`
+          + (gave ? `, and GAVE UP ${gave}` : '');
+      };
       L.push(`  ${t.season} week ${t.week}, margin ${v.margin}:`);
       L.push(`    won  — ${side(win)} = ${win.startedPoints}`);
       L.push(`    lost — ${side(lose)} = ${lose.startedPoints}`);

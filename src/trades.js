@@ -506,6 +506,30 @@ function scoreTrade(trade, snapshotsByWeek, players, { season = null, baselines 
     }
   }
 
+  /*
+   * BOTH HALVES OF THE SENTENCE.
+   *
+   * The block only ever said what a side RECEIVED, so a model writing the
+   * natural sentence — X got A for B — had to invent B. On the 2021 week 5
+   * trade it moved Michael Thomas across the table because he scored 0.0, and a
+   * zero reads as the throwaway you give up rather than the dud you received.
+   * It then listed the other side's three players as the bundle "including"
+   * him, and he was not among them.
+   *
+   * That is not a fusing error, it is a half-written sentence being completed
+   * by inference. drops has the answer — player id to the roster that LOST him
+   * — so printing both halves removes the slot entirely.
+   */
+  const drops = trade.raw?.drops || {};
+  for (const side of sides) {
+    side.gaveUp = Object.entries(drops)
+      .filter(([, rid]) => Number(rid) === side.rosterId)
+      .map(([pid]) => ({
+        playerId: pid,
+        name: players.get(pid)?.full_name || `player ${pid}`,
+      }));
+  }
+
   sides.sort((a, b) => b.startedPoints - a.startedPoints);
   const margin = sides.length === 2
     ? Number((sides[0].startedPoints - sides[1].startedPoints).toFixed(2))
