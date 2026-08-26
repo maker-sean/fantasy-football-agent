@@ -126,6 +126,29 @@ const dies = msg => ({ messages: { create: async () => { throw new Error(msg); }
     assert.strictEqual(await retrievers.run({}, { name: 'nope', args: {} }), null);
   });
 
+  console.log('\nthe lookup and its section are not both loaded');
+
+  await it('career_extremes drops the history section it is a slice of', async () => {
+    const r = await route('q', { client: says('sections: history\nlookup: career_extremes metric=luck') });
+    assert.deepStrictEqual(r.sections, [], 'history duplicates what the lookup returns');
+    assert.strictEqual(r.lookup.args.metric, 'luck');
+  });
+
+  await it('metric=drafting drops draft_history, not history', async () => {
+    const r = await route('q', { client: says('sections: history, draft_history\nlookup: career_extremes metric=drafting') });
+    assert.deepStrictEqual(r.sections, ['history']);
+  });
+
+  await it('history alone still survives when no lookup is asked for', async () => {
+    const r = await route('q', { client: says('sections: history\nlookup: none') });
+    assert.deepStrictEqual(r.sections, ['history']);
+  });
+
+  await it('a metric outside the enum cannot reach the query', async () => {
+    const r = await route('q', { client: says('sections: none\nlookup: career_extremes metric=salaries') });
+    assert.deepStrictEqual(r.lookup.args, {});
+  });
+
   console.log('\nthe trade lookup, against real rows');
 
   const db = require('../src/db');
@@ -240,6 +263,34 @@ const dies = msg => ({ messages: { create: async () => { throw new Error(msg); }
     await it('a manager nobody matches says so instead of returning the league', async () => {
       const out = await retrievers.run(ctx, { name: 'trade_extremes', args: { order: 'even', manager: 'Nobodyhere' } });
       assert.ok(/No settled trade on record/.test(out), out);
+    });
+
+    await it('every history metric returns something, none reports a false absence', async () => {
+      /*
+       * game_records is the reason this exists. ctx.gameRecords is an OBJECT of
+       * computed extremes, not an array, and a .length guard here reported
+       * "nothing is computed" for a league with 582 games on record. A false
+       * absence reaches the chat as "we have never done that", which is worse
+       * than any number of wasted tokens.
+       */
+      const { NAMES: _n, QUERIES } = require('../src/retrievers');
+      for (const metric of QUERIES.career_extremes.args.metric) {
+        const out = await retrievers.run(ctx, { name: 'career_extremes', args: { metric } });
+        assert.ok(out, `${metric} returned nothing at all`);
+        assert.ok(!/Nothing is computed/.test(out), `${metric} reported a false absence`);
+      }
+    });
+
+    await it('a champion line carries its own regular season place', async () => {
+      /*
+       * Asked who won last year the bot said Kellan finished 5th one time and 1st
+       * the next; he finished 4th. Both required joining the champion line to a
+       * TEAM NAME in the final table, which nothing hands it.
+       */
+      const out = await retrievers.run(ctx, { name: 'career_extremes', args: { metric: 'championships' } });
+      for (const line of out.split('\n').filter(l => /^\s+\d{4}: /.test(l))) {
+        assert.ok(/regular season table/.test(line), `champion line lacks its place: ${line}`);
+      }
     });
 
     await it('a season filter does not leak other seasons', async () => {

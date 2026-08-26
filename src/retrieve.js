@@ -40,6 +40,8 @@ const SECTIONS = {
          + 'games, worst benched players. ANY question about a previous year, about '
          + 'who is best or worst all time, about records, or about what usually '
          + 'happens. Also needed for "who is good at this" and rivalry questions.',
+  draft_history: 'Drafts of PAST seasons: which picks turned out well or badly, who '
+               + 'has hit on late rounds, who busts early ones. Not the current draft.',
   trades: 'Every settled trade, who won and lost each, by points and by value over '
         + 'replacement, what each side gave up and got, and each manager\'s trade '
         + 'win-loss record. Any question about trading, fleecing, a specific past '
@@ -65,6 +67,11 @@ Some facts are always present and are NEVER a reason to name a section: the leag
 
 You may also request ONE lookup, which runs a real query and computes an answer that is not in any section. Lookups available:
 - trade_extremes: the fairest or the most lopsided trades. Arguments: order=even or order=lopsided (required), manager=<name> (optional), season=<year> (optional).
+- career_extremes: ONE area of league history, computed. Argument metric= exactly one of: records (career win-loss, best and worst), scoring (points per season), average_finish, luck (record against scoring), championships, toilet_bowls, activity (adds and drops), game_records (highest and lowest scores, blowouts, closest games), benched (worst lineup calls), drafting (past draft picks).
+
+career_extremes is a SLICE OF THE HISTORY SECTION and carries the same computed facts for that area. So when you request one, do NOT also name the history section — that loads the whole thing to answer what the lookup already answers, which is the most expensive mistake available to you here. Name history WITHOUT a lookup when the question spans several of those areas at once, or when you genuinely cannot tell which one it wants.
+
+The same goes for draft_history and metric=drafting: they are the same facts. Ask for one or the other, never both.
 
 Ask for a lookup whenever the question wants a RANKING or an EXTREME. That covers the closest or fairest trade, the worst or biggest one, and any of those narrowed to one manager or one season.
 
@@ -170,8 +177,27 @@ async function route(question, opts = {}) {
     return { sections: NAMES, lookup, meta: { fellBack: 'unparsed', raw, ms: Date.now() - started } };
   }
 
+  /*
+   * A lookup and the section it came out of are the same facts twice.
+   *
+   * career_extremes is a slice of the history section; metric=drafting is the
+   * draft_history section. Asked for both, the reply pays for the whole block
+   * to answer what the slice already answered — and the router kept doing it
+   * on every history question no matter how the instruction was worded. It is
+   * a rule about the menu rather than a judgement about the question, so it
+   * belongs in code, where it holds every time.
+   *
+   * Dropped here rather than by not offering it: the router still needs to be
+   * able to name history ALONE, for questions that span several areas at once.
+   */
+  let sections = [...new Set(picked)];
+  if (lookup?.name === 'career_extremes') {
+    const covers = lookup.args.metric === 'drafting' ? 'draft_history' : 'history';
+    sections = sections.filter(n => n !== covers);
+  }
+
   return {
-    sections: [...new Set(picked)],
+    sections,
     lookup,
     meta: { raw, ms: Date.now() - started, model: response.model, usage: response.usage },
   };

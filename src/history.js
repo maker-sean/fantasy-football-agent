@@ -694,18 +694,37 @@ function activityBlock(rows, names = new Map()) {
  * say which year, and "when did Marlow win" is how the question gets asked. Six
  * lines, and they are the six the league argues about most.
  */
+/*
+ * Where a bracket winner (or loser) actually finished the regular season.
+ *
+ * The champion lines and the final table are two facts, and joining them is the
+ * operation that keeps going wrong: asked who won last year the bot said Kellan
+ * finished 5th one time and 1st the next, when he finished 4th. Both readings
+ * required matching "Kellan (jcongress)" to a TEAM NAME in the table, which is a
+ * join nothing hands it. So the place is printed on the line that names him.
+ */
+function placeIn(row, season) {
+  const f = (row.finishes || []).find(x => String(x.season) === String(season));
+  return f ? f.place : null;
+}
+
 function championBlock(rows, names = new Map()) {
   const bySeason = [];
   for (const r of rows) {
     const known = names.get(r.userId);
     const who = known && r.name && known !== r.name ? `${known} (${r.name})` : known || r.name || r.userId;
-    for (const season of r.titleSeasons || []) bySeason.push({ season, who });
+    for (const season of r.titleSeasons || []) {
+      bySeason.push({ season, who, place: placeIn(r, season) });
+    }
   }
   if (!bySeason.length) return '';
   bySeason.sort((a, b) => String(b.season).localeCompare(String(a.season)));
   return ['CHAMPIONS by season (the playoff bracket, which is what "won it" means. Not the same'
-        + ' as topping the regular season table):']
-    .concat(bySeason.map(t => `  ${t.season}: ${t.who}`)).join('\n');
+        + ' as topping the regular season table. Each line states where that champion actually'
+        + ' finished the table, so never read a place off the standings for them):']
+    .concat(bySeason.map(t => `  ${t.season}: ${t.who}`
+      + (t.place ? `, who finished ${ordinal(t.place)} in the regular season table` : '')))
+    .join('\n');
 }
 
 /**
@@ -720,13 +739,18 @@ function toiletBlock(rows, names = new Map()) {
   for (const r of rows) {
     const known = names.get(r.userId);
     const who = known && r.name && known !== r.name ? `${known} (${r.name})` : known || r.name || r.userId;
-    for (const season of r.toiletSeasons || []) bySeason.push({ season, who });
+    for (const season of r.toiletSeasons || []) {
+      bySeason.push({ season, who, place: placeIn(r, season) });
+    }
   }
   if (!bySeason.length) return '';
   bySeason.sort((a, b) => String(b.season).localeCompare(String(a.season)));
   return ['TOILET BOWL, the punishment bracket, by season. This is what the chat means by'
-        + ' "last", and it is NOT the same as finishing bottom of the regular season table:']
-    .concat(bySeason.map(t => `  ${t.season}: ${t.who}`)).join('\n');
+        + ' "last", and it is NOT the same as finishing bottom of the regular season table.'
+        + ' Each line states where they actually finished it:']
+    .concat(bySeason.map(t => `  ${t.season}: ${t.who}`
+      + (t.place ? `, who finished ${ordinal(t.place)} in the regular season table` : '')))
+    .join('\n');
 }
 
 /**

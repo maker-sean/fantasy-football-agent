@@ -30,6 +30,75 @@ const nameFor = (ctx, rid) => {
 };
 
 const QUERIES = {
+
+  /*
+   * One slice of league history, instead of all nine.
+   *
+   * The history section is 2,550 tokens and is nine precomputed rankings, each
+   * carrying the prose that explains how to read it — that "highest average
+   * finish" means the lowest number, that busier is not better, that the 2025
+   * bracket came out reversed from the table. None of that is padding; every
+   * sentence is there because the model got that exact thing wrong once. But
+   * all of it shipped on every reply that touched history, to answer a question
+   * that wanted one ranking.
+   *
+   * These call the SAME builders src/context.js calls. Nothing is recomputed
+   * here and no ranking is reimplemented: rewriting nine working rankings to
+   * save tokens would be trading a solved problem for an unsolved one. The only
+   * thing that changes is how many of them ship.
+   */
+  career_extremes: {
+    describe: 'One area of league history, computed. metric=records for career win-loss '
+            + 'and the best and worst of them; scoring for points per season; '
+            + 'average_finish for mean place; luck for record against scoring; '
+            + 'championships or toilet_bowls for the brackets; activity for adds and '
+            + 'drops; game_records for highest and lowest scores, blowouts and closest '
+            + 'games; benched for the worst lineup calls; drafting for draft picks.',
+    args: {
+      metric: ['records', 'scoring', 'average_finish', 'luck', 'championships',
+               'toilet_bowls', 'activity', 'game_records', 'benched', 'drafting'],
+    },
+    async run(ctx, args) {
+      const H = require('./history');
+      const names = new Map((ctx.members || [])
+        .filter(m => m.sleeperUserId && m.name)
+        .map(m => [m.sleeperUserId, m.name]));
+
+      const career = ctx.career || [];
+      const BY = {
+        records: () => [H.careerBlock(career, names), H.careerExtremes(career, names)],
+        scoring: () => [H.scoringBlock(career, names)],
+        average_finish: () => [H.averageFinishBlock(career, names)],
+        luck: () => [H.luckBlock(career, names)],
+        championships: () => [H.championBlock(career, names)],
+        toilet_bowls: () => [H.toiletBlock(career, names)],
+        activity: () => [H.activityBlock(career, names)],
+        // Guarded exactly as src/context.js guards it. gameRecords is an OBJECT
+        // of computed extremes, not an array, so a .length check here silently
+        // reported "nothing computed" for a league with 582 games on record —
+        // a false absence, which is the one failure mode this must never have.
+        game_records: () => [ctx.gameRecords ? H.gameRecordsBlock(ctx.gameRecords, names) : null],
+        benched: () => [ctx.benchMistakes?.length ? H.benchBlock(ctx.benchMistakes, names) : null],
+        drafting: () => [ctx.draft ? require('./draftiq').draftBlock(ctx.draft, names) : null],
+      };
+
+      const pick = BY[args.metric];
+      if (!pick) return null;
+      const parts = pick().filter(Boolean);
+      if (!parts.length) {
+        /*
+         * Nothing computed is NOT nothing on record. Said plainly, because the
+         * alternative reads to the model as an absence and comes back to the
+         * chat as "we have never done that".
+         */
+        return `Nothing is computed for ${args.metric} in this league — the underlying`
+             + ' seasons may not be captured. Say you cannot pull it up, not that it did'
+             + ' not happen.';
+      }
+      return `LEAGUE HISTORY LOOKUP (${args.metric}), computed for this question. Any`
+           + ' superlative stated inside it is safe to quote as fact:\n' + parts.join('\n');
+    },
+  },
   /*
    * Trades at either end of the fairness scale, optionally for one manager or
    * one season.

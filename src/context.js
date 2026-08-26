@@ -807,6 +807,18 @@ function contextBlock(ctx, opts = {}) {
      *
      * A failure here costs the colour and nothing else, same as career.
      */
+    /*
+     * Its own section, though it stays inside the career block for `names`.
+     *
+     * This is the largest single block in the whole context — a thousand
+     * tokens, more than a quarter of all league history — and it was reached
+     * only by loading six seasons of careers alongside it. Which meant a
+     * question about drafting paid for records and standings to get here, and
+     * every question about last season's champion paid for this. The router
+     * covered for it by pulling history whenever a draft came up, so nothing
+     * was ever wrong; it was just expensive in both directions.
+     */
+    L.section('draft_history');
     if (ctx.draft) { L.push(''); L.push(require('./draftiq').draftBlock(ctx.draft, names)); }
   }
 
