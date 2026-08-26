@@ -862,7 +862,10 @@ function contextBlock(ctx, opts = {}) {
      * which the itemised five could support.
      */
     if (ctx.tradeIndex?.length) {
-      L.push('  EVERY settled trade, winner first, then margin and value over replacement:');
+      L.push('  EVERY settled trade: who got whom, then margin and value over replacement.');
+      L.push('  NEVER name a trade without saying which players changed hands. A trade given as'
+           + ' a scoreline between two managers is the shape that had you describing a deal and'
+           + ' then inventing the players in it. The names are on every line below, so use them.');
       for (const t of ctx.tradeIndex) {
         const v = t.verdict;
         if (!v?.sides || v.sides.length !== 2) continue;
@@ -875,7 +878,12 @@ function contextBlock(ctx, opts = {}) {
          * agreeing when they contradict.
          */
         const flipped = v.vorpMargin != null && v.vorpMargin < 0;
-        L.push(`    ${t.season} wk${String(t.week).padStart(2)}  ${nameOf(w2.rosterId)}`
+        // What each side actually received, so the line can be quoted whole and
+        // never needs a player fetched from a neighbouring entry.
+        const got = s2 => `${nameOf(s2.rosterId)} got `
+          + ((s2.players || []).map(pl => pl.name).join(', ') || 'no players');
+        L.push(`    ${t.season} wk${String(t.week).padStart(2)}  ${got(w2)}; ${got(l2)}`);
+        L.push(`        ${nameOf(w2.rosterId)}`
              + ` outscored ${nameOf(l2.rosterId)} by ${v.margin}`
              + (v.vorpMargin != null
                 ? flipped
@@ -920,6 +928,40 @@ function contextBlock(ctx, opts = {}) {
       L.push('  TRADE RECORD per manager (won-lost by points, then by value):');
       for (const [who, r] of ranked) {
         L.push(`    ${who}: ${r.won}-${r.lost} on points, ${r.valueWon}-${r.valueLost} on value`);
+      }
+
+      /*
+       * The superlatives off this table, computed, because reading nine rows
+       * and picking one is a ranking.
+       *
+       * Asked who loses most, the reply came back "Whitlock and Sorenson are both 0-3
+       * on value" off a table that says Whitlock 0-3 and Sorenson 0-2. Both numbers
+       * were printed correctly and one got carried onto the neighbouring name,
+       * which is the failure that keeps recurring whenever the answer needs two
+       * lines welded rather than one quoted.
+       *
+       * "Loses the most" is also genuinely two questions — most losses, or
+       * worst record — and the two give different names here, so both are
+       * stated rather than picked between.
+       */
+      const most = (key) => {
+        const top = Math.max(...[...tally.values()].map(r => r[key]));
+        const who = [...tally].filter(([, r]) => r[key] === top).map(([n]) => n);
+        return { top, who };
+      };
+      const winless = [...tally].filter(([, r]) => r.won === 0 && r.lost > 0)
+        .sort((a, b) => b[1].lost - a[1].lost);
+      const ml = most('lost');
+      L.push(`  MOST LOSSES BY POINTS: ${ml.who.join(' and ')} at ${ml.top}`
+           + `${ml.who.length > 1 ? ' — that is a tie, say so' : ''}.`);
+      const mvl = most('valueLost');
+      L.push(`  MOST LOSSES BY VALUE: ${mvl.who.join(' and ')} at ${mvl.top}`
+           + `${mvl.who.length > 1 ? ' — that is a tie, say so' : ''}.`);
+      if (winless.length) {
+        L.push('  WINLESS (never won one on points): '
+             + winless.map(([n, r]) => `${n} at 0-${r.lost}`).join(', ')
+             + '. Most losses and worst record are different questions and can name different'
+             + ' people. Answer the one asked, and do not merge two managers into one record.');
       }
     }
     for (const t of ctx.gradedTrades) {

@@ -68,7 +68,9 @@ You may also request ONE lookup, which runs a real query and computes an answer 
 
 Ask for a lookup whenever the question wants a RANKING or an EXTREME. That covers the closest or fairest trade, the worst or biggest one, and any of those narrowed to one manager or one season.
 
-When you ask for a lookup that fully answers the question, do NOT also name the section it came from. The lookup is computed for this exact question and is more precise than the standing block, and loading both costs more and answers no better.
+Drop the section only when the lookup answers the WHOLE question. trade_extremes finds individual trades at one end of a range, and nothing else. It does NOT carry per-manager records, counts of trades won and lost, or who is best or worst at trading overall — those live in the trades section, so a question about a MANAGER rather than about a TRADE needs the section, with or without a lookup.
+
+"What was the worst trade" is about a trade: lookup alone. "Who is the worst trader" is about a manager: name the trades section.
 
 Reply in exactly this shape and nothing else:
 sections: <comma separated names, or none>

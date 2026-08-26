@@ -51,16 +51,18 @@ const QUERIES = {
     async run(ctx, args) {
       const order = args.order === 'even' ? 'even' : 'lopsided';
       const { rows } = await db.query(
-        `select t.season, t.week, t.verdict
+        `select t.season, t.week, t.verdict, t.draft_picks
            from trades t join leagues l on l.id = t.league_id
           where l.sleeper_league_id = any($1::text[]) and t.verdict is not null
-            and ($2::text is null or t.season = $2)`,
+            and ($2::text is null or t.season = $2)
+          order by t.season, t.week`,
         [ctx.chainIds || [], args.season || null]);
 
       let items = rows
         .filter(r => r.verdict?.sides?.length === 2)
         .map(r => ({
           season: r.season, week: r.week, v: r.verdict,
+          picks: (r.draft_picks || []).length,
           who: r.verdict.sides.map(s2 => nameFor(ctx, s2.rosterId)),
         }));
 
@@ -109,6 +111,33 @@ const QUERIES = {
       const CAP = 25;
       const top = ranked.slice(0, CAP);
 
+      /*
+       * WHO GOT WHOM, not just who won.
+       *
+       * A trade named as "2020 week 2, Vosberg outscored Brennan by 7.3" is a
+       * scoreline, not a trade — and it is the shape that let the bot describe
+       * a deal and then invent the players in it, because nothing on the line
+       * said what actually changed hands. Every mention of a trade names the
+       * players on both sides.
+       *
+       * Draft picks are counted, never described: the verdict sides carry
+       * players only, so the picks are known to have moved and not known to
+       * whom. Saying "plus 2 draft picks" is the honest version. Silence would
+       * present a partial swap as the whole one.
+       */
+      const side = s2 => {
+        const got = (s2.players || []).map(pl => pl.name);
+        return `${nameFor(ctx, s2.rosterId)} got ${got.length ? got.join(', ') : 'no players'}`
+             + ` (${s2.startedPoints})`;
+      };
+      const swap = i => i.v.sides.map(side).join(', ')
+        + (i.picks ? `, plus ${i.picks} draft pick${i.picks === 1 ? '' : 's'} that also moved` : '');
+
+      const full = i => `${i.season} week ${i.week}: ${swap(i)}.`
+        + ` ${nameFor(ctx, i.v.sides[0].rosterId)} outscored`
+        + ` ${nameFor(ctx, i.v.sides[1].rosterId)} by ${i.v.margin}`
+        + (i.v.vorpMargin != null ? `, value gap ${Math.abs(i.v.vorpMargin)}` : '');
+
       const scope = [args.manager && `involving ${args.manager}`, args.season && `in ${args.season}`]
         .filter(Boolean).join(' ');
       const L = [];
@@ -135,12 +164,7 @@ const QUERIES = {
       } else {
         L.push(`  This is ALL ${items.length} of them, so counting across this list is safe.`);
       }
-      for (const i of top) {
-        const [w2, l2] = i.v.sides;
-        L.push(`  ${i.season} week ${i.week}: ${nameFor(ctx, w2.rosterId)} outscored `
-             + `${nameFor(ctx, l2.rosterId)} by ${i.v.margin}`
-             + (i.v.vorpMargin != null ? `, value gap ${Math.abs(i.v.vorpMargin)}` : ''));
-      }
+      for (const i of top) L.push(`  ${full(i)}`);
 
       /*
        * The tie, stated. At the even end several trades share a value gap of
@@ -157,9 +181,6 @@ const QUERIES = {
        * them. Quoting one line is reliable, welding two together is not, so
        * every line that could be quoted alone now says everything it means.
        */
-      const full = i => `${i.season} week ${i.week}, ${nameFor(ctx, i.v.sides[0].rosterId)}`
-        + ` outscored ${nameFor(ctx, i.v.sides[1].rosterId)} by ${i.v.margin}`
-        + (i.v.vorpMargin != null ? `, value gap ${Math.abs(i.v.vorpMargin)}` : '');
 
       if (order === 'lopsided') {
         const byPoints = top[0];

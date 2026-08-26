@@ -34,7 +34,14 @@ const retrievers = require('../src/retrievers');
  * on "outscored" alone quietly pulled the verdicts in and made the ordering
  * assertions fail against correct output.
  */
-const rowsOf = out => out.split('\n').filter(l => /^\s{2,}\d{4} week \d+: /.test(l));
+/*
+ * EXACTLY two spaces. The tie sublist under "these are exactly tied" renders
+ * through the same formatter and is indented four, and it is deliberately NOT
+ * in margin order — sweeping it into the ordering assertions made this test
+ * fail against correct output, and only sometimes, since the tie order came
+ * back from an unordered query.
+ */
+const rowsOf = out => out.split('\n').filter(l => /^ {2}\d{4} week \d+: /.test(l));
 const marginOf = line => Number(line.match(/ by ([\d.]+)/)[1]);
 
 let pass = 0;
@@ -180,6 +187,34 @@ const dies = msg => ({ messages: { create: async () => { throw new Error(msg); }
           assert.ok(/outscored/.test(line), `verdict line lacks its own names: ${line}`);
           assert.ok(/\d{4} week \d+/.test(line), `verdict line lacks its own date: ${line}`);
         }
+      }
+    });
+
+    await it('every trade named in a lookup says which players changed hands', async () => {
+      /*
+       * A trade rendered as "Vosberg outscored Brennan by 7.3" is a scoreline,
+       * not a trade. That shape is what let the bot describe a deal and then
+       * invent the players in it, so no line may name a trade without naming
+       * both sides of the swap.
+       */
+      for (const args of [{ order: 'even' }, { order: 'lopsided' }, { order: 'even', season: '2022' }]) {
+        const out = await retrievers.run(ctx, { name: 'trade_extremes', args });
+        const named = out.split('\n').filter(l => /\d{4} week \d+/.test(l));
+        assert.ok(named.length, `nothing named for ${JSON.stringify(args)}`);
+        for (const line of named) {
+          assert.ok(/ got /.test(line), `trade named without its players: ${line}`);
+        }
+      }
+    });
+
+    await it('the context index also names players on every trade', async () => {
+      const { contextBlock } = require('../src/context');
+      const block = contextBlock(ctx, { only: ['trades'] });
+      const idx = block.slice(block.indexOf('EVERY settled trade'));
+      const rows = idx.split('\n').filter(l => /^\s+\d{4} wk/.test(l));
+      assert.ok(rows.length > 1, 'expected index rows');
+      for (const line of rows) {
+        assert.ok(/ got /.test(line), `index row without players: ${line}`);
       }
     });
 
