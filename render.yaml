@@ -126,6 +126,21 @@ services:
       - key: ECHO
         sync: false
 
+      # Load only the context a question needs, instead of the whole league on
+      # every reply. Unset means the old behaviour — the full block, every time
+      # — so a forgotten variable costs money and never costs an answer.
+      #
+      # sync:false for the same reason as the two above, and because this is the
+      # toggle most likely to be flipped back in a hurry: it changes what the
+      # bot can see mid-conversation, and the failure it would cause is a reply
+      # that is confidently missing something rather than an obvious outage.
+      #
+      # Worker only. The web service runs the onboarding pre-flight through the
+      # same code path, and that is a gate someone watches once per league —
+      # correctness there is worth more than the tokens.
+      - key: RETRIEVE
+        sync: false
+
       - key: POLL_INTERVAL_SECONDS
         value: "10"
       # Words per MESSAGE, not per recap. A recap may be two short texts.
