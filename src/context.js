@@ -582,11 +582,37 @@ async function leagueContext(leagueId, opts = {}) {
    * else's player the bot has no number, and must say so rather than reach for
    * one.
    */
-  if (opts.forPhone && latest?.payload?.rosters) {
+  if (opts.forPhone) {
     try {
       const me = members.find(m => m.phone === db.normalizePhone(opts.forPhone));
-      const roster = me && (latest.payload.rosters || [])
-        .find(r => r.roster_id === me.sleeper_roster_id);
+
+      /*
+       * THE ROSTER, FROM A SNAPSHOT IF THERE IS ONE AND FROM SLEEPER IF NOT.
+       *
+       * This used to require a snapshot on the LIVE league row, and live rows
+       * carry none until the first capture of the regular season — every
+       * snapshot this project holds hangs off archive rows. Captures are gated
+       * on isRegularSeason, so the first one lands at lock_thu, 20:15 on the
+       * opening Thursday, minutes before kickoff.
+       *
+       * Which meant that from the season starting until that moment — the
+       * Tuesday, Wednesday and Thursday when everybody is actually setting a
+       * lineup — "who should I start" returned nothing at all. The most asked
+       * question of the season, failing in the window it matters most, silently.
+       *
+       * One call, only when there is no snapshot to read. It is not free, but a
+       * dead answer costs more than a request.
+       */
+      let rosterSource = latest?.payload?.rosters || null;
+      if (me && !rosterSource) {
+        rosterSource = await sleeper.rosters(league.sleeper_league_id).catch(err => {
+          console.error('[context] live roster fetch failed:', err.message);
+          return null;
+        });
+      }
+
+      const roster = me && (rosterSource || [])
+        .find(r => Number(r.roster_id) === Number(me.sleeper_roster_id));
 
       if (roster?.players?.length) {
         const state = await sleeper.state();
