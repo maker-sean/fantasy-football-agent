@@ -106,7 +106,20 @@ const JOBS = [
    * fires at :00 :07 ... :56, leaving a ragged four minute gap when the hour
    * rolls. Harmless, and there is no reason to have it.
    */
-  ['delivery',       '*/6 * * * *', () => auditDelivery()],
+  /*
+   * Every two minutes, not every six.
+   *
+   * A reply to a live group failed at 23:57, Sendblue did not admit ERROR until
+   * 00:02, the six-minute pass at 00:00 saw it still QUEUED and skipped, and the
+   * retry did not go out until 00:06 — nine and a half minutes from question to
+   * answer, in a chat where people were talking. Most of that gap was waiting
+   * for the next poll rather than waiting for the provider.
+   *
+   * A pass that finds nothing costs one request, which is why the interval can
+   * come down without much thought. Worst case goes from about twelve minutes
+   * to about four.
+   */
+  ['delivery',       '*/2 * * * *', () => auditDelivery()],
   // Housekeeping.
   ['players',        '0 4 * * *',   () => snapshots.refreshPlayers()],
   /*

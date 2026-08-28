@@ -238,6 +238,50 @@ const errored = (handle, content = 'the reply that never arrived') => ({
     assert.strictEqual(delivery.alertText(null), null);
   });
 
+  console.log('\nwhich transport carried it');
+
+  await it('a chat with no recorded transport has no history to report', async () => {
+    assert.strictEqual(await delivery.transportHistory('sb_group_nothing_here'), null);
+  });
+
+  await it('a null chat is null-safe', async () => {
+    assert.strictEqual(await delivery.transportHistory(null), null);
+  });
+
+  await it('successes and failures are separated by transport', async () => {
+    /*
+     * The case this exists for: a group reply failed on iMessage with 5504 and
+     * the automatic retry succeeded on SMS. Both facts sat in Sendblue's feed
+     * and neither was in this database, so "this chat works on SMS" could not
+     * be asked of our own data.
+     */
+    const chat = 'sb_group_transport_test';
+    await db.query('delete from send_log where chat_id = $1', [chat]);
+    for (const [service, delivered] of [['iMessage', 'ERROR'], ['iMessage', 'ERROR'], ['SMS', 'SENT']]) {
+      await db.query(
+        `insert into send_log (at, chat_id, is_group, ok, status, delivery, service, message_handle)
+         values (now(), $1, true, true, 'QUEUED', $2, $3, gen_random_uuid()::text)`,
+        [chat, delivered, service]);
+    }
+    const h = await delivery.transportHistory(chat);
+    assert.deepStrictEqual(h.failed, { iMessage: 2 }, 'iMessage failures must not count as landings');
+    assert.deepStrictEqual(h.worked, { SMS: 1 });
+    assert.match(h.summary, /landed on SMS 1x/);
+    assert.match(h.summary, /failed on iMessage 2x/);
+    await db.query('delete from send_log where chat_id = $1', [chat]);
+  });
+
+  await it('the alert carries the pattern, so one bad night reads differently from a chronic chat', async () => {
+    const withHistory = delivery.alertText([{
+      state: 'ERROR', code: 5504, service: 'iMessage', message: 'x', preview: 'y', retried: true,
+      history: { summary: 'landed on SMS 5x; failed on iMessage 1x' },
+    }]);
+    assert.match(withHistory, /on iMessage/, 'the failing transport must be named');
+    assert.match(withHistory, /landed on SMS 5x/);
+    assert.match(delivery.alertText([{ state: 'ERROR', message: 'x', preview: 'y', retried: true }]),
+      /did NOT arrive/);
+  });
+
   await db.query('delete from send_log where chat_id = $1', [CHAT]);
   console.log(`\n${pass} passing`);
   await db.pool.end();

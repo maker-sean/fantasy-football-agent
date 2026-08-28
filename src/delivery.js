@@ -70,9 +70,10 @@ async function reconcile(provider, { limit = 50, windowHours = 6,
 
     await db.query(
       `update send_log set delivery = $2, checked_at = now(),
-              error = coalesce(error, $3)
+              error = coalesce(error, $3), service = coalesce(service, $4)
         where id = $1`,
-      [row.id, state, m.error_message ? String(m.error_message).slice(0, 500) : null]);
+      [row.id, state, m.error_message ? String(m.error_message).slice(0, 500) : null,
+       m.service ? String(m.service).slice(0, 40) : null]);
     checked++;
 
     // Landed: drop the handle so nothing can revisit this decision. Leaving it
@@ -92,6 +93,7 @@ async function reconcile(provider, { limit = 50, windowHours = 6,
         service: m.service || null,
         preview: String(m.content || '').slice(0, 80),
         retried: false,
+        history: await transportHistory(row.chat_id).catch(() => null),
       };
 
       /*
@@ -177,6 +179,42 @@ async function reconcile(provider, { limit = 50, windowHours = 6,
 }
 
 /** One line an operator can act on, or null when everything landed. */
+
+/**
+ * What has actually worked, and what has not, for one chat.
+ *
+ * Sendblue chooses the transport for a group send — the request body has no
+ * field to ask with — so this cannot steer a send. It answers a different and
+ * still useful question: is this chat chronically broken on one transport, or
+ * did it have one bad night? A reply that failed on iMessage and succeeded on
+ * SMS looks like a blip in isolation and like a pattern in aggregate, and only
+ * the aggregate is worth taking to Sendblue.
+ */
+async function transportHistory(chatId, { days = 30 } = {}) {
+  if (!chatId) return null;
+  const { rows } = await db.query(
+    `select service, delivery, count(*)::int n
+       from send_log
+      where chat_id = $1 and service is not null
+        and at > now() - ($2 || ' days')::interval
+      group by 1, 2`, [chatId, String(days)]);
+  if (!rows.length) return null;
+
+  const worked = new Map();
+  const failed = new Map();
+  for (const r of rows) {
+    const bucket = FAILED.has(String(r.delivery || '').toUpperCase()) ? failed : worked;
+    bucket.set(r.service, (bucket.get(r.service) || 0) + r.n);
+  }
+  const fmt = m => [...m].map(([k, v]) => `${k} ${v}x`).join(', ');
+  return {
+    worked: Object.fromEntries(worked),
+    failed: Object.fromEntries(failed),
+    summary: [worked.size ? `landed on ${fmt(worked)}` : null,
+              failed.size ? `failed on ${fmt(failed)}` : null].filter(Boolean).join('; '),
+  };
+}
+
 function alertText(failures) {
   if (!failures?.length) return null;
   const one = failures[0];
@@ -192,9 +230,18 @@ function alertText(failures) {
     ? 'I sent it again.'
     : one.retryError ? `The resend also failed: ${one.retryError}`
     : 'Too old to resend automatically.';
+  /*
+   * The chat's own record, when there is one. "It failed" and "it has failed on
+   * iMessage four times this month and has never once failed on SMS" call for
+   * different responses, and only the second is worth a support ticket.
+   */
+  const pattern = one.history?.summary
+    ? `\nThis chat: ${one.history.summary}.`
+    : '';
   return `A message to the league did NOT arrive${rest}. ${outcome}\n\n`
-       + `${one.state}${one.code ? ' ' + one.code : ''}: ${one.message || 'no detail'}\n`
+       + `${one.state}${one.code ? ' ' + one.code : ''}${one.service ? ` on ${one.service}` : ''}`
+       + `: ${one.message || 'no detail'}${pattern}\n`
        + `"${one.preview}"`;
 }
 
-module.exports = { reconcile, alertText, FAILED };
+module.exports = { reconcile, alertText, transportHistory, FAILED };
