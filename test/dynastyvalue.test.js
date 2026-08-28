@@ -81,6 +81,28 @@ const it = async (n, f) => {
     assert.ok('starterInjury' in flags[0], 'the starter injury must be reported, even when null');
   });
 
+  await it('the nearest man AHEAD on the depth chart is the one named', async () => {
+    /*
+     * Matching on team and position alone is true of four Raiders running backs
+     * at once, so the flag said "a handcuff" where the honest claim was "one of
+     * several", and a trade was argued down on that vagueness. Depth order
+     * settles who the backup is actually behind.
+     */
+    const { rows } = await db.query(
+      `select player_id, depth_chart_order from players
+        where team is not null and position = 'RB' and depth_chart_order in (1, 2)
+        order by team, depth_chart_order limit 2`);
+    if (rows.length < 2 || rows[0].depth_chart_order !== 1) {
+      return console.log('       (skip: no ordered backfield on file)');
+    }
+    const [starter, backup] = rows;
+    const flags = await dv.rosterFlags([backup.player_id], [starter.player_id]);
+    assert.strictEqual(flags.length, 1);
+    assert.strictEqual(flags[0].starterDepth, 1);
+    assert.strictEqual(flags[0].depth, 2);
+    assert.strictEqual(flags[0].immediate, true, 'RB2 behind RB1 is the immediate handcuff');
+  });
+
   await it('different teams are not a handcuff', async () => {
     const { rows } = await db.query(
       `select player_id, team from players

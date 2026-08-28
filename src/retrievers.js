@@ -32,6 +32,166 @@ const nameFor = (ctx, rid) => {
 const QUERIES = {
 
   /*
+   * Who is hurt, and how badly.
+   *
+   * The players table has carried injury_status for 718 men, refreshed every
+   * morning, since long before this existed — and context.js mentioned injury
+   * exactly nowhere, so the bot answered "is he playing?" with "check Sleeper"
+   * about a row it already had. The most asked question in a fantasy group chat
+   * and it was a plumbing gap.
+   *
+   * A LOOKUP rather than a standing section, because the full injury list is
+   * hundreds of rows and any one question wants two of them.
+   */
+  injuries: {
+    describe: 'Injury status for a named player, or for a manager\'s roster, or the whole '
+            + 'league. Use for "is X playing", "is X hurt", "who is banged up on my team", '
+            + '"any injuries I should know about". Arguments: player=<name> (optional), '
+            + 'manager=<name> (optional). With neither, reports the notable injuries.',
+    args: {
+      player: 'string, a player name',
+      manager: 'string, a manager name whose roster to check',
+    },
+    async run(ctx, args) {
+      const L = [];
+      const fmt = r => {
+        const depth = r.depth_chart_order != null ? `, ${r.position}${r.depth_chart_order} on the depth chart` : '';
+        const part = r.injury_body_part && r.injury_body_part !== 'Undisclosed'
+          ? ` (${String(r.injury_body_part).toLowerCase()})` : '';
+        const note = r.injury_notes ? ` — ${r.injury_notes}` : '';
+        return `${r.full_name}, ${r.position} ${r.team || 'no team'}${depth}: `
+             + `${r.injury_status || 'no injury designation'}${part}${note}`;
+      };
+
+      if (args.player) {
+        const { rows } = await db.query(
+          `select full_name, position, team, injury_status, injury_body_part, injury_notes,
+                  depth_chart_order, player_status, updated_at
+             from players where full_name ilike $1 order by
+               case when team is not null then 0 else 1 end limit 4`,
+          [`%${args.player}%`]);
+        if (!rows.length) return `No player named "${args.player}" is on file.`;
+        L.push(`INJURY LOOKUP for "${args.player}", as of the morning refresh`
+             + ` (${String(rows[0].updated_at).slice(0, 10)}):`);
+        for (const r of rows) L.push('  ' + fmt(r));
+        /*
+         * NO DESIGNATION IS NOT THE SAME AS HEALTHY, and the difference matters
+         * in the offseason especially. Sleeper clears these between weeks.
+         */
+        if (rows.every(r => !r.injury_status)) {
+          L.push('  Nobody there carries an injury designation right now. That means no listing,'
+               + ' which is not quite the same as confirmed healthy — say it that way.');
+        }
+        return L.join('\n');
+      }
+
+      let rosterIds = null;
+      if (args.manager) {
+        const want = String(args.manager).toLowerCase();
+        /*
+         * Two Seans again. trade_value learned to announce a collision; taking
+         * the first match here would silently report one man's injuries as
+         * another's, which is worse than asking.
+         */
+        const hits = (ctx.members || []).filter(x => (x.name || '').toLowerCase().includes(want));
+        if (!hits.length) return `No manager matching "${args.manager}" is in this league.`;
+        if (hits.length > 1) {
+          /*
+           * Say what IS known, or the gap gets filled in. Told only that the
+           * name was ambiguous, the reply added that injury reports were not
+           * loaded for the season — untrue, and invented to explain an answer
+           * it could not otherwise account for.
+           */
+          return `"${args.manager}" matches ${hits.length} managers — `
+               + `${hits.map(h => h.name).join(' and ')}. They are different people with different`
+               + ' rosters. Injury data IS available and current; the only thing missing is which'
+               + ' of them you mean. Ask that, and do not say injuries are unavailable.';
+        }
+        const m = hits[0];
+        const rs = await fetch(`https://api.sleeper.app/v1/league/${ctx.sleeperLeagueId}/rosters`)
+          .then(r => r.json()).catch(() => []);
+        const own = (rs || []).find(r => Number(r.roster_id) === Number(m.rosterId));
+        if (!own) return `Could not read ${m.name}'s roster right now.`;
+        rosterIds = own.players || [];
+        L.push(`INJURY LOOKUP for ${m.name}'s roster:`);
+      } else {
+        L.push('INJURY LOOKUP, the notable ones across the NFL:');
+      }
+
+      const { rows } = await db.query(
+        `select full_name, position, team, injury_status, injury_body_part, injury_notes,
+                depth_chart_order, updated_at
+           from players
+          where injury_status is not null
+            and ($1::text[] is null or player_id = any($1::text[]))
+            and ($1::text[] is not null or depth_chart_order <= 2)
+          order by case injury_status
+                     when 'Out' then 1 when 'IR' then 2 when 'Doubtful' then 3
+                     when 'PUP' then 4 else 5 end,
+                   depth_chart_order nulls last, full_name
+          limit 25`, [rosterIds]);
+
+      if (!rows.length) {
+        return (rosterIds
+          ? 'Nobody on that roster carries an injury designation right now.'
+          : 'No injury designations on file right now.')
+          + ' That means no listing, which is not the same as confirmed healthy.';
+      }
+      for (const r of rows) L.push('  ' + fmt(r));
+      L.push('  Statuses come from Sleeper and are refreshed each morning, so a designation set'
+           + ' later today will not be here yet. Questionable usually plays; Out, IR and PUP do not.');
+      return L.join('\n');
+    },
+  },
+
+  /*
+   * The league's own rules.
+   *
+   * Deliberately NOT a standing context section. Scoring and roster format are
+   * static, asked about maybe once a season, and would be paid for on every
+   * reply forever — the exact cost that made the whole retrieval layer worth
+   * building. Standing context is for what shapes many answers; a lookup is for
+   * what one question needs in full.
+   */
+  league_rules: {
+    describe: 'This league\'s own settings: scoring, roster slots, playoff format, waiver type. '
+            + 'Use for "what is our scoring", "how many teams make playoffs", "is this PPR", '
+            + '"how many starters do we have", "what are our waiver rules".',
+    args: {},
+    async run(ctx) {
+      const lg = await require('./sleeper').leagueSettings(ctx.sleeperLeagueId).catch(() => null);
+      if (!lg) return 'Could not read this league\'s settings from Sleeper right now.';
+
+      const L = ['LEAGUE RULES, read from Sleeper just now:'];
+      const slots = lg.roster_positions || [];
+      const starters = slots.filter(p => p !== 'BN' && p !== 'IR' && p !== 'TAXI');
+      const counts = starters.reduce((a, p) => (a[p] = (a[p] || 0) + 1, a), {});
+      L.push(`  ${lg.total_rosters || '?'} teams, ${starters.length} starters:`
+           + ` ${Object.entries(counts).map(([k, v]) => `${v}x ${k}`).join(', ')}`);
+      L.push(`  Bench ${slots.filter(p => p === 'BN').length}`
+           + `, IR ${slots.filter(p => p === 'IR').length}`
+           + `, taxi ${slots.filter(p => p === 'TAXI').length}.`);
+
+      const sc = lg.scoring_settings || {};
+      const rec = sc.rec ?? 0;
+      L.push(`  Receptions are worth ${rec} each`
+           + ` — ${rec === 1 ? 'full PPR' : rec === 0.5 ? 'half PPR' : rec === 0 ? 'standard, no PPR' : 'a custom rate'}.`);
+      L.push(`  Passing TD ${sc.pass_td ?? '?'}, rushing TD ${sc.rush_td ?? '?'},`
+           + ` receiving TD ${sc.rec_td ?? '?'}, interception ${sc.pass_int ?? '?'},`
+           + ` fumble lost ${sc.fum_lost ?? '?'}.`);
+      const st = lg.settings || {};
+      L.push(`  Playoffs: ${st.playoff_teams ?? '?'} teams, starting week ${st.playoff_week_start ?? '?'}.`);
+      const waiver = { 0: 'rolling waivers', 1: 'reverse standings', 2: 'FAAB' }[st.waiver_type];
+      L.push(`  Waivers: ${waiver || `type ${st.waiver_type ?? 'unknown'}`}`
+           + `${st.waiver_budget ? `, ${st.waiver_budget} FAAB budget` : ''}.`);
+      L.push(`  Trade deadline: week ${st.trade_deadline ?? 'not set'}.`);
+      L.push('  These are THIS league\'s settings, not defaults. Quote them; do not generalise'
+           + ' from how fantasy leagues usually work.');
+      return L.join('\n');
+    },
+  },
+
+  /*
    * What a dynasty trade was worth, and what the price could not see.
    *
    * The redraft path grades on points actually scored weeks later, which is
@@ -267,11 +427,19 @@ const QUERIES = {
             const flags = await dv.rosterFlags(side.players.map(pl => pl.playerId), own?.players || [])
               .catch(() => []);
             for (const f of flags) {
-              L.push(`    ROSTER: ${f.name} is the handcuff to ${f.handcuffOf} on ${nameOf(side.rosterId)}'s`
-                   + ` own roster (both ${f.team} ${f.position})`
-                   + (f.starterInjury ? `, and ${f.handcuffOf} is ${f.starterInjury}`
-                       + `${f.starterBodyPart ? ` with a ${String(f.starterBodyPart).toLowerCase()}` : ''}`
-                       + '. That is a premium somebody chose to pay, not only an overpay.' : '.'));
+              const rank = f.depth != null
+                ? `the ${f.position}${f.depth}${f.immediate ? ' directly behind' : ' behind'} `
+                  + `${f.handcuffOf} (${f.position}${f.starterDepth})`
+                : `a backup to ${f.handcuffOf}, depth chart rank unknown`;
+              L.push(`    ROSTER: ${f.name} is ${rank} on ${nameOf(side.rosterId)}'s own roster`
+                   + ` (both ${f.team})`
+                   + (f.starterInjury
+                       ? `, and ${f.handcuffOf} is ${f.starterInjury}`
+                         + `${f.starterBodyPart ? ` with a ${String(f.starterBodyPart).toLowerCase()}` : ''}`
+                         + `${f.starterNotes ? ` — ${f.starterNotes}` : ''}`
+                         + '. Price alone cannot see that, so a deal that looks like an overpay may'
+                         + ' be insurance somebody chose to buy. Say so; do not change the grade.'
+                       : '.'));
             }
           }
         }

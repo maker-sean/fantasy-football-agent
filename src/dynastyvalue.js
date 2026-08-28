@@ -281,7 +281,8 @@ async function priceTrade(trade, o = {}) {
 async function rosterFlags(playerIds, rosterPlayerIds) {
   if (!playerIds?.length || !rosterPlayerIds?.length) return [];
   const { rows } = await db.query(
-    `select player_id, full_name, position, team, injury_status, injury_body_part
+    `select player_id, full_name, position, team, injury_status, injury_body_part,
+            injury_notes, depth_chart_order
        from players where player_id = any($1::text[])`,
     [[...new Set([...playerIds, ...rosterPlayerIds])]]);
   const by = new Map(rows.map(r => [String(r.player_id), r]));
@@ -290,21 +291,49 @@ async function rosterFlags(playerIds, rosterPlayerIds) {
   for (const pid of playerIds) {
     const got = by.get(String(pid));
     if (!got?.team || !got?.position) continue;
-    for (const held of rosterPlayerIds) {
-      if (String(held) === String(pid)) continue;
-      const other = by.get(String(held));
-      if (!other || other.team !== got.team || other.position !== got.position) continue;
-      flags.push({
-        playerId: pid,
-        name: got.full_name,
-        handcuffOf: other.full_name,
-        team: got.team,
-        position: got.position,
-        starterInjury: other.injury_status || null,
-        starterBodyPart: other.injury_body_part || null,
-      });
-      break;
-    }
+
+    /*
+     * THE STARTER, not merely a teammate.
+     *
+     * This matched on team and position alone, which is true of four Raiders
+     * running backs at once — so it reported "a handcuff" where the honest
+     * claim was "one of several men who share a backfield", and a trade got
+     * argued down on that vagueness. Depth chart order settles it: the arriving
+     * player is a handcuff to the man AHEAD of him, and the nearest one ahead
+     * is the one worth naming.
+     *
+     * Where Sleeper has no order — 1,812 players have one out of 12,000 — the
+     * old behaviour stands and the flag says the rank is unknown rather than
+     * implying a depth it cannot see.
+     */
+    const mates = rosterPlayerIds
+      .filter(h => String(h) !== String(pid))
+      .map(h => by.get(String(h)))
+      .filter(o => o && o.team === got.team && o.position === got.position);
+    if (!mates.length) continue;
+
+    const ahead = mates
+      .filter(o => o.depth_chart_order != null && got.depth_chart_order != null
+                   && o.depth_chart_order < got.depth_chart_order)
+      .sort((a, b) => b.depth_chart_order - a.depth_chart_order)[0];
+    const other = ahead || mates[0];
+
+    flags.push({
+      playerId: pid,
+      name: got.full_name,
+      handcuffOf: other.full_name,
+      team: got.team,
+      position: got.position,
+      starterInjury: other.injury_status || null,
+      starterBodyPart: other.injury_body_part || null,
+      starterNotes: other.injury_notes || null,
+      // Named so a caller can say "the RB2 behind him" instead of "a backup",
+      // and so an unknown rank is visible rather than assumed.
+      depth: got.depth_chart_order ?? null,
+      starterDepth: other.depth_chart_order ?? null,
+      // Directly behind him, as opposed to somewhere further down the chart.
+      immediate: Boolean(ahead && got.depth_chart_order - ahead.depth_chart_order === 1),
+    });
   }
   return flags;
 }

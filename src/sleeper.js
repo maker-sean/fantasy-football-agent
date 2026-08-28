@@ -59,6 +59,14 @@ async function allPlayers() {
       injury_status: p.injury_status || null,
       injury_body_part: p.injury_body_part || null,
       player_status: p.status || null,
+      // The detail behind the status. "Questionable" and "Questionable,
+      // expected to play" are different answers to the only question asked.
+      injury_notes: p.injury_notes || null,
+      // Depth chart, which is what separates the backup from a backup. Without
+      // it the handcuff check could only say two men share a team and a
+      // position, which is true of four Raiders running backs.
+      depth_chart_order: Number.isFinite(p.depth_chart_order) ? p.depth_chart_order : null,
+      depth_chart_position: p.depth_chart_position || null,
     });
   }
   return out;
@@ -95,6 +103,26 @@ const scheduleCache = new Map();
  * an API this project is trying to stay a polite user of.
  */
 const slotMapCache = new Map();
+
+/*
+ * A league's own settings — scoring, roster slots, playoffs, waivers.
+ *
+ * Cached for an hour rather than the process, because a commissioner can change
+ * scoring mid-season and answering with yesterday's rules is worse than a
+ * second call. Nothing else here needs it: it exists for the one question a
+ * league asks about itself, which is why it is a lookup and not context.
+ */
+const settingsCache = new Map();
+const SETTINGS_TTL = 60 * 60 * 1000;
+
+async function leagueSettings(leagueId) {
+  if (!leagueId) return null;
+  const hit = settingsCache.get(leagueId);
+  if (hit && Date.now() - hit.at < SETTINGS_TTL) return hit.value;
+  const d = await get(`/league/${encodeURIComponent(leagueId)}`).catch(() => null);
+  if (d) settingsCache.set(leagueId, { at: Date.now(), value: d });
+  return d;
+}
 
 async function draftSlots(draftId) {
   if (!draftId) return null;
@@ -527,6 +555,7 @@ async function seasonStats(season, { scoring = 'half_ppr', live = false } = {}) 
 
 module.exports = {
   draftSlots,
+  leagueSettings,
   projections, seasonProjections, seasonStats, draftSchedule, draftClock,
   BASE, get, state, league, rosters, users, matchups, transactions,
   allPlayers, weekSnapshot, rosterOwners, draft,

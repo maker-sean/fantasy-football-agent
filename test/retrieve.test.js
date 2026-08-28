@@ -149,6 +149,23 @@ const dies = msg => ({ messages: { create: async () => { throw new Error(msg); }
     assert.deepStrictEqual(r.lookup.args, {});
   });
 
+  await it('a lookup named on the sections line is still run', async () => {
+    /*
+     * Asked "is this PPR", the router answered "sections: league_rules, lookup:
+     * none". league_rules is not a section, so it was dropped, and the reply
+     * said to go check Sleeper — for a lookup that reads exactly that.
+     */
+    const r = await route('is this ppr', { client: says('sections: league_rules\nlookup: none') });
+    assert.strictEqual(r.lookup?.name, 'league_rules');
+    assert.deepStrictEqual(r.sections, []);
+  });
+
+  await it('a real section on the sections line is NOT turned into a lookup', async () => {
+    const r = await route('q', { client: says('sections: history\nlookup: none') });
+    assert.strictEqual(r.lookup, null);
+    assert.deepStrictEqual(r.sections, ['history']);
+  });
+
   await it('a season nobody named is dropped', async () => {
     /*
      * "How would you grade my trade with Renshaw" came back with season=2024,
@@ -291,6 +308,52 @@ const dies = msg => ({ messages: { create: async () => { throw new Error(msg); }
       for (const line of said) {
         assert.ok(/ sent .+ for /.test(line), `sentence is not in sent/for form: ${line}`);
       }
+    });
+
+    await it('an injury lookup names the depth chart rank, not just "a backup"', async () => {
+      const out = await retrievers.run(ctx, { name: 'injuries', args: {} });
+      assert.match(out, /INJURY LOOKUP/);
+      // Any listed player carrying a depth order must have it stated.
+      for (const line of out.split('\n').filter(l => /on the depth chart/.test(l))) {
+        assert.match(line, /[A-Z]{1,3}\d on the depth chart/, `depth not named: ${line}`);
+      }
+    });
+
+    await it('an unknown player is reported as unknown, not as healthy', async () => {
+      const out = await retrievers.run(ctx, { name: 'injuries', args: { player: 'Nobody McNobody' } });
+      assert.match(out, /No player named/);
+    });
+
+    await it('no designation is distinguished from confirmed healthy', async () => {
+      /*
+       * Sleeper clears designations between weeks. "Not listed" and "fit" are
+       * different claims and only one of them is supported.
+       */
+      const { rows } = await db.query(
+        `select full_name from players where injury_status is null and team is not null limit 1`);
+      if (!rows.length) return console.log('       (skip: no uninjured player on file)');
+      const out = await retrievers.run(ctx, { name: 'injuries', args: { player: rows[0].full_name } });
+      assert.match(out, /not quite the same as confirmed healthy/);
+    });
+
+    await it('an ambiguous manager is asked about, and injuries are not called unavailable', async () => {
+      const members = (ctx.members || []).map(m => m.name).filter(Boolean);
+      const first = members[0] && members[0].split(' ')[0];
+      const shared = first && members.filter(n => n.startsWith(first)).length > 1 ? first : null;
+      if (!shared) return console.log('       (skip: no ambiguous first name)');
+      const out = await retrievers.run(ctx, { name: 'injuries', args: { manager: shared } });
+      assert.match(out, /matches \d+ managers/);
+      assert.match(out, /Injury data IS available/,
+        'the reply invented "injuries are not loaded" when told only that the name was ambiguous');
+    });
+
+    await it('league rules come from this league, with the numbers filled in', async () => {
+      const out = await retrievers.run(ctx, { name: 'league_rules', args: {} });
+      if (/Could not read/.test(out)) return console.log('       (skip: Sleeper unreachable)');
+      assert.match(out, /LEAGUE RULES/);
+      assert.match(out, /Receptions are worth/);
+      assert.match(out, /Playoffs:/);
+      assert.match(out, /THIS league's settings/);
     });
 
     await it('the grade is the headline and the arithmetic is marked as working', async () => {

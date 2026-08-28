@@ -68,6 +68,8 @@ Some facts are always present and are NEVER a reason to name a section: the leag
 You may also request ONE lookup, which runs a real query and computes an answer that is not in any section. Lookups available:
 - trade_extremes: the fairest or the most lopsided trades. Arguments: order=even or order=lopsided (required), manager=<name> (optional), season=<year> (optional).
 - trade_value: what a trade was worth at market prices ON THE DAY IT WAS MADE, for leagues whose trades are not graded on points (dynasty and keeper). Arguments: manager=<name> (optional), season=<year> (optional). Use for "was that trade fair", "did I win that trade", "how did my trade with X look". Prefer this over the trades section whenever the question is about whether a dynasty trade was GOOD, rather than merely which trades happened.
+- injuries: who is hurt and how badly, from a player list refreshed every morning, including depth chart rank. Arguments: player=<name> (optional), manager=<name> (optional). Use for "is X playing", "is X hurt", "who is banged up on my team", "any injuries this week". ALWAYS use this for a question about whether somebody is healthy — never answer that from memory.
+- league_rules: this league's own scoring, roster slots, playoff format, waiver type and trade deadline. Arguments: none. Use for "what is our scoring", "is this PPR", "how many make the playoffs", "how much FAAB", "when is the trade deadline".
 - career_extremes: ONE area of league history, computed. Argument metric= exactly one of: records (career win-loss, best and worst), scoring (points per season), average_finish, luck (record against scoring), championships, toilet_bowls, activity (adds and drops), game_records (highest and lowest scores, blowouts, closest games), benched (worst lineup calls), drafting (past draft picks).
 
 career_extremes is a SLICE OF THE HISTORY SECTION and carries the same computed facts for that area. So when you request one, do NOT also name the history section — that loads the whole thing to answer what the lookup already answers, which is the most expensive mistake available to you here. Name history WITHOUT a lookup when the question spans several of those areas at once, or when you genuinely cannot tell which one it wants.
@@ -215,6 +217,26 @@ async function route(question, opts = {}) {
    * Dropped here rather than by not offering it: the router still needs to be
    * able to name history ALONE, for questions that span several areas at once.
    */
+  /*
+   * A LOOKUP NAMED ON THE SECTIONS LINE IS STILL A LOOKUP.
+   *
+   * Asked "is this PPR", the router answered "sections: league_rules, lookup:
+   * none". league_rules is not a section, so it was dropped, and the reply said
+   * it would need to check Sleeper — for a lookup that reads exactly that, and
+   * that the router had correctly identified. The menu offers two lists of
+   * named things and putting one in the other slot is the obvious slip.
+   *
+   * Rescued here rather than reworded in the prompt, because the prompt already
+   * says it and this costs nothing to accept. Empty args are safe: every query
+   * either has none or handles their absence.
+   */
+  if (!lookup) {
+    const { QUERIES } = require('./retrievers');
+    const stray = secLine.toLowerCase().split(/[,\s]+/).map(w => w.trim())
+      .find(w => QUERIES[w] && !NAMES.includes(w));
+    if (stray) lookup = { name: stray, args: {} };
+  }
+
   let sections = [...new Set(picked)];
   if (lookup?.name === 'career_extremes') {
     const covers = lookup.args.metric === 'drafting' ? 'draft_history' : 'history';
