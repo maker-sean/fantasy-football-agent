@@ -386,6 +386,47 @@ async function leagueContext(leagueId, opts = {}) {
       .then(r => r.rows)
       .catch(() => []);
 
+    /*
+     * The trades themselves, ungraded — because dynasty has no verdicts and
+     * a league with none was answering that it had never traded.
+     *
+     * Sigma Chi has 55 trades on record across its chain, three of them this
+     * season, and asked "have we made any trades" the bot said "none yet this
+     * season, just draft picks so far. I'll announce it here the second one
+     * happens." Everything above this line was working as designed: verdicts
+     * are deliberately unwritten for dynasty, since a 2021 dynasty trade is
+     * still resolving and a frozen grade would be a stale opinion presented as
+     * a result. The gated block then left nothing at all, and nothing reads to
+     * a model as an absence rather than as a gap in what it was given.
+     *
+     * So the trades ship without grades. Who traded, when, and what moved is
+     * knowable and true. Who WON is the part this league does not get, and the
+     * block says so in as many words rather than leaving it to be inferred.
+     */
+    if (!ctx.gradedTrades.length) {
+      ctx.ungradedTrades = await db.query(
+        `select t.season, t.week, t.received, t.roster_ids, t.draft_picks
+           from trades t join leagues l on l.id = t.league_id
+          where l.sleeper_league_id = any($1::text[]) and t.verdict is null
+            and t.status = 'complete'
+          order by t.season desc, t.week desc limit 25`, [chainIds])
+        .then(r => r.rows)
+        .catch(err => { console.error('[context] ungraded trades failed:', err.message); return []; });
+
+      const ids = [...new Set(ctx.ungradedTrades
+        .flatMap(t => Object.values(t.received || {}).flat()))];
+      if (ids.length) {
+        ctx.tradedPlayerNames = await db.query(
+          'select player_id, full_name from players where player_id = any($1::text[])', [ids])
+          .then(r => new Map(r.rows.map(x => [x.player_id, x.full_name])))
+          .catch(() => new Map());
+      }
+      ctx.allTradeCount = await db.query(
+        `select count(*)::int n from trades t join leagues l on l.id = t.league_id
+          where l.sleeper_league_id = any($1::text[]) and t.status = 'complete'`, [chainIds])
+        .then(r => r.rows[0]?.n || 0).catch(() => 0);
+    }
+
     ctx.tradeCounts = await db.query(
       `select t.season, count(*)::int n
          from trades t join leagues l on l.id = t.league_id
@@ -1064,6 +1105,54 @@ function contextBlock(ctx, opts = {}) {
                + ' out, which is a neutral result and not a fleecing.');
         }
       }
+    }
+  }
+
+  /*
+   * Ungraded trades, for the leagues that get no verdicts.
+   *
+   * Everything above needs a verdict, and dynasty never gets one, so a dynasty
+   * league reached this point with an empty trades section and answered that it
+   * had never traded. Fifty-five of them were sitting in the table.
+   *
+   * What is printed here is only what is KNOWN: who was in it, when, and what
+   * moved. The one thing deliberately absent is who won, and it is named as
+   * absent — an unstated gap is the thing that got filled in with a guess.
+   */
+  if (!ctx.gradedTrades?.length && ctx.ungradedTrades?.length) {
+    const nameOf = rid => {
+      const m = (ctx.members || []).find(x => Number(x.rosterId) === Number(rid));
+      return m?.name || `roster ${rid}`;
+    };
+    const playerName = id => ctx.tradedPlayerNames?.get(String(id)) || `player ${id}`;
+
+    L.push('');
+    L.push(`TRADES: ${ctx.allTradeCount || ctx.ungradedTrades.length} completed trades are on`
+         + ' record for this league across every season it has played. They HAVE happened —'
+         + ' never say this league has not traded.');
+    L.push('  They are NOT graded here, and that is deliberate rather than missing data: this'
+         + ' is a keeper or dynasty league, where a trade made years ago is still resolving,'
+         + ' so a frozen verdict would be a stale opinion dressed as a result. You know who'
+         + ' traded and what moved. You do NOT know who won any of them, and you must not'
+         + ' rank them, call one lopsided, or say who got the better of it.');
+    if (ctx.allTradeCount > ctx.ungradedTrades.length) {
+      L.push(`  The ${ctx.ungradedTrades.length} most recent are listed. There are`
+           + ` ${ctx.allTradeCount} in total, so do not count off this list.`);
+    }
+    for (const t of ctx.ungradedTrades) {
+      const sides = Object.entries(t.received || {})
+        .map(([rid, ids]) => `${nameOf(rid)} got ${(ids || []).map(playerName).join(', ')}`);
+      const picks = (t.draft_picks || []).length;
+      /*
+       * A picks-only trade has an empty `received`, and printing it as a trade
+       * where nobody got anything reads as a bug. Say it was picks.
+       */
+      const what = sides.length
+        ? sides.join('; ') + (picks ? `, plus ${picks} draft pick${picks === 1 ? '' : 's'}` : '')
+        : picks ? `${(t.roster_ids || []).map(nameOf).join(' and ')} swapped `
+                + `${picks} draft pick${picks === 1 ? '' : 's'}, no players`
+        : `${(t.roster_ids || []).map(nameOf).join(' and ')} traded`;
+      L.push(`    ${t.season} week ${t.week}: ${what}`);
     }
   }
 

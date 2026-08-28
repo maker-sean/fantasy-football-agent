@@ -61,14 +61,23 @@ If the question cannot be answered from the context, say what you would need. Do
  */
 async function generateAnswer(question, ctx, opts = {}) {
   const { effort = 'medium', model = MODEL, recentChat = [], spice = 1,
-          retrieve = process.env.RETRIEVE === '1', client = new Anthropic() } = opts;
+          retrieve = process.env.RETRIEVE !== '0', client = new Anthropic() } = opts;
 
   /*
-   * Load only the sections the question needs, when asked to.
+   * Load only the sections the question needs.
    *
-   * Off by default while it is being measured. On, it costs a round trip to a
-   * small model and saves most of the block: the full context is 5,738 tokens
-   * for a mature league and the core everything shares is 635.
+   * ON by default, and RETRIEVE=0 turns it off. It was behind an opt-in flag
+   * while it was measured, which meant it shipped and then sat idle for days
+   * while every reply carried the whole league — the flag was the thing nobody
+   * set, not the thing anybody decided against.
+   *
+   * The kill switch stays because the failure mode is quiet: a section the
+   * router did not ask for comes back as a confident answer with a hole in it,
+   * not as an error. Setting RETRIEVE=0 in the dashboard restores the whole
+   * block immediately, with no deploy.
+   *
+   * Costs a round trip to a small model. Saves most of the block: a mature
+   * league is ~6,300 tokens and the core everything shares is ~800.
    */
   let only = null;
   let routing = null;

@@ -301,11 +301,39 @@ async function generateReply({ burst, league }) {
        */
       db.query(
         `insert into model_usage (league_id, kind, model, input_tokens, output_tokens,
-                                  cache_read_input_tokens, cache_creation_input_tokens)
-         values ($1,'reply',$2,$3,$4,$5,$6)`,
+                                  cache_read_input_tokens, cache_creation_input_tokens, detail)
+         values ($1,'reply',$2,$3,$4,$5,$6,$7)`,
         [league.id, out.meta.model || null, u.input_tokens || 0, u.output_tokens || 0,
-         u.cache_read_input_tokens || 0, u.cache_creation_input_tokens || 0]
+         u.cache_read_input_tokens || 0, u.cache_creation_input_tokens || 0,
+         // What was loaded, next to what it cost. Null when retrieval is off,
+         // which is itself the record that this reply carried the whole league.
+         out.meta.sections ? JSON.stringify({ sections: out.meta.sections }) : null]
       ).catch(err => console.error('[reply] could not record usage:', err.message));
+    }
+
+    /*
+     * The routing decision, as its own row.
+     *
+     * Its own kind so 'reply' averages stay comparable across the rollout —
+     * folding a small router call into the reply average would blur the one
+     * number this change is judged on. The detail is the point: when an answer
+     * looks confidently wrong, the question is which sections it was given, and
+     * that is not recoverable from the text.
+     */
+    const r = out.meta?.routing;
+    if (r) {
+      db.query(
+        `insert into model_usage (league_id, kind, model, input_tokens, output_tokens, detail)
+         values ($1,'route',$2,$3,$4,$5)`,
+        [league.id, r.model || null, r.usage?.input_tokens || 0, r.usage?.output_tokens || 0,
+         JSON.stringify({
+           sections: out.meta.sections,
+           lookup: r.lookup || null,
+           ms: r.ms ?? null,
+           fellBack: r.fellBack || null,
+           asked: String(asked || '').slice(0, 200),
+         })]
+      ).catch(err => console.error('[reply] could not record routing:', err.message));
     }
     return out.text;
   } catch (err) {

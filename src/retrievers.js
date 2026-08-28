@@ -156,7 +156,26 @@ const QUERIES = {
           return `No settled trade on record involves anyone matching "${args.manager}".`;
         }
       }
-      if (!items.length) return 'No settled trades match that.';
+      if (!items.length) {
+        /*
+         * "No settled trades" is true here and reads as "no trades", which is
+         * the same false absence the context block just stopped producing. A
+         * dynasty league HAS trades and has no verdicts, on purpose, and those
+         * are different sentences.
+         */
+        const { rows: [u] } = await db.query(
+          `select count(*)::int n from trades t join leagues l on l.id = t.league_id
+            where l.sleeper_league_id = any($1::text[]) and t.status = 'complete'`,
+          [ctx.chainIds || []]);
+        if (u?.n) {
+          return `This league has ${u.n} completed trades on record but NONE of them are graded,`
+               + ' so there is no fairest or most lopsided to give. That is deliberate: in a'
+               + ' keeper or dynasty league a trade keeps resolving for years and a frozen'
+               + ' verdict would be a stale opinion. Say the trades exist and that you do not'
+               + ' rate them here. Do NOT say there are no trades.';
+        }
+        return 'No completed trades are on record for this league at all.';
+      }
 
       const by = (a, b) => order === 'even'
         ? Math.abs(a.v.margin) - Math.abs(b.v.margin)
