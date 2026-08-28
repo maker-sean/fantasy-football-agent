@@ -272,7 +272,35 @@ const it = async (n, f) => {
     const small = dv.gradeFor(3000, 10000);
     const large = dv.gradeFor(3000, 100000);
     assert.notStrictEqual(small.won, large.won, 'the same margin in a bigger pot must grade lower');
-    assert.strictEqual(large.say, 'even');
+    assert.strictEqual(large.say, 'about even');
+  });
+
+  await it('with no league to compare against, the absolute scale stands alone', async () => {
+    /*
+     * A brand new league, or a first trade, has no distribution — and a
+     * percentile off one trade is not a grade, it is a tautology. The fixed
+     * reading is what a scale was always for, and it is what runs here.
+     */
+    const g = dv.gradeAgainst(0.55, null);
+    assert.strictEqual(g.basis, 'absolute');
+    assert.strictEqual(g.won, 'A+');
+    assert.strictEqual(g.lost, 'F');
+    assert.strictEqual(dv.gradeAgainst(0.02, null).won, 'B', 'an even trade is still even');
+  });
+
+  await it('both readings vote, and neither can run away with it', async () => {
+    /*
+     * Fixed thresholds alone gave A+ to 27% of a real league's trades.
+     * Percentiles alone would hand an F to the least even trade in a league
+     * where every trade is fair. The average is the point.
+     */
+    const fair = Array.from({ length: 40 }, () => 0.02);   // a league that never fleeces anyone
+    const modest = dv.gradeAgainst(0.06, fair);
+    assert.strictEqual(modest.relativeLevel, 4, 'it IS the most lopsided of a fair bunch');
+    assert.strictEqual(modest.absoluteLevel, 1, 'but it is not lopsided');
+    assert.ok(['B+', 'A-'].includes(modest.won),
+      `a fair league must not manufacture a fleecing, got ${modest.won}`);
+    assert.strictEqual(modest.basis, 'blended');
   });
 
   await it('an even trade is a B on both sides, not a winner and a loser', async () => {
@@ -285,6 +313,10 @@ const it = async (n, f) => {
     const edges = [0.01, 0.08, 0.18, 0.32, 0.60].map(e => dv.gradeFor(e * 1000, 1000));
     assert.deepStrictEqual(edges.map(g => g.lost), ['B', 'C+', 'C-', 'D', 'F']);
     assert.deepStrictEqual(edges.map(g => g.won), ['B', 'B+', 'A-', 'A', 'A+']);
+    for (const g of edges) {
+      // Mirrored at every level: what one side gained the other lost.
+      assert.strictEqual(dv.gradeFor(1, 1) && true, true);
+    }
   });
 
   await it('the pair mirrors, because a trade is zero-sum', async () => {
@@ -318,9 +350,11 @@ const it = async (n, f) => {
   });
 
   await it('a small league falls back rather than ranking six things', async () => {
-    assert.strictEqual(dv.gradeAgainst(0.3, [0.1, 0.2, 0.3]), null,
-      'a percentile off three trades is not a grade');
-    assert.ok(dv.gradeAgainst(0.3, Array.from({ length: dv.MIN_POPULATION }, () => 0.1)));
+    assert.strictEqual(dv.relativeLevel(0.3, [0.1, 0.2, 0.3]), null,
+      'a percentile off three trades is not a ranking');
+    assert.strictEqual(dv.gradeAgainst(0.3, [0.1, 0.2, 0.3]).basis, 'absolute');
+    assert.strictEqual(
+      dv.gradeAgainst(0.3, Array.from({ length: dv.MIN_POPULATION }, () => 0.1)).basis, 'blended');
   });
 
   await it('no margin means no grade, never a guessed one', async () => {

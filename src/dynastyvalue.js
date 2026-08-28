@@ -113,49 +113,84 @@ function slotsFromFinish(finishes, teams) {
  */
 const MIN_POPULATION = 20;
 
-function gradeAgainst(edge, population) {
-  if (!Array.isArray(population) || population.length < MIN_POPULATION) return null;
-  const sorted = [...population].sort((a, b) => a - b);
-  const below = sorted.filter(e => e < Math.abs(edge)).length;
-  const pct = below / sorted.length;
-
-  /*
-   * THE PAIR MIRRORS, because a trade is zero-sum: whatever one side gained the
-   * other lost, and grading that A+ against a D says the loser did better out of
-   * it than the winner did badly, which is not a thing that can happen.
-   *
-   * It is also MONOTONIC in both columns, which the first cut was not — the
-   * fairest trades handed the winner a B+ while slightly more lopsided ones gave
-   * a B, so a winner scored higher for winning less. There is no separate reward
-   * here for making a fair deal: an even trade is B and B, and the scale only
-   * ever measures how one-sided a deal was and in whose favour.
-   */
-  if (pct >= 0.90) return { won: 'A+', lost: 'F', say: 'one of the most lopsided this league has seen' };
-  if (pct >= 0.75) return { won: 'A', lost: 'D', say: 'a clear win by this league\'s standards' };
-  if (pct >= 0.55) return { won: 'A-', lost: 'C-', say: 'a bit more one-sided than usual' };
-  if (pct >= 0.30) return { won: 'B+', lost: 'C+', say: 'an ordinary deal here' };
-  if (pct >= 0.15) return { won: 'B', lost: 'B-', say: 'closer than most' };
-  return { won: 'B', lost: 'B', say: 'one of the fairest this league has made' };
-}
-
 /*
- * The fallback, for a league with too few trades to have a distribution. Same
- * mirrored pairs as gradeAgainst, so a league does not see the scale change
- * shape the week it crosses twenty trades — only tighten.
+ * ONE SEVERITY SCALE, fed by two opinions.
+ *
+ * Fixed thresholds alone inflate: they handed A+ to 27% of one league's trades,
+ * because they were set assuming deals cluster near even and real ones do not.
+ * Percentiles alone distort the other way — in a league where every trade is
+ * fair somebody still has to be in the worst tenth, so a perfectly reasonable
+ * deal draws an F for being the least even of a fair bunch. And a new league
+ * with one trade has no distribution to rank against at all.
+ *
+ * So both vote and the answer is the average. The absolute reading stops a fair
+ * league manufacturing villains; the relative one stops a trade-happy league
+ * handing out eighty A+ grades. With no population — a new league, a first
+ * trade — the absolute reading stands alone, which is the only honest thing
+ * available and is what a fixed scale was always for.
+ *
+ * The pair mirrors at every level, because a trade is zero-sum: what one side
+ * gained the other lost, and A+ against anything softer than F would say the
+ * loser did better out of it than the winner did badly.
  */
-const BANDS = [
-  { upTo: 0.05, won: 'B',  lost: 'B',  say: 'even' },
-  { upTo: 0.12, won: 'B+', lost: 'C+', say: 'a slight edge' },
-  { upTo: 0.25, won: 'A-', lost: 'C-', say: 'a clear win' },
-  { upTo: 0.40, won: 'A',  lost: 'D',  say: 'a big win' },
-  { upTo: Infinity, won: 'A+', lost: 'F', say: 'a fleecing' },
+const LEVELS = [
+  { won: 'B',  lost: 'B',  say: 'about even' },
+  { won: 'B+', lost: 'C+', say: 'a slight edge' },
+  { won: 'A-', lost: 'C-', say: 'a clear win' },
+  { won: 'A',  lost: 'D',  say: 'a big win' },
+  { won: 'A+', lost: 'F',  say: 'a fleecing' },
 ];
 
+/** How lopsided in absolute terms: 0 even, 4 a fleecing. */
+function absoluteLevel(edge) {
+  const e = Math.abs(edge || 0);
+  if (e < 0.05) return 0;
+  if (e < 0.12) return 1;
+  if (e < 0.25) return 2;
+  if (e < 0.40) return 3;
+  return 4;
+}
+
+/** How lopsided against this league's own trades, same scale, or null. */
+function relativeLevel(edge, population) {
+  if (!Array.isArray(population) || population.length < MIN_POPULATION) return null;
+  const sorted = [...population].sort((a, b) => a - b);
+  const pct = sorted.filter(e => e < Math.abs(edge)).length / sorted.length;
+  if (pct >= 0.90) return 4;
+  if (pct >= 0.75) return 3;
+  if (pct >= 0.55) return 2;
+  if (pct >= 0.30) return 1;
+  return 0;
+}
+
+function gradeAgainst(edge, population) {
+  const abs = absoluteLevel(edge);
+  const raw = relativeLevel(edge, population);
+  /*
+   * The relative reading may move the grade by ONE level, no more.
+   *
+   * Unbounded, it wins any argument: in a league where every trade is fair, the
+   * least even of them still sits in the worst decile, so a 6% edge came out
+   * A/D — a fleecing manufactured entirely out of company. Capping it keeps the
+   * league's own standard as a nudge rather than a verdict, which is what
+   * "relative to this league" should mean.
+   */
+  const rel = raw == null ? null : Math.max(abs - 1, Math.min(abs + 1, raw));
+  const level = rel == null ? abs : Math.round((abs + rel) / 2);
+  return {
+    ...LEVELS[Math.max(0, Math.min(LEVELS.length - 1, level))],
+    basis: rel == null ? 'absolute' : 'blended',
+    absoluteLevel: abs,
+    relativeLevel: raw,
+    appliedLevel: rel,
+  };
+}
+
+/** The absolute reading on its own, for callers with no league to compare to. */
 function gradeFor(margin, pot) {
   if (margin == null || !pot) return null;
   const edge = Math.abs(margin) / pot;
-  const band = BANDS.find(b => edge < b.upTo);
-  return { edge: Math.round(edge * 1000) / 10, won: band.won, lost: band.lost, say: band.say };
+  return { edge: Math.round(edge * 1000) / 10, ...gradeAgainst(edge, null) };
 }
 
 
@@ -406,7 +441,8 @@ async function priceTrade(trade, o = {}) {
           const margin = list[0].value - list[list.length - 1].value;
           const pot = list.reduce((a, sd) => a + sd.value, 0);
           // Against the league where there is a league to measure against.
-          return gradeAgainst(pot ? margin / pot : 0, o.population) || gradeFor(margin, pot);
+          const edge = pot ? Math.abs(margin) / pot : 0;
+          return { edge: Math.round(edge * 1000) / 10, ...gradeAgainst(edge, o.population) };
         })(),
   };
 }
@@ -656,4 +692,4 @@ function traderGrade(rank, of) {
 }
 
 module.exports = { priceTrade, loadValueBook, tradeLedger, pickLadder, inPicks, traderGrade,
-  gradeAgainst, MIN_POPULATION, rosterFlags, gradeFor, pickLabel, bucketFor, slotsFromDraft, slotsFromFinish };
+  gradeAgainst, absoluteLevel, relativeLevel, MIN_POPULATION, rosterFlags, gradeFor, pickLabel, bucketFor, slotsFromDraft, slotsFromFinish };

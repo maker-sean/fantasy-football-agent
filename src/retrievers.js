@@ -527,6 +527,7 @@ const QUERIES = {
     args: {
       manager: 'string, a manager name, or omit for the whole league',
       season: 'string, a year like 2026, or omit for the most recent trades',
+      order: ['lopsided', 'even', 'recent'],
     },
     async run(ctx, args) {
       const dv = require('./dynastyvalue');
@@ -547,6 +548,47 @@ const QUERIES = {
         const m = (ctx.members || []).find(x => Number(x.rosterId) === Number(rid));
         return m?.name || `roster ${rid}`;
       };
+
+      const superflex = Boolean(ctx.valueVariant?.superflex);
+      const teams = ctx.draftSchedule?.teams || 12;
+      const slotMap = await require('./sleeper').draftSlots(ctx.draftSchedule?.draftId).catch(() => null);
+      const slots = slotMap ? dv.slotsFromDraft(slotMap) : new Map();
+
+      /*
+       * THE LEAGUE'S OWN SPREAD, so a letter means something at scale.
+       *
+       * Fixed bands handed A+ to 27% of this league's trades — at a few hundred
+       * trades that is eighty A+ grades and a letter that says nothing. Graded
+       * against the population instead, A+ is the most lopsided tenth.
+       *
+       * Pricing every trade to build that spread is affordable only because the
+       * value book makes it one query: 112 pricings ran in 8ms behind it.
+       */
+      /*
+       * The yardstick is EVERY trade the league has made, not the ones being
+       * shown. Filtered to one season the population fell to four, dropped
+       * below the threshold, silently reverted to fixed bands — and the text
+       * still said "graded against the 4 trades", which was a sentence about a
+       * scale that was not being used.
+       */
+      const { rows: allTrades } = await db.query(
+        `select t.status_updated_at, t.received, t.roster_ids, t.draft_picks, t.season
+           from trades t join leagues l on l.id = t.league_id
+          where l.sleeper_league_id = any($1::text[]) and t.status = 'complete'`,
+        [ctx.chainIds || []]);
+
+      const book = await dv.loadValueBook({
+        dates: [...allTrades.map(t => t.status_updated_at), null], superflex });
+      const population = [];
+      if (book) {
+        for (const t of allTrades) {
+          const p = await dv.priceTrade(t, {
+            book, slots, teams, slotSeason: ctx.draftSchedule?.season, asOf: t.status_updated_at });
+          if (!p || p.margin == null) continue;
+          const pot = p.sides.reduce((a, sd) => a + sd.value, 0);
+          if (pot) population.push(Math.abs(p.margin / pot));
+        }
+      }
 
       let items = rows;
       let ambiguous = null;
@@ -581,35 +623,32 @@ const QUERIES = {
        */
       const matched = items.length;
       const SHOW = 4;
-      items = items.slice(0, SHOW);
-
-      const superflex = Boolean(ctx.valueVariant?.superflex);
-      const teams = ctx.draftSchedule?.teams || 12;
-      const slotMap = await require('./sleeper').draftSlots(ctx.draftSchedule?.draftId).catch(() => null);
-      const slots = slotMap ? dv.slotsFromDraft(slotMap) : new Map();
 
       /*
-       * THE LEAGUE'S OWN SPREAD, so a letter means something at scale.
+       * MOST LOPSIDED, when that is what was asked.
        *
-       * Fixed bands handed A+ to 27% of this league's trades — at a few hundred
-       * trades that is eighty A+ grades and a letter that says nothing. Graded
-       * against the population instead, A+ is the most lopsided tenth.
-       *
-       * Pricing every trade to build that spread is affordable only because the
-       * value book makes it one query: 112 pricings ran in 8ms behind it.
+       * "What was the worst trade" used to reach trade_extremes, which reads
+       * stored verdicts and therefore answers "none graded here" in every
+       * dynasty league — while this lookup, which grades them on the market,
+       * sat unused. Sorting needs every trade priced first, which the value
+       * book already made cheap.
        */
-      const book = await dv.loadValueBook({
-        dates: [...rows.map(t => t.status_updated_at), null], superflex });
-      const population = [];
-      if (book) {
-        for (const t of rows) {
+      if (args.order === 'lopsided' || args.order === 'even') {
+        const scored = [];
+        for (const t of items) {
           const p = await dv.priceTrade(t, {
-            book, slots, teams, slotSeason: ctx.draftSchedule?.season, asOf: t.status_updated_at });
+            book, slots, teams, population,
+            slotSeason: ctx.draftSchedule?.season, asOf: t.status_updated_at });
           if (!p || p.margin == null) continue;
           const pot = p.sides.reduce((a, sd) => a + sd.value, 0);
-          if (pot) population.push(Math.abs(p.margin / pot));
+          if (pot) scored.push({ t, edge: Math.abs(p.margin / pot) });
         }
+        scored.sort((a, b) => (args.order === 'even' ? a.edge - b.edge : b.edge - a.edge));
+        items = scored.map(x => x.t);
       }
+
+      items = items.slice(0, SHOW);
+
 
       /*
        * Rosters are TODAY'S, so the handcuff check runs only on this season's
@@ -618,6 +657,8 @@ const QUERIES = {
        */
       const thisSeason = String(ctx.season || new Date().getFullYear());
       let rosters = null;
+      let lgSettings;      // undefined until first needed, then null on failure
+      let seasonProj;
 
       const L = [`TRADE VALUE, ${superflex ? 'superflex' : '1QB'} market prices AS AT THE DATE OF EACH`
                + ' TRADE, not today. So these say what the two sides were agreeing to at the time,'
@@ -637,10 +678,24 @@ const QUERIES = {
              + ' them and you cannot tell which, ask.');
       }
       if (matched > items.length) {
-        L.push(`  THESE ARE THE ${items.length} MOST RECENT OF ${matched}`
+        const how = args.order === 'lopsided' ? 'MOST LOPSIDED'
+          : args.order === 'even' ? 'CLOSEST' : 'MOST RECENT';
+        L.push(`  THESE ARE THE ${items.length} ${how} OF ${matched}`
              + `${args.manager ? ` involving ${args.manager}` : ''}${args.season ? ` in ${args.season}` : ''}.`
              + ' Older ones exist and are not priced here, so do NOT say a pairing has never'
              + ' traded, and do not count from this list. Ask for a season to see further back.');
+        /*
+         * A SORTED list has an answer at the top, and saying only "4 of 48"
+         * made the reply refuse to name it — "can't crown a worst, I've only
+         * got the 4 most lopsided" — while holding the most lopsided of all 48
+         * on the first line. The truncation warning is about counting, not
+         * about the ranking.
+         */
+        if (args.order === 'lopsided' || args.order === 'even') {
+          L.push(`  All ${matched} were ranked to build this, so the FIRST one below IS the`
+               + ` ${args.order === 'even' ? 'closest' : 'most lopsided'} of them. Name it`
+               + ' outright. The cut only limits how many are shown, not what was compared.');
+        }
       }
 
       for (const t of items) {
@@ -742,9 +797,13 @@ const QUERIES = {
             L.push(`    GRADE, this is the headline: ${nameOf(priced.sides[0].rosterId)} ${g.won},`
                  + ` ${nameOf(priced.sides[priced.sides.length - 1].rosterId)} ${g.lost}`
                  + `${g.say ? ` — ${g.say}` : ''}.`
-                 + ` Graded against the ${population.length || 'few'} trades this league has`
-                 + ' actually made, so the letter is relative to THIS league. Quote it; do not'
-                 + ' invent your own or adjust it.');
+                 + (population.length >= dv.MIN_POPULATION
+                     ? ` Graded against all ${population.length} trades this league has made, so`
+                       + ' the letter is relative to THIS league.'
+                     : ` This league has only ${population.length} priced trades, too few to rank`
+                       + ' against, so this is a general scale rather than a league one. Say the'
+                       + ' grade, but do not claim it is relative to this league.')
+                 + ' Quote it; do not invent your own or adjust it.');
           }
         } else {
           L.push(`    NO MARGIN AND NO GRADE: ${priced.unpricedReason}. Say that rather than`
@@ -761,6 +820,40 @@ const QUERIES = {
           if (rosters === null) {
             rosters = await fetch(`https://api.sleeper.app/v1/league/${ctx.sleeperLeagueId}/rosters`)
               .then(r => r.json()).catch(() => []);
+          }
+
+          /*
+           * THE OTHER AXIS, and it is not zero-sum.
+           *
+           * Market value is: whatever one side gained the other lost, which is
+           * why the letters mirror. Roster FIT is not. Four good receivers and
+           * no tight end against three tight ends and no receiver, swapped at
+           * identical value, leaves both lineups better — and a grade that can
+           * only name a winner calls one of those two a loser for making the
+           * best trade available to them.
+           */
+          const dg = require('./draftgrade');
+          if (lgSettings === undefined) {
+            lgSettings = await require('./sleeper').leagueSettings(ctx.sleeperLeagueId).catch(() => null);
+            seasonProj = await require('./sleeper').seasonProjections(ctx.season).catch(() => null);
+          }
+          if (lgSettings && seasonProj) {
+            const im = dg.lineupImpact(t, {
+              rosters, rosterPositions: lgSettings.roster_positions, proj: seasonProj });
+            if (im) {
+              L.push(`    LINEUP: ${im.sides.map(sd => `${nameOf(sd.rosterId)} `
+                + `${sd.delta > 0 ? '+' : ''}${sd.delta}`).join(', ')} projected points to the`
+                + ' starting lineup they can now field.');
+              if (im.bothUp) {
+                L.push('    BOTH ROSTERS GOT BETTER. Value is zero-sum and this is not: each side'
+                     + ' traded from surplus into a hole. Do NOT call either of them the loser —'
+                     + ' the value letters describe who got more, not who was hurt. Say it helped'
+                     + ' them both, and that on paper one got more of the surplus.');
+              } else if (im.bothDown) {
+                L.push('    BOTH LINEUPS GOT WORSE this season, which usually means picks or'
+                     + ' futures went out for nothing that starts. Worth saying.');
+              }
+            }
           }
           for (const side of priced.sides) {
             const own = (rosters || []).find(r => Number(r.roster_id) === side.rosterId);

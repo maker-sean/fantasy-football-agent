@@ -67,7 +67,7 @@ Some facts are always present and are NEVER a reason to name a section: the leag
 
 You may also request ONE lookup, which runs a real query and computes an answer that is not in any section. Lookups available:
 - trade_extremes: the fairest or the most lopsided trades. Arguments: order=even or order=lopsided (required), manager=<name> (optional), season=<year> (optional).
-- trade_value: what a trade was worth at market prices ON THE DAY IT WAS MADE, for leagues whose trades are not graded on points (dynasty and keeper). Arguments: manager=<name> (optional), season=<year> (optional). Use for "was that trade fair", "did I win that trade", "how did my trade with X look". Prefer this over the trades section whenever the question is about whether a dynasty trade was GOOD, rather than merely which trades happened.
+- trade_value: GRADES a trade — a letter for each side — on what the pieces were worth on the day it was made, plus what it did to each roster's starting lineup. Works in dynasty and keeper leagues, where trades are not graded on points. Arguments: manager=<name> (optional), season=<year> (optional), order=lopsided|even|recent (optional — use order=lopsided for "worst trade ever" and order=even for "fairest trade"). Use for "was that trade fair", "did I win that trade", "grade that trade", "how did the X and Y trade look", "what was the worst trade". ALWAYS prefer this over the trades section when the question is whether a trade was GOOD; the section only lists what happened.
 - trade_ledger: who has gained or lost the most VALUE in trades, both at the time of each trade and as things stand now. Argument: manager=<name> (optional). Use for "who wins the most trades", "who is the best trader", "who helped their team most", "has my trading been good".
 - draft_grades: grades and RANKS every team on the roster it drafted, with each team's strongest and weakest positions. Argument: manager=<name> (optional). Use for "grade my draft", "who drafted best", "how did my team do", "rank the teams", "who is the best team this year", "am I any good".
 - injuries: who is hurt and how badly, from a player list refreshed every morning, including depth chart rank. Arguments: player=<name> (optional), manager=<name> (optional). Use for "is X playing", "is X hurt", "who is banged up on my team", "any injuries this week". ALWAYS use this for a question about whether somebody is healthy — never answer that from memory.
@@ -108,11 +108,28 @@ async function route(question, opts = {}) {
    * and useless: Halcyon Kings is the league.
    */
   const who = (ctx?.members || []).map(m => m.name).filter(Boolean);
+  /*
+   * The league's FORMAT, because it decides which lookup can answer a trade
+   * question at all. trade_extremes reads stored verdicts, which only redraft
+   * leagues have — asked for the worst trade, a dynasty league went there and
+   * answered "none graded here" while trade_value, which grades them on the
+   * market, sat unused.
+   */
+  const format = ctx?.valueVariant?.dynasty
+    ? '\nThis is a DYNASTY or KEEPER league: its trades have NO stored verdicts, so'
+      + ' trade_extremes cannot answer anything here. Use trade_value with an order for any'
+      + ' question about which trade was best, worst or fairest.'
+    : ctx?.valueVariant
+      ? '\nThis is a REDRAFT league: its trades are graded on points actually scored, so'
+        + ' trade_extremes is the right lookup for best and worst.'
+      : '';
+
   const roster = who.length || ctx?.leagueName
     ? `\n\nThis league is called "${ctx?.leagueName || 'unknown'}" — that is the LEAGUE, never a manager.`
       + (who.length ? ` The managers are: ${who.join(', ')}. A manager argument must be one of those names,`
                     + ' and if the question names nobody from that list, omit the argument.' : '')
-    : '';
+      + format
+    : format;
 
   /*
    * Recent chat matters more here than it does when answering. "Was that a

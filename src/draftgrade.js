@@ -198,4 +198,67 @@ function gradeDraft({ rosters, rosterPositions, proj, nameOf, values = null, roo
   };
 }
 
-module.exports = { gradeDraft, gradeFor, BANDS };
+
+/**
+ * What a trade did to each side's STARTING LINEUP.
+ *
+ * Market value is zero-sum: whatever one side gained the other lost, which is
+ * why the value grade mirrors. Roster fit is not. Four good receivers and no
+ * tight end, against three tight ends and no receiver, swapped at identical
+ * value, leaves BOTH lineups better — and a grade that can only name a winner
+ * calls one of those two a loser for making the best trade available to them.
+ *
+ * Measured the only honest way: build the best legal lineup before the trade
+ * and after it, and take the difference. Both numbers can be positive, and when
+ * they are, that is the finding.
+ *
+ * CURRENT SEASON ONLY. Rosters are today's, so rewinding one trade off them is
+ * sound while rewinding three years of moves is not. Asked about an old trade
+ * this returns nothing rather than a confident number about a roster that no
+ * longer exists — the same rule the handcuff check follows.
+ */
+function lineupImpact(trade, { rosters, rosterPositions, proj }) {
+  if (!trade?.received || !rosters?.length) return null;
+
+  const points = (playerIds, rosterId) => {
+    const swapped = rosters.map(r =>
+      Number(r.roster_id) === Number(rosterId) ? { ...r, players: playerIds } : r);
+    const needs = draftNeeds(swapped, proj, rosterId, { rosterPositions });
+    if (!needs) return null;
+    return needs.lineup
+      .filter(s => s.player)
+      .reduce((a, s) => a + (s.player.points || 0), 0);
+  };
+
+  const sides = [];
+  for (const [rid, got] of Object.entries(trade.received)) {
+    const other = (trade.roster_ids || []).find(x => Number(x) !== Number(rid));
+    const gave = trade.received[String(other)] || [];
+    const current = (rosters.find(r => Number(r.roster_id) === Number(rid)) || {}).players || [];
+    if (!current.length) continue;
+
+    // Rewind: take back what they received, restore what they sent away.
+    const before = current.filter(p => !got.includes(p)).concat(gave);
+    const a = points(before, rid);
+    const b = points(current, rid);
+    if (a == null || b == null) continue;
+    sides.push({
+      rosterId: Number(rid),
+      before: Math.round(a * 10) / 10,
+      after: Math.round(b * 10) / 10,
+      delta: Math.round((b - a) * 10) / 10,
+    });
+  }
+  if (sides.length !== 2) return null;
+
+  /*
+   * "Both better" needs a threshold. A tenth of a point is noise in a
+   * projection and calling it a mutual win would make almost every trade one.
+   */
+  const MEANINGFUL = 5;
+  const bothUp = sides.every(s => s.delta >= MEANINGFUL);
+  const bothDown = sides.every(s => s.delta <= -MEANINGFUL);
+  return { sides, bothUp, bothDown, meaningful: MEANINGFUL };
+}
+
+module.exports = { gradeDraft, lineupImpact, gradeFor, BANDS };

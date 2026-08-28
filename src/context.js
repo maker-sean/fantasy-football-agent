@@ -1159,11 +1159,24 @@ function contextBlock(ctx, opts = {}) {
     L.push(`TRADES: ${ctx.allTradeCount || ctx.ungradedTrades.length} completed trades are on`
          + ' record for this league across every season it has played. They HAVE happened —'
          + ' never say this league has not traded.');
-    L.push('  They are NOT graded here, and that is deliberate rather than missing data: this'
-         + ' is a keeper or dynasty league, where a trade made years ago is still resolving,'
-         + ' so a frozen verdict would be a stale opinion dressed as a result. You know who'
-         + ' traded and what moved. You do NOT know who won any of them, and you must not'
-         + ' rank them, call one lopsided, or say who got the better of it.');
+    /*
+     * This used to end "you do not know who won any of them, and you must not
+     * rank them" — which was true when written and became false the day trades
+     * could be priced against the market. The reply then refused to grade a
+     * trade while a lookup that grades it sat one call away, and said "won't
+     * ever", which is a promise the system no longer keeps.
+     *
+     * What remains true is narrower: no verdict is STORED, because a dynasty
+     * trade keeps resolving. A grade computed on request is a different thing
+     * from a frozen one.
+     */
+    L.push('  No verdict is stored for these, deliberately: this is a keeper or dynasty league'
+         + ' and a trade made years ago is still resolving, so a frozen grade would be a stale'
+         + ' opinion dressed as a result. What is listed here is only who traded and what moved.');
+    L.push('  They CAN still be graded on what the pieces were worth — that is a lookup, not'
+         + ' this block. If somebody asks who won one, or which was worst, say you can pull the'
+         + ' values up. Never say this league\'s trades cannot be graded, and never say you will'
+         + ' not grade them.');
     if (ctx.allTradeCount > ctx.ungradedTrades.length) {
       L.push(`  The ${ctx.ungradedTrades.length} most recent are listed. There are`
            + ` ${ctx.allTradeCount} in total, so do not count off this list.`);
