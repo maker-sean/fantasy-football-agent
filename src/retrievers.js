@@ -32,6 +32,161 @@ const nameFor = (ctx, rid) => {
 const QUERIES = {
 
   /*
+   * Every team's draft, graded and ranked, with what each roster is good at.
+   *
+   * THE MEASURE IS THE STARTING LINEUP, not the roster. A bench stacked with
+   * running backs scores nothing, and a team can lead the league in total
+   * projected points while starting a hole at tight end.
+   *
+   * SEASON projections, never weekly. The first cut used the current week's and
+   * every team came back with an identical wall of empty slots and a total of
+   * about 21 — one quarterback — because a preseason week projects almost
+   * nobody. Grading a draft on one week would be wrong even if it worked.
+   *
+   * Ranks, grades and the positional strengths are all computed in
+   * src/draftgrade.js. Handing a model twelve rosters and asking which drafted
+   * best is asking for a ranking nothing downstream can check.
+   */
+  draft_grades: {
+    describe: 'Grades and ranks every team in the league on the roster they drafted, with '
+            + 'each team\'s strongest and weakest positions. Use for "grade my draft", '
+            + '"who drafted best", "how did my team do", "rank the rosters", "who is the '
+            + 'best team", "am I any good this year". Argument: manager=<name> (optional) '
+            + 'to focus on one team; the full ranking comes either way.',
+    args: { manager: 'string, a manager name to detail, or omit for the whole league' },
+    async run(ctx, args) {
+      const sleeper = require('./sleeper');
+      const dg = require('./draftgrade');
+
+      const [lg, rosters, proj] = await Promise.all([
+        sleeper.leagueSettings(ctx.sleeperLeagueId).catch(() => null),
+        sleeper.rosters(ctx.sleeperLeagueId).catch(() => null),
+        sleeper.seasonProjections(ctx.season).catch(() => null),
+      ]);
+      if (!lg || !rosters || !proj) return 'Could not read the league from Sleeper right now.';
+
+      const drafted = (rosters || []).reduce((a, r) => a + (r.players || []).length, 0);
+      if (!drafted) {
+        /*
+         * Empty rosters mean the draft has not happened, which is a different
+         * sentence from "everybody is terrible" — and the grades would happily
+         * render as twelve identical zeroes without this.
+         */
+        return 'Nobody has drafted yet in this league — every roster is empty, so there is'
+             + ' nothing to grade. Say the draft has not happened.';
+      }
+
+      const nameOf = rid => {
+        const m = (ctx.members || []).find(x => Number(x.rosterId) === Number(rid));
+        return m?.name || `roster ${rid}`;
+      };
+
+      /*
+       * Dynasty is graded on the MARKET, not on this season's points.
+       *
+       * A rookie taken in the second round projects near nothing this year —
+       * which is the point of the pick, you are betting he becomes a top-ten
+       * back in a few seasons. Grading on season projections marks a team DOWN
+       * for the asset it just drafted, so it gets exactly backwards the thing a
+       * draft grade is for. Market values already price that bet.
+       */
+      const dynasty = Boolean(ctx.valueVariant?.dynasty);
+      let values = null;
+      if (dynasty) {
+        const { rows } = await db.query(
+          `select sleeper_id, value from player_values
+            where source = 'ktc' and superflex = $1 and sleeper_id is not null
+              and captured_on = (select max(captured_on) from player_values)`,
+          [Boolean(ctx.valueVariant?.superflex)]);
+        if (rows.length) values = new Map(rows.map(r => [String(r.sleeper_id), r.value]));
+      }
+
+      const out = dg.gradeDraft({
+        rosters, rosterPositions: lg.roster_positions, proj, nameOf,
+        values, basis: dynasty ? 'market' : 'projection',
+      });
+      if (!out) return 'Could not build lineups for this league.';
+      const market = out.basis === 'market';
+      const L = [market
+        ? 'ROSTER GRADES, by DYNASTY MARKET VALUE of the whole roster. Ranks and letters are'
+          + ' computed, so quote them and do not re-rank.'
+        : 'DRAFT GRADES. Every team ranked on the STARTING LINEUP it can field, by'
+          + ` Sleeper's ${ctx.season} season projections. Ranks and letters are computed,`
+          + ' so quote them and do not re-rank.'];
+      if (market) {
+        L.push('  Market value, NOT this season\'s points, and that is deliberate. A rookie just'
+             + ' drafted projects near nothing this year — that is the point of the pick, the bet'
+             + ' is that he becomes a top-ten player in a few seasons — so grading dynasty on'
+             + ' season projections marks a team DOWN for the asset it just acquired. Market'
+             + ' values already price age and future upside.');
+        L.push('  This is a keeper or dynasty league, so a roster is years of accumulation rather'
+             + ' than one draft. Call it a roster ranking, not a draft grade.');
+        L.push(`  League average roster value: ${out.mean}.`
+             + ` Average projected starting lineup, a DIFFERENT question: ${out.lineupMean} points.`);
+      } else {
+        L.push(`  League average starting lineup: ${out.mean} projected points.`);
+      }
+      L.push('');
+      /*
+       * EVERY line carries its own strengths and weaknesses.
+       *
+       * The detail block only covered the team asked about, or the top and
+       * bottom when nobody was named — so "what are my weaknesses" came back
+       * "no weaknesses flagged, clean roster" to a manager sitting 11th at
+       * running back and 12th at tight end. The asker's identity is not always
+       * known here, and an absent line reads as an absence of the thing.
+       *
+       * Twelve short lines is a few hundred tokens and removes the whole class.
+       */
+      for (const t of out.teams) {
+        const up = (t.strengths || []).map(x => x.pos).join('/');
+        const down = (t.weaknesses || []).map(x => x.pos).join('/');
+        const score = market
+          ? `${t.market} in market value (${t.priced} players priced`
+            + `${t.unpriced ? `, ${t.unpriced} the market does not cover` : ''})`
+          : `${t.total} projected`;
+        L.push(`  ${String(t.rank).padStart(2)}. ${t.name}: ${t.grade}, ${score}`
+             + ` (${t.pctOver > 0 ? '+' : ''}${t.pctOver}% vs average, ${t.say})`
+             + (market ? `. THIS SEASON they are ${t.lineupRank} of ${out.teams.length} on`
+                       + ` projected lineup (${t.total})` : '')
+             + `. Strong: ${up || 'nothing stands out'}. Weak: ${down || 'nothing glaring'}`
+             + (t.holes.length ? `. Cannot fill: ${t.holes.join(', ')}` : ''));
+      }
+
+      const focus = args.manager
+        ? out.teams.filter(t => t.name.toLowerCase().includes(String(args.manager).toLowerCase()))
+        : [out.teams[0], out.teams[out.teams.length - 1]];
+      if (args.manager && !focus.length) {
+        L.push('');
+        L.push(`  Nobody matching "${args.manager}" is in this league, so no team is detailed.`);
+        return L.join('\n');
+      }
+      if (args.manager && focus.length > 1) {
+        L.push('');
+        L.push(`  "${args.manager}" matches ${focus.length} managers — `
+             + `${focus.map(f => f.name).join(' and ')}. Different people; ask which.`);
+      }
+
+      L.push('');
+      L.push('  DETAIL — strengths and weaknesses are that position ranked ACROSS THE LEAGUE,'
+           + ' not against some absolute bar:');
+      for (const t of focus.slice(0, 3)) {
+        const up = (t.strengths || []).map(x => `${x.pos} ${x.rank}${x.rank === 1 ? 'st' : x.rank === 2 ? 'nd' : x.rank === 3 ? 'rd' : 'th'} in the league (${x.points})`);
+        const down = (t.weaknesses || []).map(x => `${x.pos} ${x.rank}${x.rank === 1 ? 'st' : 'th'} of ${out.teams.length} (${x.points})`);
+        L.push(`    ${t.name} — ${t.grade}, ${t.rank} of ${out.teams.length}.`);
+        L.push(`      Best at: ${up.join('; ') || 'nothing stands out'}`);
+        L.push(`      Worst at: ${down.join('; ') || 'no glaring weakness'}`);
+        if (t.holes.length) {
+          L.push(`      CANNOT FILL: ${t.holes.join(', ')} — no projected player for those slots.`);
+        }
+      }
+      L.push('  Projections are Sleeper\'s, not yours. A grade here is what the roster projects'
+           + ' to, not what it will do.');
+      return L.join('\n');
+    },
+  },
+
+  /*
    * Who is hurt, and how badly.
    *
    * The players table has carried injury_status for 718 men, refreshed every
