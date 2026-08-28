@@ -101,9 +101,20 @@ const QUERIES = {
         if (rows.length) values = new Map(rows.map(r => [String(r.sleeper_id), r.value]));
       }
 
+      /*
+       * Which of those are rookies, so a grade can say how much of it rests on
+       * the market's least certain prices.
+       */
+      let rookies = null;
+      if (values) {
+        const { rows } = await db.query(
+          `select player_id from players where years_exp = 0 and team is not null`);
+        if (rows.length) rookies = new Set(rows.map(r => String(r.player_id)));
+      }
+
       const out = dg.gradeDraft({
         rosters, rosterPositions: lg.roster_positions, proj, nameOf,
-        values, basis: dynasty ? 'market' : 'projection',
+        values, rookies, basis: dynasty ? 'market' : 'projection',
       });
       if (!out) return 'Could not build lineups for this league.';
       const market = out.basis === 'market';
@@ -149,6 +160,14 @@ const QUERIES = {
              + ` (${t.pctOver > 0 ? '+' : ''}${t.pctOver}% vs average, ${t.say})`
              + (market ? `. THIS SEASON they are ${t.lineupRank} of ${out.teams.length} on`
                        + ` projected lineup (${t.total})` : '')
+             + (market && t.rookieShare >= 20
+                 ? `. ${t.rookieShare}% of that value is ROOKIES, the least certain prices in the`
+                   + ' market — the value is real but hold the grade more loosely'
+                 : '')
+             + (market && t.rookieCount
+                 ? `. ${t.rookieCount} rookie${t.rookieCount === 1 ? '' : 's'} on this roster count`
+                   + ' for NOTHING here, see the coverage note'
+                 : '')
              + `. Strong: ${up || 'nothing stands out'}. Weak: ${down || 'nothing glaring'}`
              + (t.holes.length ? `. Cannot fill: ${t.holes.join(', ')}` : ''));
       }
@@ -178,6 +197,27 @@ const QUERIES = {
         L.push(`      Worst at: ${down.join('; ') || 'no glaring weakness'}`);
         if (t.holes.length) {
           L.push(`      CANNOT FILL: ${t.holes.join(', ')} — no projected player for those slots.`);
+        }
+      }
+      if (market) {
+        const uncovered = out.teams.reduce((a, t) => a + t.unpriced, 0);
+        const rookiesHeld = out.teams.reduce((a, t) => a + (t.rookieCount || 0), 0);
+        L.push('');
+        L.push(`  COVERAGE: the value source prices a few hundred assets, not every player, so`
+             + ` ${uncovered} rostered players across the league carry no value here and are`
+             + ' excluded from every total above. Mostly deep-bench veterans.');
+        if (rookiesHeld) {
+          /*
+           * The one that would quietly get a draft grade backwards. Not a
+           * single rookie in the source carries a price, so a team that just
+           * drafted well is counted at zero for exactly the assets it drafted —
+           * the same failure as grading dynasty on season projections, arriving
+           * by a different route.
+           */
+          L.push(`  AND ${rookiesHeld} of those are ROOKIES, who this source does not price at all.`
+               + ' A team that just drafted well is therefore UNDERCOUNTED here, for precisely the'
+               + ' assets it drafted. Say that plainly if a recently drafted team grades badly;'
+               + ' do not present the grade as the whole story.');
         }
       }
       L.push('  Projections are Sleeper\'s, not yours. A grade here is what the roster projects'

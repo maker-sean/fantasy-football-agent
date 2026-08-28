@@ -67,6 +67,10 @@ async function allPlayers() {
       // position, which is true of four Raiders running backs.
       depth_chart_order: Number.isFinite(p.depth_chart_order) ? p.depth_chart_order : null,
       depth_chart_position: p.depth_chart_position || null,
+      // Rookie-ness, which is the least certain corner of any dynasty price:
+      // no NFL snaps to value, only college tape and draft capital.
+      years_exp: Number.isFinite(p.years_exp) ? p.years_exp : null,
+      age: Number.isFinite(p.age) ? p.age : null,
     });
   }
   return out;

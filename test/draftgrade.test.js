@@ -163,6 +163,29 @@ const mkProj = rows => new Map(rows.map(r => [String(r.playerId), r]));
     assert.strictEqual(t1.market, 1000);
   });
 
+  await it('an unpriced ROOKIE is counted apart from an unpriced veteran', async () => {
+    /*
+     * The failure this guards, which cannot be observed live until a rookie
+     * draft completes and Sleeper puts the picks on rosters.
+     *
+     * No rookie in the value source carries a price. So a team that just drafted
+     * well is counted at ZERO for exactly the assets it drafted — the same way
+     * grading dynasty on season projections gets a draft grade backwards, only
+     * arriving by coverage instead of by measure. An unpriced deep-bench veteran
+     * is a shrug; an unpriced rookie is the pick itself.
+     */
+    const out = dg.gradeDraft({
+      rosters: [{ roster_id: 1, players: ['1', '5', '9', '4'] }, { roster_id: 2, players: ['2', '6'] }],
+      rosterPositions: SLOTS, proj,
+      values: new Map([['1', 500], ['5', 500], ['2', 400], ['6', 400]]),
+      rookies: new Set(['9']),            // '4' is an unpriced veteran
+      basis: 'market', nameOf: r => `T${r}`,
+    });
+    const t1 = out.teams.find(t => t.rosterId === 1);
+    assert.strictEqual(t1.unpriced, 2, 'both uncovered players count as unpriced');
+    assert.strictEqual(t1.rookieCount, 1, 'and the rookie among them is named separately');
+  });
+
   await it('with no values at all it falls back to projections rather than zeroing everyone', async () => {
     const out = dg.gradeDraft({ rosters, rosterPositions: SLOTS, proj, values: null, basis: 'market', nameOf: r => `T${r}` });
     assert.strictEqual(out.basis, 'projection');

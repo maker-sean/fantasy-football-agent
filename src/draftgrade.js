@@ -48,7 +48,8 @@ const gradeFor = over => (BANDS.find(b => over > b.over) || BANDS[BANDS.length -
  * @param o.nameOf           rosterId -> manager name
  * @param o.basis            'projection' (redraft) or 'market' (dynasty)
  */
-function gradeDraft({ rosters, rosterPositions, proj, nameOf, values = null, basis = 'projection' }) {
+function gradeDraft({ rosters, rosterPositions, proj, nameOf, values = null, rookies = null,
+                      basis = 'projection' }) {
   const teams = [];
 
   for (const r of rosters || []) {
@@ -94,13 +95,28 @@ function gradeDraft({ rosters, rosterPositions, proj, nameOf, values = null, bas
     let market = null;
     let priced = 0;
     let unpriced = 0;
+    let rookieValue = 0;
+    let rookieCount = 0;
     if (values) {
       market = 0;
       for (const id of r.players || []) {
         const v = values.get(String(id));
-        if (v == null) { unpriced++; continue; }
+        if (v == null) {
+          unpriced++;
+          // Counted separately: an unpriced VETERAN is a deep-bench body the
+          // source skipped, while an unpriced ROOKIE is an asset a team just
+          // spent a pick on. Same absence, very different consequence.
+          if (rookies && rookies.has(String(id))) rookieCount++;
+          continue;
+        }
         market += v;
         priced++;
+        // Tracked, not discounted. Dynasty prices DO project future production
+        // — that is what they are for — but a rookie has no NFL snaps behind
+        // his, only college tape and draft capital. A grade resting mostly on
+        // rookies rests on the least certain prices in the source, and the
+        // honest move is to say so rather than to second-guess the market.
+        if (rookies && rookies.has(String(id))) rookieValue += v;
       }
     }
 
@@ -111,6 +127,9 @@ function gradeDraft({ rosters, rosterPositions, proj, nameOf, values = null, bas
       market,
       priced,
       unpriced,
+      rookieValue: values ? rookieValue : null,
+      rookieCount: values ? rookieCount : null,
+      rookieShare: values && market ? Math.round((rookieValue / market) * 1000) / 10 : null,
       starters: starters.length,
       holes,
       byPos,

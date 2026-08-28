@@ -568,20 +568,24 @@ async function upsertPlayers(players) {
   const notes = players.map(p => p.injury_notes ?? null);
   const depthOrder = players.map(p => p.depth_chart_order ?? null);
   const depthPos = players.map(p => p.depth_chart_position ?? null);
+  const exp = players.map(p => p.years_exp ?? null);
+  const ages = players.map(p => p.age ?? null);
 
   await query(
     `insert into players (player_id, full_name, position, team,
                           injury_status, injury_body_part, player_status,
-                          injury_notes, depth_chart_order, depth_chart_position, updated_at)
+                          injury_notes, depth_chart_order, depth_chart_position,
+                          years_exp, age, updated_at)
      select p.player_id, p.full_name, p.position, p.team,
             p.injury_status, p.injury_body_part, p.player_status,
-            p.injury_notes, p.depth_chart_order, p.depth_chart_position, now()
+            p.injury_notes, p.depth_chart_order, p.depth_chart_position,
+            p.years_exp, p.age, now()
      from unnest($1::text[], $2::text[], $3::text[], $4::text[],
                  $5::text[], $6::text[], $7::text[],
-                 $8::text[], $9::int[], $10::text[])
+                 $8::text[], $9::int[], $10::text[], $11::int[], $12::int[])
        as p(player_id, full_name, position, team,
             injury_status, injury_body_part, player_status,
-            injury_notes, depth_chart_order, depth_chart_position)
+            injury_notes, depth_chart_order, depth_chart_position, years_exp, age)
      on conflict (player_id) do update
        set full_name            = excluded.full_name,
            position             = excluded.position,
@@ -592,8 +596,10 @@ async function upsertPlayers(players) {
            injury_notes         = excluded.injury_notes,
            depth_chart_order    = excluded.depth_chart_order,
            depth_chart_position = excluded.depth_chart_position,
+           years_exp            = excluded.years_exp,
+           age                  = excluded.age,
            updated_at = now()`,
-    [ids, names, positions, teams, injuries, parts, statuses, notes, depthOrder, depthPos]
+    [ids, names, positions, teams, injuries, parts, statuses, notes, depthOrder, depthPos, exp, ages]
   );
   return players.length;
 }
