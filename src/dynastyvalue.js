@@ -108,6 +108,64 @@ function gradeFor(margin, pot) {
   return { edge: Math.round(edge * 1000) / 10, won: band.won, lost: band.lost, say: band.say };
 }
 
+
+/**
+ * Every price needed for a set of trades, in two queries instead of two hundred.
+ *
+ * priceTrade reads the database itself, which is fine for one trade and hopeless
+ * for a ledger: fifty-six trades priced at their own date AND at today is 112
+ * calls and 25 seconds, against a reply budget of seven or eight.
+ *
+ * So the caller can hand over a book. Resolving which capture a date lands on is
+ * itself a query — captures are weekly, so "as at the 23rd" means the newest on
+ * or before it — and doing that per trade is most of the cost.
+ */
+async function loadValueBook({ dates, superflex = false }) {
+  const wanted = [...new Set(dates.filter(Boolean).map(d =>
+    (d instanceof Date ? d.toISOString() : String(d)).slice(0, 10)))];
+
+  // Which capture each requested date actually resolves to, all at once.
+  const { rows: resolved } = await db.query(
+    `select d::date as asked,
+            (select max(captured_on) from player_values where captured_on <= d::date) as capture
+       from unnest($1::date[]) as d`, [wanted.length ? wanted : [new Date().toISOString().slice(0, 10)]]);
+  const { rows: [newest] } = await db.query('select max(captured_on) d from player_values');
+
+  const asOfCapture = new Map(resolved
+    .filter(r => r.capture)
+    .map(r => [r.asked.toISOString().slice(0, 10), r.capture]));
+  const captures = [...new Set([...asOfCapture.values(), newest?.d].filter(Boolean))];
+  if (!captures.length) return null;
+
+  const { rows } = await db.query(
+    `select v.captured_on, v.sleeper_id, v.name, v.value, v.position, p.position as pos, p.team
+       from player_values v left join players p on p.player_id = v.sleeper_id
+      where v.superflex = $1 and v.captured_on = any($2::date[])`,
+    [superflex, captures]);
+
+  const book = new Map();
+  const key = d => (d instanceof Date ? d.toISOString() : String(d)).slice(0, 10);
+  for (const r of rows) {
+    const k = key(r.captured_on);
+    if (!book.has(k)) book.set(k, { capturedOn: r.captured_on, byId: new Map(), byName: new Map() });
+    const e = book.get(k);
+    if (r.sleeper_id) e.byId.set(String(r.sleeper_id), { name: r.name, value: r.value, position: r.pos, team: r.team });
+    e.byName.set(r.name, r.value);
+    if (r.position === 'PICK') e.byName.set(r.name, r.value);
+  }
+
+  return {
+    superflex,
+    newest: newest?.d || null,
+    // asOf -> the page of the book to read. Null asOf means today's.
+    pageFor(asOf) {
+      const k = asOf ? key(asOf) : null;
+      const capture = k ? asOfCapture.get(k) : (newest?.d || null);
+      return capture ? book.get(key(capture)) || null : null;
+    },
+  };
+}
+
 /**
  * Value every asset on both sides of a trade.
  *
@@ -120,13 +178,24 @@ function gradeFor(margin, pot) {
 async function priceTrade(trade, o = {}) {
   const { superflex = false, teams = 12, slots = new Map(), asOf = null } = o;
 
-  const { rows: [cap] } = await db.query(
-    asOf
-      ? `select max(captured_on) d from player_values where captured_on <= $1`
-      : `select max(captured_on) d from player_values`,
-    asOf ? [asOf] : []);
-  const on = cap?.d;
-  if (!on) return null;
+  /*
+   * A preloaded book skips every query below. Same answers, two orders of
+   * magnitude fewer round trips — see loadValueBook.
+   */
+  const page = o.book ? o.book.pageFor(asOf) : null;
+  let on;
+  if (o.book) {
+    if (!page) return null;
+    on = page.capturedOn;
+  } else {
+    const { rows: [cap] } = await db.query(
+      asOf
+        ? `select max(captured_on) d from player_values where captured_on <= $1`
+        : `select max(captured_on) d from player_values`,
+      asOf ? [asOf] : []);
+    on = cap?.d;
+    if (!on) return null;
+  }
 
   const received = trade.received || {};
   const rosterIds = trade.roster_ids || Object.keys(received).map(Number);
@@ -142,7 +211,12 @@ async function priceTrade(trade, o = {}) {
   // Players received.
   const ids = [...new Set(Object.values(received).flat())];
   const byId = new Map();
-  if (ids.length) {
+  if (page) {
+    for (const pid of ids) {
+      const hit = page.byId.get(String(pid));
+      if (hit) byId.set(String(pid), { ...hit, sleeper_id: pid });
+    }
+  } else if (ids.length) {
     const { rows } = await db.query(
       `select v.sleeper_id, v.name, v.value, p.position, p.team
          from player_values v left join players p on p.player_id = v.sleeper_id
@@ -185,7 +259,12 @@ async function priceTrade(trade, o = {}) {
     const { label } = labelFor(pk);
     if (label) labels.set(label, null);
   }
-  if (labels.size) {
+  if (labels.size && page) {
+    for (const label of labels.keys()) {
+      const v = page.byName.get(label);
+      if (v != null) labels.set(label, v);
+    }
+  } else if (labels.size) {
     const { rows } = await db.query(
       `select name, value from player_values
         where captured_on = $1 and superflex = $2 and position = 'PICK' and name = any($3::text[])`,
@@ -213,9 +292,12 @@ async function priceTrade(trade, o = {}) {
   const assumptions = [];
   const missing = [...labels].filter(([, v]) => v == null).map(([k]) => k);
   if (missing.length) {
-    const { rows: priced } = await db.query(
-      `select name, value from player_values
-        where captured_on = $1 and superflex = $2 and position = 'PICK'`, [on, superflex]);
+    const priced = page
+      ? [...page.byName].filter(([n]) => /^\d{4} (Early|Mid|Late) (1st|2nd|3rd|4th)$/.test(n))
+          .map(([name, value]) => ({ name, value }))
+      : (await db.query(
+          `select name, value from player_values
+            where captured_on = $1 and superflex = $2 and position = 'PICK'`, [on, superflex])).rows;
     const byShape = new Map();
     for (const r of priced) {
       const m = /^(\d{4}) (Early|Mid|Late) (1st|2nd|3rd|4th)$/.exec(r.name);
@@ -343,4 +425,90 @@ async function rosterFlags(playerIds, rosterPlayerIds) {
   return flags;
 }
 
-module.exports = { priceTrade, rosterFlags, gradeFor, pickLabel, bucketFor, slotsFromDraft, slotsFromFinish };
+
+/**
+ * Who has gained and lost value in trades — at the time, and in hindsight.
+ *
+ * TWO NUMBERS, because they answer different questions and disagree. "At the
+ * time" is whether the market agreed with you the day you made the deal.
+ * "Today" is whether it worked out. A manager who systematically buys players
+ * the market later re-rates looks bad on the first and good on the second, and
+ * that gap is the whole story: this league's most active trader is 13,259 down
+ * at the time and 7,666 down today, having clawed back 5,593 without ever
+ * getting to level.
+ *
+ * NO FROZEN VERDICT. A dynasty trade is not over for years, which is why
+ * nothing here is stored — the answer is a function of when you ask, and a
+ * grade written down once would be a stale opinion presented as a result.
+ *
+ * Coverage is reported rather than assumed. Older trades fall out entirely when
+ * a player leaves the value source's few-hundred-asset universe, and a ledger
+ * that quietly skipped them would rank managers on who traded recently.
+ */
+async function tradeLedger({ trades, book, slots, teams = 12, slotSeason = null, nameOf }) {
+  const per = new Map();
+  let bothPriced = 0;
+  let thenOnly = 0;
+  let neither = 0;
+
+  const bump = (rid, field, delta) => {
+    const k = nameOf ? nameOf(rid) : `roster ${rid}`;
+    const e = per.get(k) || { name: k, then: 0, thenMatched: 0, now: 0, trades: 0, wonThen: 0, lostThen: 0 };
+    e[field] += delta;
+    per.set(k, e);
+    return e;
+  };
+
+  for (const t of trades || []) {
+    const at = await priceTrade(t, { book, slots, teams, slotSeason, asOf: t.status_updated_at });
+    const today = await priceTrade(t, { book, slots, teams, slotSeason, asOf: null });
+    if (!at || at.margin == null) { neither++; continue; }
+
+    const winner = at.sides[0].rosterId;
+    const loser = at.sides[at.sides.length - 1].rosterId;
+
+    const w = bump(winner, 'then', at.margin);
+    const l = bump(loser, 'then', -at.margin);
+    w.trades++; l.trades++;
+    w.wonThen++; l.lostThen++;
+
+    /*
+     * Today's margin is keyed to the SAME side that won at the time, so a
+     * negative number means the deal has since turned against them. Re-sorting
+     * by today's winner would silently compare two different things.
+     */
+    if (today && today.margin != null) {
+      const a = today.sides.find(s => s.rosterId === winner);
+      const b = today.sides.find(s => s.rosterId === loser);
+      if (a && b) {
+        bump(winner, 'now', a.value - b.value);
+        bump(loser, 'now', b.value - a.value);
+        /*
+         * The SAME trade's then-value, banked separately.
+         *
+         * A swing is only a swing if both ends cover the same deals. Summing
+         * "then" over every priced trade and "now" over the subset that still
+         * prices made the league's most active trader look 18,295 recovered
+         * when most of that was trades simply missing from the second total.
+         */
+        bump(winner, 'thenMatched', at.margin);
+        bump(loser, 'thenMatched', -at.margin);
+        bothPriced++;
+      } else thenOnly++;
+    } else thenOnly++;
+  }
+
+  const rows = [...per.values()].map(r => ({
+    ...r,
+    then: Math.round(r.then),
+    thenMatched: Math.round(r.thenMatched),
+    now: Math.round(r.now),
+    // Only over deals that price at both ends. Anything else is comparing two
+    // different sets of trades and calling the difference a result.
+    swing: Math.round(r.now - r.thenMatched),
+  })).sort((a, b) => b.now - a.now);
+
+  return { rows, coverage: { bothPriced, thenOnly, unpriced: neither, total: (trades || []).length } };
+}
+
+module.exports = { priceTrade, loadValueBook, tradeLedger, rosterFlags, gradeFor, pickLabel, bucketFor, slotsFromDraft, slotsFromFinish };

@@ -32,6 +32,94 @@ const nameFor = (ctx, rid) => {
 const QUERIES = {
 
   /*
+   * Who has gained and lost value in trades, at the time and in hindsight.
+   *
+   * TOP AND BOTTOM ONLY. A league can have hundreds of trades and a dozen
+   * managers, and a full table is a wall nobody reads and a lot of tokens. The
+   * ends are the argument; the middle is available by asking for a name.
+   */
+  trade_ledger: {
+    describe: 'Who has gained or lost the most value in trades, both AT THE TIME of each '
+            + 'trade and AS THINGS STAND NOW. Use for "who wins the most trades", "who is '
+            + 'the best trader", "who helped their team most", "has my trading been any '
+            + 'good", "who got better this offseason". Argument: manager=<name> (optional) '
+            + 'to see one manager wherever they place.',
+    args: { manager: 'string, a manager name, or omit for the top and bottom of the league' },
+    async run(ctx, args) {
+      const dv = require('./dynastyvalue');
+      const sleeper = require('./sleeper');
+
+      const { rows: trades } = await db.query(
+        `select t.* from trades t join leagues l on l.id = t.league_id
+          where l.sleeper_league_id = any($1::text[]) and t.status = 'complete'`,
+        [ctx.chainIds || []]);
+      if (!trades.length) return 'No completed trades are on record for this league.';
+
+      const superflex = Boolean(ctx.valueVariant?.superflex);
+      const book = await dv.loadValueBook({
+        dates: [...trades.map(t => t.status_updated_at), null], superflex });
+      if (!book) return 'No market values are loaded, so trades cannot be valued.';
+
+      const slotMap = await sleeper.draftSlots(ctx.draftSchedule?.draftId).catch(() => null);
+      const nameOf = rid => {
+        const m = (ctx.members || []).find(x => Number(x.rosterId) === Number(rid));
+        return m?.name || `roster ${rid}`;
+      };
+      const out = await dv.tradeLedger({
+        trades, book, slots: slotMap ? dv.slotsFromDraft(slotMap) : new Map(),
+        teams: ctx.draftSchedule?.teams || 12,
+        slotSeason: ctx.draftSchedule?.season, nameOf,
+      });
+      if (!out.rows.length) return 'No trade could be valued for this league.';
+
+      const c = out.coverage;
+      const L = ['TRADE LEDGER. Two different questions, kept apart:',
+        '  AT THE TIME — did the market agree with you the day you made the deal.',
+        '  NOW — has it worked out since. A manager who buys players the market later'
+        + ' re-rates looks bad on the first and good on the second, and that gap is the story.',
+        `  Values compared over the ${c.bothPriced} trades that price at BOTH dates, of ${c.total}`
+        + ` on record. ${c.thenOnly} price only at the time and ${c.unpriced} not at all — older`
+        + ' players drop out of the value source entirely, so this leans recent. Say that if you'
+        + ' quote a total.'];
+
+      const N = Math.min(4, Math.max(1, Math.floor(out.rows.length / 3)));
+      const show = args.manager
+        ? out.rows.filter(r => r.name.toLowerCase().includes(String(args.manager).toLowerCase()))
+        : null;
+
+      if (args.manager && !show.length) {
+        return `Nobody matching "${args.manager}" has a trade on record here.`;
+      }
+
+      const line = (r, i) => `    ${r.name}: ${r.now > 0 ? '+' : ''}${r.now} as things stand`
+        + `, ${r.thenMatched > 0 ? '+' : ''}${r.thenMatched} at the time`
+        + ` (swing ${r.swing > 0 ? '+' : ''}${r.swing}), ${r.wonThen}-${r.lostThen} on the day`;
+
+      if (show) {
+        L.push('');
+        for (const r of show) {
+          const at = out.rows.indexOf(r) + 1;
+          L.push(`  ${r.name} is ${at} of ${out.rows.length}:`);
+          L.push(line(r));
+        }
+        return L.join('\n');
+      }
+
+      L.push('');
+      L.push(`  BEST ${N}, as things stand:`);
+      for (const r of out.rows.slice(0, N)) L.push(line(r));
+      L.push(`  WORST ${N}:`);
+      for (const r of out.rows.slice(-N).reverse()) L.push(line(r));
+      const middle = out.rows.length - 2 * N;
+      if (middle > 0) {
+        L.push(`  The other ${middle} are in the middle and NOT listed. Do not say they have no`
+             + ' record or rank them — offer to pull up a name.');
+      }
+      return L.join('\n');
+    },
+  },
+
+  /*
    * Every team's draft, graded and ranked, with what each roster is good at.
    *
    * THE MEASURE IS THE STARTING LINEUP, not the roster. A bench stacked with

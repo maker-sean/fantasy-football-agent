@@ -197,6 +197,19 @@ const JOBS = [
     console.log(`[values] thinned ${out.deleted} rows; `
               + `${out.after.n} remain across ${out.after.days} captures`);
   }],
+  /*
+   * The trade ledger, twice a season. Checked daily; it sends itself only in
+   * the opening week of the regular season and once the season is over, and
+   * only once per league per phase.
+   *
+   * Daily rather than on the exact day because a cron that fires once a year is
+   * a cron nobody notices has broken. A check that finds nothing costs one
+   * Sleeper state call.
+   */
+  ['ledger_recap',   '0 16 * * *',  async () => {
+    const out = await require('./src/ledgerrecap').run(sendblue, { dryRun: DRY_RUN });
+    if (out.phase) console.log(`[ledger] ${out.phase}: sent ${out.sent.length}, skipped ${out.skipped.length}`);
+  }],
   ['members',        '30 4 * * *',  () => snapshots.syncMembers()],
   // The weekly recap — Tuesday morning, after Monday night has settled and the
   // postscore capture has run. Queues a draft and texts the owner; it does not

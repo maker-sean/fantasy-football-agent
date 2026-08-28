@@ -292,6 +292,65 @@ const it = async (n, f) => {
     assert.strictEqual(dv.gradeFor(500, 0), null);
   });
 
+  console.log('\nthe ledger: at the time, and as things stand');
+
+  await it('a swing compares only trades that price at BOTH dates', async () => {
+    /*
+     * The bug this exists for. "Then" was summed over every priced trade and
+     * "now" over the subset that still prices, so the league's most active
+     * trader appeared to have recovered 18,295 when the honest figure was
+     * 5,593 — the rest was simply trades missing from the second total.
+     */
+    const { rows: [lg] } = await db.query(
+      `select id from leagues where provider <> 'archive' and active limit 1`);
+    if (!lg) return console.log('       (skip: no live league)');
+    const { leagueContext } = require('../src/context');
+    const ctx = await leagueContext(lg.id);
+    const { rows: trades } = await db.query(
+      `select t.* from trades t join leagues l on l.id = t.league_id
+        where l.sleeper_league_id = any($1::text[]) and t.status = 'complete'`,
+      [ctx.chainIds || []]);
+    if (!trades.length) return console.log('       (skip: no trades)');
+
+    const book = await dv.loadValueBook({
+      dates: [...trades.map(t => t.status_updated_at), null], superflex: false });
+    if (!book) return console.log('       (skip: no values)');
+    const out = await dv.tradeLedger({ trades, book, slots: new Map(), nameOf: r => `r${r}` });
+
+    for (const r of out.rows) {
+      assert.strictEqual(r.swing, r.now - r.thenMatched,
+        `${r.name}: swing must be now minus the MATCHED then, not the all-time then`);
+    }
+    assert.ok(out.coverage.total >= out.coverage.bothPriced, 'coverage must not exceed the total');
+  });
+
+  await it('the ledger balances: what one side gains the other loses', async () => {
+    const { rows: [lg] } = await db.query(
+      `select id from leagues where provider <> 'archive' and active limit 1`);
+    if (!lg) return console.log('       (skip: no live league)');
+    const { leagueContext } = require('../src/context');
+    const ctx = await leagueContext(lg.id);
+    const { rows: trades } = await db.query(
+      `select t.* from trades t join leagues l on l.id = t.league_id
+        where l.sleeper_league_id = any($1::text[]) and t.status = 'complete'`,
+      [ctx.chainIds || []]);
+    if (!trades.length) return console.log('       (skip: no trades)');
+    const book = await dv.loadValueBook({
+      dates: [...trades.map(t => t.status_updated_at), null], superflex: false });
+    if (!book) return console.log('       (skip: no values)');
+    const out = await dv.tradeLedger({ trades, book, slots: new Map(), nameOf: r => `r${r}` });
+
+    /*
+     * Every trade moves value from one manager to another, so the league totals
+     * must come to zero. A drift means a side was counted once and not the
+     * other — the shape of bug that produces a league where everybody wins.
+     */
+    const sumThen = out.rows.reduce((a, r) => a + r.thenMatched, 0);
+    const sumNow = out.rows.reduce((a, r) => a + r.now, 0);
+    assert.ok(Math.abs(sumThen) <= out.rows.length, `then should net to ~0, got ${sumThen}`);
+    assert.ok(Math.abs(sumNow) <= out.rows.length, `now should net to ~0, got ${sumNow}`);
+  });
+
   console.log(`\n${pass} passing`);
   await db.pool.end();
 })();

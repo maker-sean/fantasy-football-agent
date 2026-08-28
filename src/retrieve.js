@@ -42,10 +42,10 @@ const SECTIONS = {
          + 'happens. Also needed for "who is good at this" and rivalry questions.',
   draft_history: 'Drafts of PAST seasons: which picks turned out well or badly, who '
                + 'has hit on late rounds, who busts early ones. Not the current draft.',
-  trades: 'Every settled trade, who won and lost each, by points and by value over '
-        + 'replacement, what each side gave up and got, and each manager\'s trade '
-        + 'win-loss record. Any question about trading, fleecing, a specific past '
-        + 'trade, or whether a deal was fair.',
+  trades: 'The list of trades this league has made and what moved in each. Use for '
+        + '"have we traded", "what trades happened in 2022", "what did X get". It does '
+        + 'NOT answer who is BEST or WORST at trading — that is trade_ledger, which '
+        + 'works in every league, while this section carries grades only in redraft.',
   draft: 'The draft: whether it is live, who is on the clock, what they should take, '
        + 'who picked last and whether it made sense, roster needs by position, best '
        + 'players available. Any question about drafting or picks.',
@@ -68,6 +68,7 @@ Some facts are always present and are NEVER a reason to name a section: the leag
 You may also request ONE lookup, which runs a real query and computes an answer that is not in any section. Lookups available:
 - trade_extremes: the fairest or the most lopsided trades. Arguments: order=even or order=lopsided (required), manager=<name> (optional), season=<year> (optional).
 - trade_value: what a trade was worth at market prices ON THE DAY IT WAS MADE, for leagues whose trades are not graded on points (dynasty and keeper). Arguments: manager=<name> (optional), season=<year> (optional). Use for "was that trade fair", "did I win that trade", "how did my trade with X look". Prefer this over the trades section whenever the question is about whether a dynasty trade was GOOD, rather than merely which trades happened.
+- trade_ledger: who has gained or lost the most VALUE in trades, both at the time of each trade and as things stand now. Argument: manager=<name> (optional). Use for "who wins the most trades", "who is the best trader", "who helped their team most", "has my trading been good".
 - draft_grades: grades and RANKS every team on the roster it drafted, with each team's strongest and weakest positions. Argument: manager=<name> (optional). Use for "grade my draft", "who drafted best", "how did my team do", "rank the teams", "who is the best team this year", "am I any good".
 - injuries: who is hurt and how badly, from a player list refreshed every morning, including depth chart rank. Arguments: player=<name> (optional), manager=<name> (optional). Use for "is X playing", "is X hurt", "who is banged up on my team", "any injuries this week". ALWAYS use this for a question about whether somebody is healthy — never answer that from memory.
 - league_rules: this league's own scoring, roster slots, playoff format, waiver type and trade deadline. Arguments: none. Use for "what is our scoring", "is this PPR", "how many make the playoffs", "how much FAAB", "when is the trade deadline".
@@ -251,6 +252,13 @@ async function route(question, opts = {}) {
    * that lists a subset reads as the complete set, so it goes.
    */
   if (lookup?.name === 'trade_value') sections = sections.filter(n => n !== 'trades');
+  /*
+   * Same collision, later discovery. The trades section used to advertise a
+   * per-manager win-loss record, so "who is the best trader" went there — and
+   * in a dynasty league it holds no grades at all, so the reply said it could
+   * not say, with a ledger that answers exactly that sitting unused.
+   */
+  if (lookup?.name === 'trade_ledger') sections = sections.filter(n => n !== 'trades');
 
   return {
     sections,
