@@ -1,0 +1,104 @@
+# What Commish AI is happy to have read, and what it is not.
+#
+# THE DEFAULT HERE IS YES. This is a product people find by asking an assistant
+# "how do I settle a fantasy trade argument", so the answer engines reading this
+# file are a distribution channel rather than a cost. Google-Extended in
+# particular decides whether these pages can ground a Gemini answer at all, and
+# it is a separate agent from Googlebot: blocking it does not affect search
+# ranking, and allowing it does not affect ranking either. It only decides
+# whether the assistant may cite you.
+#
+# EVERY GROUP BELOW REPEATS THE SAME DISALLOWS, and that is not redundancy. A
+# crawler that finds a group matching its own name obeys ONLY that group and
+# ignores "*" entirely. A named group listing just "Allow: /" would therefore
+# hand that one crawler the operator console, which is the opposite of the
+# intent — and it would look correct while doing it.
+#
+# WHAT IS BLOCKED:
+#   /admin    the operator console. Already noindex,nofollow and it holds no
+#             data in its HTML, but it has no business in an index.
+#   /v/       ballot links. Minted per member, they carry identity, and a cached
+#             crawl of one is a leak that cannot be revoked.
+#   /api/     not pages.
+#   /app      the member app shell.
+#   /success  a post-signup confirmation. Nothing to rank, and it already
+#             carries a noindex of its own.
+
+User-agent: *
+Disallow: /admin
+Disallow: /app
+Disallow: /v/
+Disallow: /api/
+Disallow: /success
+
+# OpenAI: training and ChatGPT grounding
+User-agent: GPTBot
+Disallow: /admin
+Disallow: /app
+Disallow: /v/
+Disallow: /api/
+Disallow: /success
+
+# OpenAI: ChatGPT search index
+User-agent: OAI-SearchBot
+Disallow: /admin
+Disallow: /app
+Disallow: /v/
+Disallow: /api/
+Disallow: /success
+
+# OpenAI: fetches a page because a user asked for it
+User-agent: ChatGPT-User
+Disallow: /admin
+Disallow: /app
+Disallow: /v/
+Disallow: /api/
+Disallow: /success
+
+# Anthropic
+User-agent: ClaudeBot
+Disallow: /admin
+Disallow: /app
+Disallow: /v/
+Disallow: /api/
+Disallow: /success
+
+# Anthropic, older agent string
+User-agent: anthropic-ai
+Disallow: /admin
+Disallow: /app
+Disallow: /v/
+Disallow: /api/
+Disallow: /success
+
+# Perplexity
+User-agent: PerplexityBot
+Disallow: /admin
+Disallow: /app
+Disallow: /v/
+Disallow: /api/
+Disallow: /success
+
+# Gemini grounding. Separate from Googlebot: blocking
+User-agent: Google-Extended
+Disallow: /admin
+Disallow: /app
+Disallow: /v/
+Disallow: /api/
+Disallow: /success
+
+# Apple Intelligence
+User-agent: Applebot-Extended
+Disallow: /admin
+Disallow: /app
+Disallow: /v/
+Disallow: /api/
+Disallow: /success
+
+# Common Crawl, which feeds many models downstream
+User-agent: CCBot
+Disallow: /admin
+Disallow: /app
+Disallow: /v/
+Disallow: /api/
+Disallow: /success
