@@ -149,6 +149,8 @@ async function route(question, opts = {}) {
    * wrong answer stated with confidence.
    */
   let lookup = null;
+  // What the asker actually said, for arguments that must be traceable to it.
+  const haystack = [question, ...recentChat.map(m => m.text || '')].join(' ');
   const lkLine = (raw.match(/lookups?:\s*(.*)/i) || [])[1];
   if (lkLine && !/^\s*none\b/i.test(lkLine)) {
     const parts = lkLine.trim().split(/\s+/);
@@ -171,6 +173,20 @@ async function route(question, opts = {}) {
          * <asking" — an emptiness the reply then reports as fact.
          */
         if (/[<>]/.test(v)) continue;
+        /*
+         * A SEASON MUST HAVE BEEN ASKED FOR.
+         *
+         * "How would you grade my trade with Renshaw" came back with
+         * season=2024, a year nothing in the question mentions. It narrowed the
+         * search to a year in which those two had not traded, and the reply
+         * said the trade did not exist — a filter nobody requested, producing
+         * an absence reported as fact.
+         *
+         * Unlike a manager, which can legitimately be resolved from "my" or
+         * "I", a year is only ever a year somebody said. So it has to appear in
+         * the text, or it is dropped.
+         */
+        if (k === 'season' && !haystack.includes(v)) continue;
         args[k] = v;
       }
       lookup = { name, args };

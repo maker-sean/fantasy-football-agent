@@ -149,6 +149,24 @@ const dies = msg => ({ messages: { create: async () => { throw new Error(msg); }
     assert.deepStrictEqual(r.lookup.args, {});
   });
 
+  await it('a season nobody named is dropped', async () => {
+    /*
+     * "How would you grade my trade with Renshaw" came back with season=2024,
+     * a year the question never mentions. It narrowed to a year those two had
+     * not traded in, and the reply said the trade did not exist.
+     */
+    const r = await route('grade my trade with Renshaw', {
+      client: says('sections: none\nlookup: trade_value manager=Sean season=2024') });
+    assert.strictEqual(r.lookup.args.season, undefined, 'an unnamed year must not filter');
+    assert.strictEqual(r.lookup.args.manager, 'Sean');
+  });
+
+  await it('a season the asker DID name survives', async () => {
+    const r = await route('how did our 2024 trades look', {
+      client: says('sections: none\nlookup: trade_value season=2024') });
+    assert.strictEqual(r.lookup.args.season, '2024');
+  });
+
   await it('a placeholder is never passed through as an argument', async () => {
     /*
      * The router answered "was my trade fair" with manager=<asking person>,
@@ -256,6 +274,51 @@ const dies = msg => ({ messages: { create: async () => { throw new Error(msg); }
       for (const line of rows) {
         assert.ok(/ got /.test(line), `index row without players: ${line}`);
       }
+    });
+
+    await it('a trade lookup writes the sentence out rather than leaving it to be composed', async () => {
+      /*
+       * Across five runs the reply said "you gave up your Early 2nd" about a
+       * block stating he received it — both halves per side did not stop it,
+       * naming where the best asset went did not stop it. A D grade tells a
+       * story and the story wants the good piece leaving. So the sentence is
+       * written and only quoted.
+       */
+      const out = await retrievers.run(ctx, { name: 'trade_value', args: {} });
+      if (/No completed trades/.test(out)) return console.log('       (skip: no trades on record)');
+      const said = out.split('\n').filter(l => /SAY IT THIS WAY/.test(l));
+      assert.ok(said.length, 'every priced trade needs a quotable sentence');
+      for (const line of said) {
+        assert.ok(/ sent .+ for /.test(line), `sentence is not in sent/for form: ${line}`);
+      }
+    });
+
+    await it('the grade is the headline and the arithmetic is marked as working', async () => {
+      /*
+       * What people want is the letter and who came off worse. The totals, the
+       * margin and the percentage are how it was reached, not the answer, so
+       * they are kept back until somebody asks how — at which point they have
+       * to still be present, which is why they are marked rather than removed.
+       */
+      const out = await retrievers.run(ctx, { name: 'trade_value', args: {} });
+      if (/No completed trades/.test(out)) return console.log('       (skip: no trades on record)');
+      assert.match(out, /LEAD WITH THE GRADE/);
+      assert.match(out, /Do not volunteer a value in an opening reply/);
+      for (const line of out.split('\n').filter(l => /ahead by \d/.test(l))) {
+        assert.match(line, /WORKING, do not volunteer/,
+          `a margin line must be marked as working: ${line}`);
+      }
+      assert.match(out, /GRADE, this is the headline/);
+    });
+
+    await it('two managers matching one filter are named as different people', async () => {
+      const members = (ctx.members || []).map(m => m.name).filter(Boolean);
+      const first = members[0] && members[0].split(' ')[0];
+      const shared = first && members.filter(n => n.startsWith(first)).length > 1 ? first : null;
+      if (!shared) return console.log('       (skip: no ambiguous first name in this league)');
+      const out = await retrievers.run(ctx, { name: 'trade_value', args: { manager: shared } });
+      assert.match(out, /CAREFUL/, 'an ambiguous filter must announce itself');
+      assert.match(out, /DIFFERENT PEOPLE/);
     });
 
     await it('the league name is not mistaken for a manager', async () => {

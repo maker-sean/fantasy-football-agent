@@ -75,10 +75,25 @@ const QUERIES = {
       };
 
       let items = rows;
+      let ambiguous = null;
       if (args.manager) {
         const want = String(args.manager).toLowerCase();
         items = rows.filter(t => (t.roster_ids || []).some(r => nameOf(r).toLowerCase().includes(want)));
         if (!items.length) return `No trade on record involves anyone matching "${args.manager}".`;
+        /*
+         * TWO PEOPLE, ONE FILTER.
+         *
+         * This league has a Sean M. and a Sean C. Asked to grade "my last
+         * trade", the reply handed Sean M. a deal Sean C. had made — every line
+         * named the right person and the model merged them anyway, because a
+         * filter on "Sean" returns one list and a list reads as one person.
+         *
+         * Every match is named here so the collision is a stated fact rather
+         * than something to be noticed.
+         */
+        const hits = [...new Set((ctx.members || [])
+          .map(m => m.name).filter(n => n && n.toLowerCase().includes(want)))];
+        if (hits.length > 1) ambiguous = hits;
       }
       /*
        * THE TRUNCATION, SAID OUT LOUD.
@@ -110,8 +125,20 @@ const QUERIES = {
       const L = [`TRADE VALUE, ${superflex ? 'superflex' : '1QB'} market prices AS AT THE DATE OF EACH`
                + ' TRADE, not today. So these say what the two sides were agreeing to at the time,'
                + ' which is a different question from how it turned out — a player can be worth'
-               + ' twice now what he was worth then. Nothing here says who won: say "on paper" or'
-               + ' "by value at the time" when you use these numbers:'];
+               + ' twice now what he was worth then.',
+        '',
+        '  LEAD WITH THE GRADE. What people want is the letter and who came off worse, not the'
+        + ' arithmetic behind it. Give the pieces that moved and the grades, and stop there.',
+        '  The point totals, the margin and the percentage are all WORKING, not the answer. Keep'
+        + ' them back unless somebody asks how you got to the grade, or disputes it — then you'
+        + ' have the numbers and can show them. Do not volunteer a value in an opening reply.'];
+      if (ambiguous) {
+        L.push(`  CAREFUL: "${args.manager}" matches ${ambiguous.length} different managers —`
+             + ` ${ambiguous.join(' and ')}. They are DIFFERENT PEOPLE and this list mixes their`
+             + ' trades. Every line below names whose trade it is; go by that name and never'
+             + ' attribute one of them a deal made by the other. If the question meant one of'
+             + ' them and you cannot tell which, ask.');
+      }
       if (matched > items.length) {
         L.push(`  THESE ARE THE ${items.length} MOST RECENT OF ${matched}`
              + `${args.manager ? ` involving ${args.manager}` : ''}${args.season ? ` in ${args.season}` : ''}.`
@@ -139,21 +166,90 @@ const QUERIES = {
         L.push('');
         L.push(`  ${t.season} week ${t.week}, priced as at`
              + ` ${String(priced.capturedOn).slice(0, 10)}:`);
+        /*
+         * BOTH HALVES, AGAIN.
+         *
+         * Listing only what each side RECEIVED was enough to invert a whole
+         * trade: "you flipped your Early 2nd to Renshaw for his Mid 2nd" off a
+         * block that says the opposite, in a sentence that then contradicted
+         * its own margin. The redraft path learned this and states both halves;
+         * with two sides, what one gave is exactly what the other got, so there
+         * is no excuse for leaving it to inference.
+         */
+        const assetsOf = side => [
+          ...side.players.map(pl => `${pl.name} (${pl.value})`),
+          ...side.picks.map(pk => `${pk.label || `${pk.season} round ${pk.round}`}`
+            + (pk.value != null
+                ? ` (${pk.value}${pk.assumedFrom ? ', assumed' : ''}${pk.slotUnknown ? ', slot unknown so priced mid-round' : ''})`
+                : ' (no price)')),
+        ];
         for (const side of priced.sides) {
-          const got = [
-            ...side.players.map(pl => `${pl.name} (${pl.value})`),
-            ...side.picks.map(pk => `${pk.label || `${pk.season} round ${pk.round}`}`
-              + (pk.value != null
-                  ? ` (${pk.value}${pk.assumedFrom ? ', assumed' : ''}${pk.slotUnknown ? ', slot unknown so priced mid-round' : ''})`
-                  : ' (no price)')),
-          ];
-          L.push(`    ${nameOf(side.rosterId)} got ${got.join(', ') || 'nothing'}`
-               + `  = ${side.value}`);
+          const other = priced.sides.find(x => x.rosterId !== side.rosterId);
+          const got = assetsOf(side);
+          const gave = other ? assetsOf(other) : [];
+          L.push(`    ${nameOf(side.rosterId)} GOT ${got.join(', ') || 'nothing'} = ${side.value}`
+               + `, and GAVE UP ${gave.join(', ') || 'nothing'}`);
         }
+        /*
+         * THE SENTENCE, WRITTEN OUT, because composing it keeps going wrong.
+         *
+         * Both halves are already stated per side and correct, and the reply
+         * still said "you gave up your Early 2nd" when the block says he
+         * received it — twice, in a sentence that then contradicted its own
+         * margin. The pull is a story: a D grade means you gave away the good
+         * piece, so the good piece gets moved to the losing side.
+         *
+         * Naming which side the single best asset went to is the one fact that
+         * cannot be reconciled with the inverted story, and a pre-written line
+         * is quotable rather than derivable.
+         */
+        const best = priced.sides
+          .flatMap(sd => [...sd.players, ...sd.picks].map(a => ({ ...a, to: sd.rosterId })))
+          .filter(a => a.value != null)
+          .sort((a, b) => b.value - a.value)[0];
+        if (best) {
+          L.push(`    DIRECTION: the most valuable single asset here is`
+               + ` ${best.name || best.label} (${best.value}), and it went TO`
+               + ` ${nameOf(best.to)}.`);
+        }
+
+        /*
+         * A SENTENCE TO QUOTE, not one to build.
+         *
+         * Both halves stated per side did not stop it. Naming which side the
+         * best asset went to did not stop it. Across five runs the reply kept
+         * saying "you gave up your Early 2nd" about a block that says he
+         * received it, because a D grade tells a story and the story wants the
+         * good piece leaving. Composing this sentence is the step that fails,
+         * so the sentence is written here and the model is asked only to repeat
+         * it. Quoting one line is the operation this model does reliably.
+         */
+        const [w2, l2] = priced.sides;
+        const names = sd => [...sd.players.map(x => x.name), ...sd.picks.map(x => x.label)]
+          .filter(Boolean).join(' and ');
+        L.push(`    SAY IT THIS WAY, word for word: "${nameOf(l2.rosterId)} sent`
+             + ` ${nameOf(w2.rosterId)} ${names(w2)} for ${names(l2)}."`
+             + ' Do not rearrange who sent what. If you describe this trade any other way you'
+             + ' will get the direction backwards, which has happened every time so far.');
+
         if (priced.margin != null) {
-          L.push(`    ON PAPER: ${nameOf(priced.sides[0].rosterId)} came out ahead by ${priced.margin}.`);
+          const g = priced.grade;
+          L.push(`    WORKING, do not volunteer: ${nameOf(priced.sides[0].rosterId)} ahead by`
+               + ` ${priced.margin}` + (g ? `, ${g.edge}% of everything in the deal — ${g.say}.` : '.'));
+          if (g) {
+            /*
+             * The letters, computed, with the instruction to quote rather than
+             * re-derive. This is the number two people will argue over, so it
+             * must mean the same thing every time it is asked.
+             */
+            L.push(`    GRADE, this is the headline: ${nameOf(priced.sides[0].rosterId)} ${g.won},`
+                 + ` ${nameOf(priced.sides[priced.sides.length - 1].rosterId)} ${g.lost}.`
+                 + ' Computed from the share of value, not judged. Quote the letters, do not'
+                 + ' invent your own or adjust them.');
+          }
         } else {
-          L.push(`    NO MARGIN: ${priced.unpricedReason}. Say that rather than guessing one.`);
+          L.push(`    NO MARGIN AND NO GRADE: ${priced.unpricedReason}. Say that rather than`
+               + ' guessing either.');
         }
         for (const a of priced.assumptions) {
           L.push(`    ASSUMED: ${a.label} priced as ${a.from}, because the market does not quote it`

@@ -75,6 +75,39 @@ function slotsFromFinish(finishes, teams) {
   return out;
 }
 
+
+/*
+ * A letter grade, COMPUTED — never left to the model.
+ *
+ * Grading is a ranking, and every ranking in this codebase is computed here for
+ * the same reason: a model handed two totals will produce a letter that sounds
+ * right and cannot be checked. Two people arguing in a group chat will quote
+ * the letter and nothing else, so it has to mean one fixed thing.
+ *
+ * The measure is the winner's surplus as a SHARE OF THE POT, not the raw
+ * margin. A 3,000 gap between two second round picks is a fleecing; the same
+ * 3,000 between two first round studs is a rounding error, and raw margin
+ * cannot tell those apart.
+ *
+ * Bands are deliberately coarse. The inputs are market estimates with a few
+ * percent of noise in them, so finer gradations would be false precision
+ * wearing a letter.
+ */
+const BANDS = [
+  { upTo: 0.05, won: 'B',  lost: 'B',  say: 'even' },
+  { upTo: 0.12, won: 'A-', lost: 'C+', say: 'a slight edge' },
+  { upTo: 0.25, won: 'A',  lost: 'C-', say: 'a clear win' },
+  { upTo: 0.40, won: 'A+', lost: 'D',  say: 'a big win' },
+  { upTo: Infinity, won: 'A+', lost: 'F', say: 'a fleecing' },
+];
+
+function gradeFor(margin, pot) {
+  if (margin == null || !pot) return null;
+  const edge = Math.abs(margin) / pot;
+  const band = BANDS.find(b => edge < b.upTo);
+  return { edge: Math.round(edge * 1000) / 10, won: band.won, lost: band.lost, say: band.say };
+}
+
 /**
  * Value every asset on both sides of a trade.
  *
@@ -226,6 +259,14 @@ async function priceTrade(trade, o = {}) {
     // Never empty-by-omission: a margin that rests on a carried-over price has
     // to arrive with that fact attached, or it reads as a measurement.
     assumptions,
+    /*
+     * Graded on the pot, and only when every asset carried a price. A grade
+     * computed over a side with an unpriceable pick would be a letter derived
+     * from a number the caller was just told not to trust.
+     */
+    grade: anyUnpriced ? null
+      : gradeFor(list[0].value - list[list.length - 1].value,
+                 list.reduce((a, sd) => a + sd.value, 0)),
   };
 }
 
@@ -268,4 +309,4 @@ async function rosterFlags(playerIds, rosterPlayerIds) {
   return flags;
 }
 
-module.exports = { priceTrade, rosterFlags, pickLabel, bucketFor, slotsFromDraft, slotsFromFinish };
+module.exports = { priceTrade, rosterFlags, gradeFor, pickLabel, bucketFor, slotsFromDraft, slotsFromFinish };

@@ -211,6 +211,37 @@ const it = async (n, f) => {
     assert.match(other.label, /Mid/);
   });
 
+  console.log('\nthe letter, computed rather than judged');
+
+  await it('a grade is the share of the pot, not the raw margin', async () => {
+    /*
+     * 3,000 between two second round picks is a fleecing; 3,000 between two
+     * first round studs is a rounding error. Raw margin cannot tell them apart,
+     * which is why the measure is the winner's surplus as a share.
+     */
+    const small = dv.gradeFor(3000, 10000);
+    const large = dv.gradeFor(3000, 100000);
+    assert.notStrictEqual(small.won, large.won, 'the same margin in a bigger pot must grade lower');
+    assert.strictEqual(large.say, 'even');
+  });
+
+  await it('an even trade is a B on both sides, not a winner and a loser', async () => {
+    const g = dv.gradeFor(100, 10000);
+    assert.strictEqual(g.won, 'B');
+    assert.strictEqual(g.lost, 'B');
+  });
+
+  await it('the bands run in one direction and never cross', async () => {
+    const edges = [0.01, 0.08, 0.18, 0.32, 0.60].map(e => dv.gradeFor(e * 1000, 1000));
+    assert.deepStrictEqual(edges.map(g => g.lost), ['B', 'C+', 'C-', 'D', 'F']);
+    assert.deepStrictEqual(edges.map(g => g.won), ['B', 'A-', 'A', 'A+', 'A+']);
+  });
+
+  await it('no margin means no grade, never a guessed one', async () => {
+    assert.strictEqual(dv.gradeFor(null, 10000), null);
+    assert.strictEqual(dv.gradeFor(500, 0), null);
+  });
+
   console.log(`\n${pass} passing`);
   await db.pool.end();
 })();
