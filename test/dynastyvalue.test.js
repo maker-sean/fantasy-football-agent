@@ -284,7 +284,43 @@ const it = async (n, f) => {
   await it('the bands run in one direction and never cross', async () => {
     const edges = [0.01, 0.08, 0.18, 0.32, 0.60].map(e => dv.gradeFor(e * 1000, 1000));
     assert.deepStrictEqual(edges.map(g => g.lost), ['B', 'C+', 'C-', 'D', 'F']);
-    assert.deepStrictEqual(edges.map(g => g.won), ['B', 'A-', 'A', 'A+', 'A+']);
+    assert.deepStrictEqual(edges.map(g => g.won), ['B', 'B+', 'A-', 'A', 'A+']);
+  });
+
+  await it('the pair mirrors, because a trade is zero-sum', async () => {
+    /*
+     * Whatever one side gained the other lost. Grading that A+ against a D says
+     * the loser did better out of it than the winner did badly, which cannot
+     * happen — and a D is the grade that actually starts an argument, which is
+     * the point of handing one out.
+     */
+    const pop = Array.from({ length: 48 }, (_, i) => (i / 48) * 0.38);
+    const worst = dv.gradeAgainst(0.37, pop);
+    assert.strictEqual(worst.won, 'A+');
+    assert.strictEqual(worst.lost, 'F', 'the mirror of the best grade is the worst one');
+    const even = dv.gradeAgainst(0.01, pop);
+    assert.strictEqual(even.won, even.lost, 'an even trade grades both sides the same');
+  });
+
+  await it('a winner never scores higher for winning less', async () => {
+    /*
+     * The first cut handed the FAIREST trades a B+ and slightly more lopsided
+     * ones a B, so the winner's column went backwards in the middle.
+     */
+    const pop = Array.from({ length: 48 }, (_, i) => (i / 48) * 0.4);
+    const order = ['B', 'B+', 'A-', 'A', 'A+'];
+    const seen = [0.01, 0.10, 0.20, 0.30, 0.39]
+      .map(e => dv.gradeAgainst(e, pop).won)
+      .map(g => order.indexOf(g));
+    for (let i = 1; i < seen.length; i++) {
+      assert.ok(seen[i] >= seen[i - 1], `winner grade went backwards: ${seen.join(',')}`);
+    }
+  });
+
+  await it('a small league falls back rather than ranking six things', async () => {
+    assert.strictEqual(dv.gradeAgainst(0.3, [0.1, 0.2, 0.3]), null,
+      'a percentile off three trades is not a grade');
+    assert.ok(dv.gradeAgainst(0.3, Array.from({ length: dv.MIN_POPULATION }, () => 0.1)));
   });
 
   await it('no margin means no grade, never a guessed one', async () => {

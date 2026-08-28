@@ -589,6 +589,29 @@ const QUERIES = {
       const slots = slotMap ? dv.slotsFromDraft(slotMap) : new Map();
 
       /*
+       * THE LEAGUE'S OWN SPREAD, so a letter means something at scale.
+       *
+       * Fixed bands handed A+ to 27% of this league's trades — at a few hundred
+       * trades that is eighty A+ grades and a letter that says nothing. Graded
+       * against the population instead, A+ is the most lopsided tenth.
+       *
+       * Pricing every trade to build that spread is affordable only because the
+       * value book makes it one query: 112 pricings ran in 8ms behind it.
+       */
+      const book = await dv.loadValueBook({
+        dates: [...rows.map(t => t.status_updated_at), null], superflex });
+      const population = [];
+      if (book) {
+        for (const t of rows) {
+          const p = await dv.priceTrade(t, {
+            book, slots, teams, slotSeason: ctx.draftSchedule?.season, asOf: t.status_updated_at });
+          if (!p || p.margin == null) continue;
+          const pot = p.sides.reduce((a, sd) => a + sd.value, 0);
+          if (pot) population.push(Math.abs(p.margin / pot));
+        }
+      }
+
+      /*
        * Rosters are TODAY'S, so the handcuff check runs only on this season's
        * trades. Asking whether two men are teammates in 2026 answers nothing
        * about a 2021 deal, and a confidently wrong handcuff is worse than none.
@@ -631,7 +654,7 @@ const QUERIES = {
          * weekly history exist for exactly this.
          */
         const priced = await dv.priceTrade(t, {
-          superflex, teams, slots,
+          superflex, teams, slots, book, population,
           slotSeason: ctx.draftSchedule?.season,
           asOf: t.status_updated_at || null,
         });
@@ -717,9 +740,11 @@ const QUERIES = {
              * must mean the same thing every time it is asked.
              */
             L.push(`    GRADE, this is the headline: ${nameOf(priced.sides[0].rosterId)} ${g.won},`
-                 + ` ${nameOf(priced.sides[priced.sides.length - 1].rosterId)} ${g.lost}.`
-                 + ' Computed from the share of value, not judged. Quote the letters, do not'
-                 + ' invent your own or adjust them.');
+                 + ` ${nameOf(priced.sides[priced.sides.length - 1].rosterId)} ${g.lost}`
+                 + `${g.say ? ` — ${g.say}` : ''}.`
+                 + ` Graded against the ${population.length || 'few'} trades this league has`
+                 + ' actually made, so the letter is relative to THIS league. Quote it; do not'
+                 + ' invent your own or adjust it.');
           }
         } else {
           L.push(`    NO MARGIN AND NO GRADE: ${priced.unpricedReason}. Say that rather than`

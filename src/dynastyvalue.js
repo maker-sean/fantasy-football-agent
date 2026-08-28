@@ -93,11 +93,61 @@ function slotsFromFinish(finishes, teams) {
  * percent of noise in them, so finer gradations would be false precision
  * wearing a letter.
  */
+
+/*
+ * Grade a trade against the trades this league actually makes.
+ *
+ * The fixed bands below were set on the assumption that deals cluster near even
+ * and only the outliers are lopsided. They do not: measured over 48 real
+ * trades, 27% cleared the top band. A+ described more than a quarter of all
+ * trades, which at a few hundred trades is eighty of them and a letter that
+ * says nothing.
+ *
+ * So the population is the yardstick, exactly as it already is for a trader's
+ * grade: A+ is the most lopsided tenth, D the fairest tenth, and "one of the
+ * worst trades in this league" means one of the worst trades in THIS league.
+ *
+ * Under twenty trades there is no distribution worth speaking of and this falls
+ * back to the fixed bands — a percentile off six trades is a ranking of six
+ * things wearing the authority of a grade.
+ */
+const MIN_POPULATION = 20;
+
+function gradeAgainst(edge, population) {
+  if (!Array.isArray(population) || population.length < MIN_POPULATION) return null;
+  const sorted = [...population].sort((a, b) => a - b);
+  const below = sorted.filter(e => e < Math.abs(edge)).length;
+  const pct = below / sorted.length;
+
+  /*
+   * THE PAIR MIRRORS, because a trade is zero-sum: whatever one side gained the
+   * other lost, and grading that A+ against a D says the loser did better out of
+   * it than the winner did badly, which is not a thing that can happen.
+   *
+   * It is also MONOTONIC in both columns, which the first cut was not — the
+   * fairest trades handed the winner a B+ while slightly more lopsided ones gave
+   * a B, so a winner scored higher for winning less. There is no separate reward
+   * here for making a fair deal: an even trade is B and B, and the scale only
+   * ever measures how one-sided a deal was and in whose favour.
+   */
+  if (pct >= 0.90) return { won: 'A+', lost: 'F', say: 'one of the most lopsided this league has seen' };
+  if (pct >= 0.75) return { won: 'A', lost: 'D', say: 'a clear win by this league\'s standards' };
+  if (pct >= 0.55) return { won: 'A-', lost: 'C-', say: 'a bit more one-sided than usual' };
+  if (pct >= 0.30) return { won: 'B+', lost: 'C+', say: 'an ordinary deal here' };
+  if (pct >= 0.15) return { won: 'B', lost: 'B-', say: 'closer than most' };
+  return { won: 'B', lost: 'B', say: 'one of the fairest this league has made' };
+}
+
+/*
+ * The fallback, for a league with too few trades to have a distribution. Same
+ * mirrored pairs as gradeAgainst, so a league does not see the scale change
+ * shape the week it crosses twenty trades — only tighten.
+ */
 const BANDS = [
   { upTo: 0.05, won: 'B',  lost: 'B',  say: 'even' },
-  { upTo: 0.12, won: 'A-', lost: 'C+', say: 'a slight edge' },
-  { upTo: 0.25, won: 'A',  lost: 'C-', say: 'a clear win' },
-  { upTo: 0.40, won: 'A+', lost: 'D',  say: 'a big win' },
+  { upTo: 0.12, won: 'B+', lost: 'C+', say: 'a slight edge' },
+  { upTo: 0.25, won: 'A-', lost: 'C-', say: 'a clear win' },
+  { upTo: 0.40, won: 'A',  lost: 'D',  say: 'a big win' },
   { upTo: Infinity, won: 'A+', lost: 'F', say: 'a fleecing' },
 ];
 
@@ -352,8 +402,12 @@ async function priceTrade(trade, o = {}) {
      * from a number the caller was just told not to trust.
      */
     grade: anyUnpriced ? null
-      : gradeFor(list[0].value - list[list.length - 1].value,
-                 list.reduce((a, sd) => a + sd.value, 0)),
+      : (() => {
+          const margin = list[0].value - list[list.length - 1].value;
+          const pot = list.reduce((a, sd) => a + sd.value, 0);
+          // Against the league where there is a league to measure against.
+          return gradeAgainst(pot ? margin / pot : 0, o.population) || gradeFor(margin, pot);
+        })(),
   };
 }
 
@@ -601,4 +655,5 @@ function traderGrade(rank, of) {
   return { grade: 'D', say: 'dead last in the league at it' };
 }
 
-module.exports = { priceTrade, loadValueBook, tradeLedger, pickLadder, inPicks, traderGrade, rosterFlags, gradeFor, pickLabel, bucketFor, slotsFromDraft, slotsFromFinish };
+module.exports = { priceTrade, loadValueBook, tradeLedger, pickLadder, inPicks, traderGrade,
+  gradeAgainst, MIN_POPULATION, rosterFlags, gradeFor, pickLabel, bucketFor, slotsFromDraft, slotsFromFinish };
