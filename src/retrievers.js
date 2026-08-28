@@ -607,9 +607,10 @@ const QUERIES = {
                + ' guessing either.');
         }
         for (const a of priced.assumptions) {
-          L.push(`    ASSUMED: ${a.label} priced as ${a.from}, because the market does not quote it`
-               + ' yet. Future picks normally trade at a DISCOUNT, so this reads generously for'
-               + ' whoever gave it up.');
+          L.push(`    ASSUMED: ${a.label} priced as ${a.from}, because no quote for it exists on`
+               + ' that date. Which way that leans is NOT known — measured against a real price'
+               + ' the moment one appeared, a 2027 second was worth MORE than the 2026 one, not'
+               + ' less. Treat the margin as approximate and say so.');
         }
 
         if (t.season === thisSeason) {

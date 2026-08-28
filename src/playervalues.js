@@ -39,6 +39,13 @@ const SOURCES = {
       { gid: '991742784', superflex: true },
     ],
     fetch: fetchSheetSeries,
+    // Today's board, which the history does not carry: rookies, 2027 and 2028
+    // picks, age and rookie status.
+    current: [
+      { gid: '407873638', superflex: false },
+      { gid: '0', superflex: true },
+    ],
+    fetchCurrent: fetchCurrentSheet,
   },
 };
 
@@ -137,6 +144,66 @@ async function fetchSheetSeries({ gid, superflex }, { since = null, weekly = fal
   return out;
 }
 
+
+/**
+ * The CURRENT tabs, which carry what the historical one does not.
+ *
+ * This project read only the historical tabs, on a note that the current ones
+ * were stamped two months stale. That is no longer true — they are refreshed
+ * the same morning — and reading only history cost three things that matter:
+ *
+ *   ROOKIES. 66 of them are priced here, richly (a rookie back at 7,368), and
+ *   the historical tab lists almost none. A dynasty roster grade that cannot
+ *   see rookies counts a team at zero for the picks it just spent, which gets
+ *   a draft grade exactly backwards.
+ *
+ *   PICKS BEYOND THIS YEAR. 2027 and 2028, Early through Late, every round.
+ *   Trades containing a future second could not be priced at all, so no margin
+ *   could be given for them.
+ *
+ *   AGE AND ROOKIE STATUS. player_values has carried an is_rookie column since
+ *   it was created and nothing ever filled it, because the historical tab is
+ *   dates crossed with asset names and holds no metadata whatsoever.
+ *
+ * Row-shaped rather than column-shaped: one row per asset, name in column 0,
+ * KTC's own value in column 8 — column 4 is the sheet author's blend of KTC
+ * with FantasyCalc, and this source is KTC.
+ */
+async function fetchCurrentSheet({ gid, superflex }) {
+  const res = await fetch(csvUrl(gid), { redirect: 'follow' });
+  if (!res.ok) throw new Error(`sheet gid ${gid} -> ${res.status}`);
+  const rows = parseCsv(await res.text());
+  if (!rows.length) return [];
+
+  /*
+   * The date lives in the header of column 0, as "Updated 08/28/26 at 10:09am".
+   * Falling back to today is deliberate: a header the author reformats must not
+   * silently stop the ingest, and being a day out on a current snapshot is a
+   * much smaller error than losing rookies entirely.
+   */
+  const stamp = /(\d{2})\/(\d{2})\/(\d{2})/.exec(rows[0]?.[0] || '');
+  const capturedOn = stamp
+    ? `20${stamp[3]}-${stamp[1]}-${stamp[2]}`
+    : new Date().toISOString().slice(0, 10);
+
+  const out = [];
+  for (const row of rows.slice(1)) {
+    const name = (row[0] || '').trim();
+    if (!name || JUNK.test(name.toLowerCase())) continue;
+    const raw = (row[8] || row[4] || '').trim();
+    const value = Number(raw.replace(/,/g, ''));
+    if (!Number.isFinite(value) || !value) continue;
+    out.push({
+      capturedOn, name, value: Math.round(value), superflex,
+      age: Number((row[5] || '').trim()) || null,
+      isRookie: (row[6] || '').trim().toLowerCase() === 'yes',
+      posRank: (row[1] || '').trim() || null,
+      sheetPosition: (row[2] || '').trim() || null,
+    });
+  }
+  return out;
+}
+
 /** A draft pick, not a person. No Sleeper id will ever exist for these. */
 const isPick = name => /\b(1st|2nd|3rd|4th)\b/.test(name);
 
@@ -216,7 +283,8 @@ async function loadPlayerIndex() {
  * source revising its own history cannot quietly change what we already told a
  * league. A day we have is a day we keep.
  */
-async function ingest({ source = 'ktc', since = null, until = null, weekly = false, dryRun = false } = {}) {
+async function ingest({ source = 'ktc', since = null, until = null, weekly = false,
+                        skipCurrent = false, dryRun = false } = {}) {
   const spec = SOURCES[source];
   if (!spec) throw new Error(`unknown value source: ${source}`);
 
@@ -263,6 +331,75 @@ async function ingest({ source = 'ktc', since = null, until = null, weekly = fal
          values ${vals}
          on conflict (source, captured_on, name, superflex, tep) do nothing`, params);
       summary.written += rowCount;
+    }
+  }
+
+  /*
+   * TODAY'S BOARD, after the history.
+   *
+   * Written with an UPDATE on conflict rather than the history's DO NOTHING,
+   * because where the two overlap this one is the better reading: it is the
+   * sheet's live tab, refreshed this morning, and it carries the metadata.
+   * History wins nothing by being written first.
+   */
+  if (spec.fetchCurrent && !skipCurrent) {
+    for (const c of spec.current || []) {
+      let records;
+      try {
+        records = await spec.fetchCurrent(c);
+      } catch (err) {
+        // A failed current tab must not lose the history that already landed.
+        console.error('[values] current tab failed:', err.message);
+        summary.currentError = err.message;
+        continue;
+      }
+      summary.currentRows = (summary.currentRows || 0) + records.length;
+
+      const batch = [];
+      for (const r of records) {
+        const pick = isPick(r.name);
+        let player = null;
+        if (pick) summary.picks++;
+        else {
+          const key = ALIASES.get(normalise(r.name)) || normalise(r.name);
+          player = index.get(key) || null;
+          if (player) summary.matched++; else summary.unmatched.add(r.name);
+        }
+        batch.push({
+          ...r,
+          sleeperId: player?.player_id || null,
+          position: pick ? 'PICK' : (player?.position || r.sheetPosition || null),
+          team: pick ? null : (player?.team || null),
+        });
+      }
+
+      if (dryRun) continue;
+      for (let i = 0; i < batch.length; i += 500) {
+        const chunk = batch.slice(i, i + 500);
+        const vals = chunk.map((_, n) => {
+          const b = n * 12;
+          return `($${b + 1},$${b + 2},$${b + 3},$${b + 4},$${b + 5},$${b + 6},$${b + 7},`
+               + `$${b + 8},$${b + 9},$${b + 10},$${b + 11},$${b + 12})`;
+        }).join(',');
+        const params = chunk.flatMap(b => [
+          source, b.capturedOn, b.sleeperId, b.name, b.position, b.team,
+          b.superflex, 'none', b.value, b.age, b.isRookie, b.posRank,
+        ]);
+        const { rowCount } = await db.query(
+          `insert into player_values
+             (source, captured_on, sleeper_id, name, position, team, superflex, tep, value,
+              age, is_rookie, pos_rank)
+           values ${vals}
+           on conflict (source, captured_on, name, superflex, tep) do update
+             set value      = excluded.value,
+                 sleeper_id = coalesce(excluded.sleeper_id, player_values.sleeper_id),
+                 position   = coalesce(excluded.position, player_values.position),
+                 team       = coalesce(excluded.team, player_values.team),
+                 age        = coalesce(excluded.age, player_values.age),
+                 is_rookie  = coalesce(excluded.is_rookie, player_values.is_rookie),
+                 pos_rank   = coalesce(excluded.pos_rank, player_values.pos_rank)`, params);
+        summary.currentWritten = (summary.currentWritten || 0) + rowCount;
+      }
     }
   }
 

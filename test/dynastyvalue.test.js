@@ -152,10 +152,38 @@ const it = async (n, f) => {
     const payer = p.sides.find(s => s.rosterId === 3);
     const future = payer.picks.find(k => k.season === '2027');
     assert.ok(future.value > 0, 'the 2027 pick must be priced, not left at nothing');
-    assert.match(future.assumedFrom || '', /^2026 /, 'and it must name the year it borrowed from');
     assert.ok(p.margin > 0, 'a margin is owed once every asset carries a price');
-    assert.ok(p.assumptions.some(a => a.label === '2027 Mid 2nd'),
-      'the assumption must be reported alongside the margin, never folded into it');
+
+    /*
+     * 2027 used to have no quote at all and was carried across from 2026. The
+     * sheet's CURRENT tab quotes 2027 and 2028 directly, so on recent dates
+     * this is now a real price and no assumption is recorded — which is the
+     * better outcome and the reason this assertion is conditional rather than
+     * simply deleted. Older dates still carry.
+     */
+    if (future.assumedFrom) {
+      assert.match(future.assumedFrom, /^\d{4} /, 'a carried price must name the year it came from');
+      assert.ok(p.assumptions.some(a => a.label === future.label),
+        'and be reported alongside the margin, never folded into it');
+    } else {
+      assert.ok(!p.assumptions.some(a => a.label === future.label),
+        'a real price must not be reported as an assumption');
+    }
+  });
+
+  await it('a season with no quote anywhere is still carried, and said', async () => {
+    // 2031 is quoted by nobody, so the carry mechanism itself stays covered.
+    const p = await dv.priceTrade({
+      received: {}, roster_ids: [3, 4],
+      draft_picks: [
+        { round: 2, season: '2026', owner_id: 4, roster_id: 3 },
+        { round: 2, season: '2031', owner_id: 3, roster_id: 4 },
+      ],
+    }, { superflex: false, teams: 12, slots: new Map([[3, 3], [4, 8]]), slotSeason: '2026' });
+    if (!p) return console.log('       (skip: no player_values loaded)');
+    const far = p.sides.flatMap(s => s.picks).find(k => k.season === '2031');
+    assert.ok(far.assumedFrom, '2031 has no quote and must be carried');
+    assert.ok(p.assumptions.some(a => a.label === far.label), 'and reported');
   });
 
   await it('a pick nothing can price at all still leaves the margin NULL', async () => {

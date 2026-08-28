@@ -198,12 +198,17 @@ async function priceTrade(trade, o = {}) {
    * has. The source lists 2026 picks and no 2027, so "my 2027 second" priced at
    * nothing and no margin could be given for a trade containing one.
    *
-   * Sean's call, and it is defensible: a mid second is a mid second. It is also
-   * KNOWN to be slightly generous — real dynasty markets discount a future pick
-   * against the same pick this year, because its slot is not yet decided — so
-   * it reads high for whoever GIVES UP the future pick. That is why every one
-   * of these is recorded as an assumption and repeated back with the margin,
-   * rather than quietly folded into a number.
+   * Sean's call, and it is defensible: a mid second is a mid second.
+   *
+   * The direction of its error is NOT known, which is the point of recording
+   * it. The obvious reasoning says a future pick trades at a discount, since
+   * its slot is undecided — and measured against a real 2027 price the moment
+   * one became available, that reasoning was backwards: a 2027 Mid 2nd was
+   * 4,146 against a 2026 Mid 2nd at 3,712. Mid-draft, this year's remaining
+   * picks have already decayed while next year's still hold their option value.
+   *
+   * So every carried price is repeated back with the margin rather than quietly
+   * folded into it, and no claim is made about which way it leans.
    */
   const assumptions = [];
   const missing = [...labels].filter(([, v]) => v == null).map(([k]) => k);
