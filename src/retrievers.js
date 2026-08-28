@@ -73,7 +73,10 @@ const QUERIES = {
       if (!out.rows.length) return 'No trade could be valued for this league.';
 
       const c = out.coverage;
-      const L = ['TRADE LEDGER. Two different questions, kept apart:',
+      const L = ['TRADE LEDGER. Lead with the GRADE and the PICK EQUIVALENT — "up about an early'
+        + ' 1st" is something a person can feel, and the raw number is not. The bracketed'
+        + ' figures are working: keep them back unless somebody asks how, or argues.',
+        '  Two different questions, kept apart:',
         '  AT THE TIME — did the market agree with you the day you made the deal.',
         '  NOW — has it worked out since. A manager who buys players the market later'
         + ' re-rates looks bad on the first and good on the second, and that gap is the story.',
@@ -91,9 +94,37 @@ const QUERIES = {
         return `Nobody matching "${args.manager}" has a trade on record here.`;
       }
 
-      const line = (r, i) => `    ${r.name}: ${r.now > 0 ? '+' : ''}${r.now} as things stand`
-        + `, ${r.thenMatched > 0 ? '+' : ''}${r.thenMatched} at the time`
-        + ` (swing ${r.swing > 0 ? '+' : ''}${r.swing}), ${r.wonThen}-${r.lostThen} on the day`;
+      /*
+       * SAID IN PICKS, GRADED BY RANK — because "+7,492" is a number off a value
+       * sheet and nobody in a group chat has a feel for it. Everybody knows
+       * roughly what a first is worth. The raw totals stay, marked as working,
+       * for the follow-up where somebody disputes it.
+       */
+      const { rows: pickRows } = await db.query(
+        `select name, value from player_values
+          where position = 'PICK' and superflex = $1
+            and captured_on = (select max(captured_on) from player_values)`, [superflex]);
+      const ladder = dv.pickLadder(pickRows);
+      const say = v => dv.inPicks(v, ladder) || `${v}`;
+
+      const line = r => {
+        const g = dv.traderGrade(out.rows.indexOf(r) + 1, out.rows.length);
+        /*
+         * Near enough to zero that "up" or "down" overstates it. Somebody who
+         * has traded to a standstill should be told that, not told they are up
+         * an amount too small to name.
+         */
+        const tiny = Math.abs(r.now) < (ladder[ladder.length - 1]?.value || 0) * 0.6;
+        const dir = tiny ? 'level, having traded to a standstill —' : (r.now >= 0 ? 'up' : 'down');
+        // they/them: nobody has told us these managers' pronouns.
+        const moved = Math.abs(r.swing) > Math.abs(r.now) * 0.25
+          ? (r.swing > 0 ? ' It has moved their way since the deals were made.'
+                         : ' It has moved against them since the deals were made.')
+          : ' Roughly where it stood when the deals were made.';
+        return `    ${r.name}: ${g.grade}, ${tiny ? dir : `${dir} ${say(r.now)}`}, ${g.say}.${moved}`
+             + `  [working, do not volunteer: now ${r.now}, at the time ${r.thenMatched},`
+             + ` swing ${r.swing}, ${r.wonThen}-${r.lostThen} on the day]`;
+      };
 
       if (show) {
         L.push('');

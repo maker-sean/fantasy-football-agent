@@ -351,6 +351,55 @@ const it = async (n, f) => {
     assert.ok(Math.abs(sumNow) <= out.rows.length, `now should net to ~0, got ${sumNow}`);
   });
 
+  console.log('\nsaying a number in a unit people feel');
+
+  const LADDER = dv.pickLadder([
+    { name: '2026 Early 1st', value: 6000 }, { name: '2027 Early 1st', value: 6400 },
+    { name: '2026 Mid 1st', value: 5000 }, { name: '2026 Late 2nd', value: 3500 },
+    { name: '2026 Late 4th', value: 1700 },
+  ]);
+
+  await it('the ladder averages a rung across years and drops the year', async () => {
+    const early = LADDER.find(r => r.label === 'early 1st');
+    assert.strictEqual(early.value, 6200, '6000 and 6400 average to 6200');
+    assert.ok(LADDER.every(r => !/\d{4}/.test(r.label)), 'nobody speaks in "a 2028 Mid 1st"');
+  });
+
+  await it('"about" means about, and a 38% miss is not about', async () => {
+    /*
+     * Snapping 8,822 onto a 6,378 rung and calling it "about an early 1st" is a
+     * 38% error stated as a comparison. The whole point of translating is to be
+     * roughly right in a unit people feel; being confidently wrong in that unit
+     * is worse than the raw number was.
+     */
+    assert.match(dv.inPicks(6200, LADDER), /^about an early 1st$/);
+    assert.ok(!/^about/.test(dv.inPicks(8800, LADDER)), '8,800 is not "about" a 6,200 rung');
+  });
+
+  await it('it reads as English, not as a template', async () => {
+    for (const v of [6200, 5000, 3500, 1700, 9000, 40000, 100]) {
+      const said = dv.inPicks(v, LADDER);
+      assert.ok(!/\ba (early|an)/.test(said), `bad article in: ${said}`);
+      assert.ok(said && said.length, 'every value must say something');
+    }
+  });
+
+  await it('below the cheapest pick and far above the dearest both stay honest', async () => {
+    assert.match(dv.inPicks(200, LADDER), /less than a late fourth/);
+    assert.match(dv.inPicks(40000, LADDER), /first round picks/);
+  });
+
+  await it('A+ is first place, not near it', async () => {
+    assert.strictEqual(dv.traderGrade(1, 12).grade, 'A+');
+    assert.strictEqual(dv.traderGrade(2, 12).grade, 'A', 'second of twelve is not the best at it');
+    assert.strictEqual(dv.traderGrade(12, 12).grade, 'D');
+  });
+
+  await it('a grade is rank-based, so league size does not change what it means', async () => {
+    assert.strictEqual(dv.traderGrade(1, 8).grade, dv.traderGrade(1, 14).grade);
+    assert.strictEqual(dv.traderGrade(8, 8).grade, dv.traderGrade(14, 14).grade);
+  });
+
   console.log(`\n${pass} passing`);
   await db.pool.end();
 })();

@@ -105,12 +105,22 @@ async function build(league, { top = 4 } = {}) {
     if (!rows.length) return null;
 
     const n = Math.min(top, Math.max(1, Math.floor(rows.length / 3)));
+    /*
+     * Points stay as points here — a redraft league already thinks in them and
+     * "+335 points" is a sentence anybody in one understands. Only the letter
+     * is added, since a total on its own gives no sense of where that sits.
+     */
+    const dv2 = require('./dynastyvalue');
     const sign = v => (v > 0 ? `+${v}` : `${v}`);
     const lines = [`Trade ledger, ${graded.length} settled trades, judged on points actually scored.`];
+    const say2 = r => {
+      const g = dv2.traderGrade(rows.indexOf(r) + 1, rows.length);
+      return `  ${r.name} ${g.grade}, ${sign(r.points)} points (${r.won}-${r.lost})`;
+    };
     lines.push('Up:');
-    for (const r of rows.slice(0, n)) lines.push(`  ${r.name} ${sign(r.points)} points (${r.won}-${r.lost})`);
+    for (const r of rows.slice(0, n)) lines.push(say2(r));
     lines.push('Down:');
-    for (const r of rows.slice(-n).reverse()) lines.push(`  ${r.name} ${sign(r.points)} points (${r.won}-${r.lost})`);
+    for (const r of rows.slice(-n).reverse()) lines.push(say2(r));
     const mid = rows.length - 2 * n;
     if (mid > 0) lines.push(`${mid} others in the middle, ask me for a name.`);
     return { text: lines.join('\n'), basis: 'points', rows };
@@ -140,13 +150,31 @@ async function build(league, { top = 4 } = {}) {
   const worst = out.rows.slice(-n).reverse();
   const middle = out.rows.length - 2 * n;
 
-  const sign = v => (v > 0 ? `+${v}` : `${v}`);
+  /*
+   * IN PICKS, WITH A LETTER. A raw market total is a number off a value sheet
+   * and means nothing to anybody reading a group chat; "up about an early 1st"
+   * is a thing people trade in and argue about. The numbers stay out of the
+   * broadcast entirely — anyone who wants them can ask, and the ledger lookup
+   * still has them.
+   */
+  const { rows: pickRows } = await db.query(
+    `select name, value from player_values
+      where position = 'PICK' and superflex = $1
+        and captured_on = (select max(captured_on) from player_values)`, [superflex]);
+  const ladder = dv.pickLadder(pickRows);
+  const say = (r, i, list) => {
+    const rank = out.rows.indexOf(r) + 1;
+    const g = dv.traderGrade(rank, out.rows.length);
+    const dir = r.now >= 0 ? 'up' : 'down';
+    return `  ${r.name} ${g.grade}, ${dir} ${dv.inPicks(r.now, ladder) || r.now}`;
+  };
+
   const lines = [];
   lines.push(`Trade ledger, ${out.coverage.bothPriced} of ${out.coverage.total} trades valued.`);
   lines.push('Up:');
-  for (const r of best) lines.push(`  ${r.name} ${sign(r.now)} (${sign(r.thenMatched)} at the time)`);
+  for (const r of best) lines.push(say(r));
   lines.push('Down:');
-  for (const r of worst) lines.push(`  ${r.name} ${sign(r.now)} (${sign(r.thenMatched)} at the time)`);
+  for (const r of worst) lines.push(say(r));
   if (middle > 0) lines.push(`${middle} others in the middle, ask me for a name.`);
 
   return { text: lines.join('\n'), basis: 'market', ledger: out };

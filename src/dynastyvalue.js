@@ -511,4 +511,94 @@ async function tradeLedger({ trades, book, slots, teams = 12, slotSeason = null,
   return { rows, coverage: { bothPriced, thenOnly, unpriced: neither, total: (trades || []).length } };
 }
 
-module.exports = { priceTrade, loadValueBook, tradeLedger, rosterFlags, gradeFor, pickLabel, bucketFor, slotsFromDraft, slotsFromFinish };
+
+/*
+ * Raw market value means nothing to a person.
+ *
+ * "+7,492 as things stand" is a number off a value sheet and nobody in a group
+ * chat has any feel for it. The currency dynasty players actually think in is
+ * PICKS: everybody knows roughly what a first is worth and what a third is not.
+ *
+ * So the ladder of pick prices doubles as a translation table. The year is
+ * dropped and the same rung averaged across seasons, because "a mid 1st" is the
+ * unit people speak in and "a 2028 Mid 1st" is a different, more precise thing
+ * than anybody means.
+ */
+function pickLadder(rows) {
+  const buckets = new Map();
+  for (const r of rows || []) {
+    const m = /^(\d{4}) (Early|Mid|Late) (1st|2nd|3rd|4th)$/.exec(r.name);
+    if (!m) continue;
+    const label = `${m[2].toLowerCase()} ${m[3]}`;
+    if (!buckets.has(label)) buckets.set(label, []);
+    buckets.get(label).push(r.value);
+  }
+  return [...buckets].map(([label, vals]) => ({
+    label, value: Math.round(vals.reduce((a, v) => a + v, 0) / vals.length),
+  })).sort((a, b) => b.value - a.value);
+}
+
+/**
+ * Say a value in picks: "about a mid 1st", "roughly two firsts".
+ *
+ * Deliberately vague at the edges. Below the cheapest rung there is no pick
+ * worth saying, and past the top one the honest phrasing is multiples rather
+ * than a rung nobody would recognise.
+ */
+function inPicks(value, ladder) {
+  if (!ladder?.length || value == null) return null;
+  const v = Math.abs(value);
+  const top = ladder[0];
+  const bottom = ladder[ladder.length - 1];
+  // "a early 1st" is how a machine talks.
+  const a = label => `${/^[aeiou]/i.test(label) ? 'an' : 'a'} ${label}`;
+
+  // Phrased to follow "up" or "down" without reading like a form letter.
+  if (v < bottom.value * 0.6) return 'barely anything, less than a late fourth';
+  if (v >= top.value * 1.5) {
+    const n = Math.round(v / top.value);
+    return n <= 1 ? `a bit more than ${a(top.label)}` : `about ${n} first round picks`;
+  }
+
+  const nearest = ladder.reduce((best, r) =>
+    Math.abs(r.value - v) < Math.abs(best.value - v) ? r : best, ladder[0]);
+
+  /*
+   * "About" has to mean about. Snapping 8,822 to a 6,378 rung and calling it
+   * "about an early 1st" is a 38% error stated as a comparison — the whole
+   * point of the translation is to be roughly right in a unit people feel, and
+   * being confidently wrong in that unit is worse than the raw number was.
+   */
+  if (Math.abs(nearest.value - v) / nearest.value <= 0.15) return `about ${a(nearest.label)}`;
+
+  if (v > top.value) return `more than ${a(top.label)}`;
+  const above = [...ladder].reverse().find(r => r.value >= v);
+  const below = ladder.find(r => r.value <= v);
+  if (above && below && above.label !== below.label) {
+    return `between ${a(below.label)} and ${a(above.label)}`;
+  }
+  return `about ${a(nearest.label)}`;
+}
+
+/*
+ * A trader's grade, from where they sit in their own league.
+ *
+ * Rank-based rather than absolute, because raw totals depend on how much a
+ * league trades: +3,000 is a fortune in a quiet league and noise in a busy one.
+ * Being second of twelve means the same thing everywhere.
+ */
+function traderGrade(rank, of) {
+  if (!rank || !of) return null;
+  const pct = (rank - 1) / Math.max(1, of - 1);
+  // A+ is first place, not "near the top" — two of them in a twelve team league
+  // is a grade nobody believes.
+  if (rank === 1) return { grade: 'A+', say: 'the best in the league at it' };
+  if (pct <= 0.25) return { grade: 'A', say: 'one of the best' };
+  if (pct <= 0.40) return { grade: 'B+', say: 'ahead of most' };
+  if (pct <= 0.60) return { grade: 'B', say: 'about average' };
+  if (pct <= 0.75) return { grade: 'C+', say: 'behind most' };
+  if (pct < 1) return { grade: 'C', say: 'one of the worst' };
+  return { grade: 'D', say: 'dead last in the league at it' };
+}
+
+module.exports = { priceTrade, loadValueBook, tradeLedger, pickLadder, inPicks, traderGrade, rosterFlags, gradeFor, pickLabel, bucketFor, slotsFromDraft, slotsFromFinish };
