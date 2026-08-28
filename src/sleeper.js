@@ -83,6 +83,30 @@ async function allPlayers() {
 const SCHEDULE_TTL_MS = Number(process.env.DRAFT_SCHEDULE_TTL_MS || 10 * 60 * 1000);
 const scheduleCache = new Map();
 
+/*
+ * The slot map on its own, cached for the life of the process.
+ *
+ * Which roster drafts from which slot is what turns "a 2026 2nd" into "the
+ * eighteenth pick", and therefore into a price. It is NOT on the drafts list,
+ * only on the draft detail, which is why the schedule carries it as null.
+ *
+ * Immutable once the order is drawn, so this caches hard rather than for a few
+ * minutes: a trade priced twice in one conversation must not cost two calls to
+ * an API this project is trying to stay a polite user of.
+ */
+const slotMapCache = new Map();
+
+async function draftSlots(draftId) {
+  if (!draftId) return null;
+  if (slotMapCache.has(draftId)) return slotMapCache.get(draftId);
+  const d = await get(`/draft/${encodeURIComponent(draftId)}`).catch(() => null);
+  const map = d?.slot_to_roster_id || null;
+  // Only a real answer is cached. Caching a failure would make one bad minute
+  // permanent for as long as the worker runs.
+  if (map) slotMapCache.set(draftId, map);
+  return map;
+}
+
 async function draftSchedule(leagueId) {
   const hit = scheduleCache.get(leagueId);
   if (hit && Date.now() - hit.at < SCHEDULE_TTL_MS) return hit.value;
@@ -502,6 +526,7 @@ async function seasonStats(season, { scoring = 'half_ppr', live = false } = {}) 
 }
 
 module.exports = {
+  draftSlots,
   projections, seasonProjections, seasonStats, draftSchedule, draftClock,
   BASE, get, state, league, rosters, users, matchups, transactions,
   allPlayers, weekSnapshot, rosterOwners, draft,

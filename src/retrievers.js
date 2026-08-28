@@ -32,6 +32,159 @@ const nameFor = (ctx, rid) => {
 const QUERIES = {
 
   /*
+   * What a dynasty trade was worth, and what the price could not see.
+   *
+   * The redraft path grades on points actually scored weeks later, which is
+   * ground truth. Dynasty gets none of that — a trade made in 2021 is still
+   * resolving — so this answers the question the chat actually argues about:
+   * was it fair when it was made.
+   *
+   * Market values already carry age, team control and breakout odds, so this
+   * looks them up rather than modelling them. The judgement it adds is the
+   * roster: a second round pick spent on the backup to a starter carrying a
+   * knee injury is an overpay by price and a handcuff by roster, and only the
+   * second explains why somebody paid it.
+   */
+  trade_value: {
+    describe: 'What a trade was worth at market prices, for leagues whose trades are '
+            + 'not graded on points — dynasty and keeper. Use for "was that trade fair", '
+            + '"did I win that trade", "how did my trade with X look", "what did I give up". '
+            + 'Arguments: manager=<name> (optional), season=<year> (optional).',
+    args: {
+      manager: 'string, a manager name, or omit for the whole league',
+      season: 'string, a year like 2026, or omit for the most recent trades',
+    },
+    async run(ctx, args) {
+      const dv = require('./dynastyvalue');
+
+      const leagueWords = String(ctx.leagueName || '').toLowerCase().split(/\s+/).filter(w => w.length > 2);
+      if (args.manager && leagueWords.includes(String(args.manager).toLowerCase())) delete args.manager;
+
+      const { rows } = await db.query(
+        `select t.season, t.week, t.received, t.roster_ids, t.draft_picks, t.status_updated_at
+           from trades t join leagues l on l.id = t.league_id
+          where l.sleeper_league_id = any($1::text[]) and t.status = 'complete'
+            and ($2::text is null or t.season = $2)
+          order by t.season desc, t.week desc limit 40`,
+        [ctx.chainIds || [], args.season || null]);
+      if (!rows.length) return 'No completed trades are on record for this league.';
+
+      const nameOf = rid => {
+        const m = (ctx.members || []).find(x => Number(x.rosterId) === Number(rid));
+        return m?.name || `roster ${rid}`;
+      };
+
+      let items = rows;
+      if (args.manager) {
+        const want = String(args.manager).toLowerCase();
+        items = rows.filter(t => (t.roster_ids || []).some(r => nameOf(r).toLowerCase().includes(want)));
+        if (!items.length) return `No trade on record involves anyone matching "${args.manager}".`;
+      }
+      /*
+       * THE TRUNCATION, SAID OUT LOUD.
+       *
+       * Pricing every trade is too many tokens, so this shows the most recent
+       * few. Asked whether Sean had ever traded with Brennan, the answer came
+       * back "they haven't" — the deal was 2024 and the list stopped at four,
+       * and a list that stops without saying so is read as the whole record.
+       * This repo has now paid for that exact mistake three times: five graded
+       * trades of sixteen, twenty-five ungraded of fifty-five, and here.
+       */
+      const matched = items.length;
+      const SHOW = 4;
+      items = items.slice(0, SHOW);
+
+      const superflex = Boolean(ctx.valueVariant?.superflex);
+      const teams = ctx.draftSchedule?.teams || 12;
+      const slotMap = await require('./sleeper').draftSlots(ctx.draftSchedule?.draftId).catch(() => null);
+      const slots = slotMap ? dv.slotsFromDraft(slotMap) : new Map();
+
+      /*
+       * Rosters are TODAY'S, so the handcuff check runs only on this season's
+       * trades. Asking whether two men are teammates in 2026 answers nothing
+       * about a 2021 deal, and a confidently wrong handcuff is worse than none.
+       */
+      const thisSeason = String(ctx.season || new Date().getFullYear());
+      let rosters = null;
+
+      const L = [`TRADE VALUE, ${superflex ? 'superflex' : '1QB'} market prices AS AT THE DATE OF EACH`
+               + ' TRADE, not today. So these say what the two sides were agreeing to at the time,'
+               + ' which is a different question from how it turned out — a player can be worth'
+               + ' twice now what he was worth then. Nothing here says who won: say "on paper" or'
+               + ' "by value at the time" when you use these numbers:'];
+      if (matched > items.length) {
+        L.push(`  THESE ARE THE ${items.length} MOST RECENT OF ${matched}`
+             + `${args.manager ? ` involving ${args.manager}` : ''}${args.season ? ` in ${args.season}` : ''}.`
+             + ' Older ones exist and are not priced here, so do NOT say a pairing has never'
+             + ' traded, and do not count from this list. Ask for a season to see further back.');
+      }
+
+      for (const t of items) {
+        /*
+         * Priced at the date of the TRADE, not today.
+         *
+         * "Was it fair" is a question about the moment it was made, and today's
+         * market answers a different one. A 2024 deal priced at 2026 values had
+         * Nico Collins at 6304 because that is what he is worth now, which says
+         * nothing about what anybody was agreeing to two years ago. Six years of
+         * weekly history exist for exactly this.
+         */
+        const priced = await dv.priceTrade(t, {
+          superflex, teams, slots,
+          slotSeason: ctx.draftSchedule?.season,
+          asOf: t.status_updated_at || null,
+        });
+        if (!priced) { L.push(`  ${t.season} week ${t.week}: no market values available.`); continue; }
+
+        L.push('');
+        L.push(`  ${t.season} week ${t.week}, priced as at`
+             + ` ${String(priced.capturedOn).slice(0, 10)}:`);
+        for (const side of priced.sides) {
+          const got = [
+            ...side.players.map(pl => `${pl.name} (${pl.value})`),
+            ...side.picks.map(pk => `${pk.label || `${pk.season} round ${pk.round}`}`
+              + (pk.value != null
+                  ? ` (${pk.value}${pk.assumedFrom ? ', assumed' : ''}${pk.slotUnknown ? ', slot unknown so priced mid-round' : ''})`
+                  : ' (no price)')),
+          ];
+          L.push(`    ${nameOf(side.rosterId)} got ${got.join(', ') || 'nothing'}`
+               + `  = ${side.value}`);
+        }
+        if (priced.margin != null) {
+          L.push(`    ON PAPER: ${nameOf(priced.sides[0].rosterId)} came out ahead by ${priced.margin}.`);
+        } else {
+          L.push(`    NO MARGIN: ${priced.unpricedReason}. Say that rather than guessing one.`);
+        }
+        for (const a of priced.assumptions) {
+          L.push(`    ASSUMED: ${a.label} priced as ${a.from}, because the market does not quote it`
+               + ' yet. Future picks normally trade at a DISCOUNT, so this reads generously for'
+               + ' whoever gave it up.');
+        }
+
+        if (t.season === thisSeason) {
+          if (rosters === null) {
+            rosters = await fetch(`https://api.sleeper.app/v1/league/${ctx.sleeperLeagueId}/rosters`)
+              .then(r => r.json()).catch(() => []);
+          }
+          for (const side of priced.sides) {
+            const own = (rosters || []).find(r => Number(r.roster_id) === side.rosterId);
+            const flags = await dv.rosterFlags(side.players.map(pl => pl.playerId), own?.players || [])
+              .catch(() => []);
+            for (const f of flags) {
+              L.push(`    ROSTER: ${f.name} is the handcuff to ${f.handcuffOf} on ${nameOf(side.rosterId)}'s`
+                   + ` own roster (both ${f.team} ${f.position})`
+                   + (f.starterInjury ? `, and ${f.handcuffOf} is ${f.starterInjury}`
+                       + `${f.starterBodyPart ? ` with a ${String(f.starterBodyPart).toLowerCase()}` : ''}`
+                       + '. That is a premium somebody chose to pay, not only an overpay.' : '.'));
+            }
+          }
+        }
+      }
+      return L.join('\n');
+    },
+  },
+
+  /*
    * One slice of league history, instead of all nine.
    *
    * The history section is 2,550 tokens and is nine precomputed rankings, each

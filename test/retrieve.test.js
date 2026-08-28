@@ -149,6 +149,23 @@ const dies = msg => ({ messages: { create: async () => { throw new Error(msg); }
     assert.deepStrictEqual(r.lookup.args, {});
   });
 
+  await it('a placeholder is never passed through as an argument', async () => {
+    /*
+     * The router answered "was my trade fair" with manager=<asking person>,
+     * copying the menu's shape instead of filling it in. Passed through, that
+     * filters the league down to nobody, and the reply reports the emptiness
+     * as fact.
+     */
+    const r = await route('q', { client: says('sections: none\nlookup: trade_value manager=<asking') });
+    assert.deepStrictEqual(r.lookup.args, {}, 'an angle-bracketed value must be dropped');
+  });
+
+  await it('trade_value drops the trades section, which lists only the recent few', async () => {
+    const r = await route('q', { client: says('sections: trades\nlookup: trade_value manager=Sean') });
+    assert.deepStrictEqual(r.sections, [], 'the shorter list would otherwise win');
+    assert.strictEqual(r.lookup.args.manager, 'Sean');
+  });
+
   console.log('\nthe trade lookup, against real rows');
 
   const db = require('../src/db');

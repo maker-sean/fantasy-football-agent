@@ -350,6 +350,9 @@ async function leagueContext(leagueId, opts = {}) {
     // Kept on ctx so a retriever can run its own query over the same chain
     // rather than re-walking it. See src/retrievers.js.
     ctx.chainIds = chainIds;
+    // The live league's own Sleeper id, for lookups that need today's rosters
+    // rather than a snapshot — the handcuff check is the one that does.
+    ctx.sleeperLeagueId = league.sleeper_league_id;
 
     ctx.gradedTrades = await db.query(
       `select t.season, t.week, t.verdict

@@ -125,7 +125,7 @@ const it = async (n, f) => {
       ],
     };
     const slots = new Map([[3, 3], [4, 8]]);
-    const p = await dv.priceTrade(trade, { superflex: false, teams: 12, slots });
+    const p = await dv.priceTrade(trade, { superflex: false, teams: 12, slots, slotSeason: '2026' });
     if (!p) return console.log('       (skip: no player_values loaded)');
     const payer = p.sides.find(s => s.rosterId === 3);
     const future = payer.picks.find(k => k.season === '2027');
@@ -157,12 +157,58 @@ const it = async (n, f) => {
         { round: 2, season: '2026', owner_id: 3, roster_id: 4 },
       ],
     };
-    const p = await dv.priceTrade(trade, { superflex: false, teams: 12, slots: new Map([[3, 3], [4, 8]]) });
+    // slotSeason is REQUIRED for the real slots to apply — without it every pick
+    // falls back to mid-round, which is the correct behaviour and makes this
+    // test meaningless rather than failing loudly. Named here so it stays true.
+    const p = await dv.priceTrade(trade, {
+      superflex: false, teams: 12, slots: new Map([[3, 3], [4, 8]]), slotSeason: '2026' });
     if (!p) return console.log('       (skip: no player_values loaded)');
     assert.strictEqual(p.margin !== null, true, 'both sides priceable means a margin is owed');
     const early = p.sides.find(s => s.picks.some(k => /Early/.test(k.label || '')));
     const mid = p.sides.find(s => s.picks.some(k => /Mid/.test(k.label || '')));
     assert.ok(early.value > mid.value, 'an early second must outvalue a mid second');
+  });
+
+  console.log('\npriced at the date of the trade, not today');
+
+  await it('an older capture is used when asOf is in the past', async () => {
+    const trade = {
+      received: {}, roster_ids: [3, 4],
+      draft_picks: [
+        { round: 2, season: '2026', owner_id: 4, roster_id: 3 },
+        { round: 2, season: '2026', owner_id: 3, roster_id: 4 },
+      ],
+    };
+    const slots = new Map([[3, 3], [4, 8]]);
+    const now = await dv.priceTrade(trade, { superflex: false, teams: 12, slots, slotSeason: '2026' });
+    const then = await dv.priceTrade(trade, { superflex: false, teams: 12, slots, slotSeason: '2026',
+      asOf: '2025-09-01' });
+    if (!now || !then) return console.log('       (skip: no player_values loaded)');
+    assert.ok(then.capturedOn < now.capturedOn, 'a past asOf must reach a past capture');
+    assert.ok(String(then.capturedOn).startsWith('2025') || then.capturedOn < new Date('2025-09-02'),
+      `expected a 2025 capture, got ${then.capturedOn}`);
+  });
+
+  await it('a slot map is only trusted for its own season', async () => {
+    /*
+     * The map we can fetch is this year's. Using it for a 2028 pick would price
+     * that pick against a draft position with nothing to do with it — so other
+     * seasons fall back to mid-round, and say so.
+     */
+    const p = await dv.priceTrade({
+      received: {}, roster_ids: [3, 4],
+      draft_picks: [
+        { round: 2, season: '2026', owner_id: 4, roster_id: 3 },
+        { round: 2, season: '2028', owner_id: 3, roster_id: 3 },
+      ],
+    }, { superflex: false, teams: 12, slots: new Map([[3, 3]]), slotSeason: '2026' });
+    if (!p) return console.log('       (skip: no player_values loaded)');
+    const own = p.sides.flatMap(s => s.picks).find(k => k.season === '2026');
+    const other = p.sides.flatMap(s => s.picks).find(k => k.season === '2028');
+    assert.strictEqual(own.slotUnknown, false, 'its own season uses the real slot');
+    assert.strictEqual(own.label, '2026 Early 2nd');
+    assert.strictEqual(other.slotUnknown, true, 'another season must not borrow this slot');
+    assert.match(other.label, /Mid/);
   });
 
   console.log(`\n${pass} passing`);

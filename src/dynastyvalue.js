@@ -127,9 +127,29 @@ async function priceTrade(trade, o = {}) {
 
   // Picks. owner_id is who holds it after the trade; roster_id is whose pick it is.
   const labels = new Map();
+  /*
+   * A slot map belongs to ONE draft.
+   *
+   * The map we can fetch is the current season's, and a pick for another year
+   * will be drawn in an order nobody has generated yet — or one drawn years ago
+   * that Sleeper no longer exposes. Using this year's slot for a 2028 pick
+   * would price it against a draft position that has nothing to do with it,
+   * confidently and invisibly.
+   *
+   * So the real slot is used only for its own season, and everything else is
+   * priced at Mid, which is the honest middle of a round rather than a guess
+   * dressed as knowledge. Callers are told, per pick, which one they got.
+   */
+  const slotFor = pk => (String(pk.season) === String(o.slotSeason) ? slots.get(Number(pk.roster_id)) : null);
+  const labelFor = pk => {
+    const slot = slotFor(pk);
+    if (slot) return { label: pickLabel({ season: pk.season, round: pk.round, slot, teams }), midded: false };
+    const ord = ORDINAL[pk.round];
+    return ord ? { label: `${pk.season} Mid ${ord}`, midded: true } : { label: null, midded: false };
+  };
+
   for (const pk of trade.draft_picks || []) {
-    const slot = slots.get(Number(pk.roster_id));
-    const label = pickLabel({ season: pk.season, round: pk.round, slot, teams });
+    const { label } = labelFor(pk);
     if (label) labels.set(label, null);
   }
   if (labels.size) {
@@ -179,12 +199,11 @@ async function priceTrade(trade, o = {}) {
     }
   }
   for (const pk of trade.draft_picks || []) {
-    const slot = slots.get(Number(pk.roster_id));
-    const label = pickLabel({ season: pk.season, round: pk.round, slot, teams });
+    const { label, midded } = labelFor(pk);
     const value = label ? labels.get(label) : null;
     const assumed = assumptions.find(a => a.label === label) || null;
     const entry = { season: pk.season, round: pk.round, from: Number(pk.roster_id), label, value,
-                    assumedFrom: assumed?.from || null };
+                    assumedFrom: assumed?.from || null, slotUnknown: midded };
     const s = side(pk.owner_id);
     s.picks.push(entry);
     if (value != null) s.value += value;
