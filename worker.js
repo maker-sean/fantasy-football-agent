@@ -180,6 +180,23 @@ const JOBS = [
     console.log(`[values] ${out.written} new rows, ${out.unmatched.length} unmatched`);
     if (out.unmatched.length) console.warn('[values] unmatched:', out.unmatched.slice(0, 10).join(', '));
   }],
+  /*
+   * Thin old value captures to one a week. Sunday, after the daily pull.
+   *
+   * The daily ingest adds ~692 rows a day, about 99MB a year, so without this
+   * the table outgrows its own historical backfill inside a year and keeps
+   * going. Recent captures stay daily — "what is it worth now" and which way it
+   * is moving both want them — and beyond the window the only question these
+   * rows answer is "what was it worth around then", which a week answers.
+   *
+   * It deletes, so it is deliberately dull: nothing inside the window is
+   * touched and the first capture of each week always survives.
+   */
+  ['values_thin',    '30 5 * * 0',  async () => {
+    const out = await require('./src/playervalues').thin({ days: 90 });
+    console.log(`[values] thinned ${out.deleted} rows; `
+              + `${out.after.n} remain across ${out.after.days} captures`);
+  }],
   ['members',        '30 4 * * *',  () => snapshots.syncMembers()],
   // The weekly recap — Tuesday morning, after Monday night has settled and the
   // postscore capture has run. Queues a draft and texts the owner; it does not

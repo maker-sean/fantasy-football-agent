@@ -75,7 +75,24 @@ function parseCsv(text) {
  * one record per asset per date, which is the shape everything downstream
  * wants and the shape the table is.
  */
-async function fetchSheetSeries({ gid, superflex }, { since = null } = {}) {
+/*
+ * ISO-week key, so "one capture a week" means the same week for every asset
+ * regardless of which weekday the sheet happened to record.
+ */
+function weekKey(day) {
+  const d = new Date(day + 'T00:00:00Z');
+  const t = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+  t.setUTCDate(t.getUTCDate() + 4 - (t.getUTCDay() || 7));
+  const start = new Date(Date.UTC(t.getUTCFullYear(), 0, 1));
+  return `${t.getUTCFullYear()}-${Math.ceil(((t - start) / 86400000 + 1) / 7)}`;
+}
+
+/**
+ * @param o.weekly  keep one capture per ISO week rather than every day.
+ * @param o.until   ignore days on or after this, so a backfill stops where the
+ *                  daily history already begins instead of duplicating it.
+ */
+async function fetchSheetSeries({ gid, superflex }, { since = null, weekly = false, until = null } = {}) {
   const res = await fetch(csvUrl(gid), { redirect: 'follow' });
   if (!res.ok) throw new Error(`sheet gid ${gid} -> ${res.status}`);
   const rows = parseCsv(await res.text());
@@ -83,10 +100,30 @@ async function fetchSheetSeries({ gid, superflex }, { since = null } = {}) {
 
   const header = rows[0];
   const out = [];
+  /*
+   * WEEKLY IS THE DEFAULT SHAPE FOR HISTORY, and it costs almost nothing.
+   *
+   * The sheet carries a row a day back to 2020-04-01. Ingested daily that is
+   * 1.62M rows and about 633MB against a 27MB database — past the tier ceiling
+   * on this one table. Weekly is 231k rows and about 90MB.
+   *
+   * The accuracy given up is not the reason to prefer it, but it is the reason
+   * it is safe: these values answer "what was this worth around the time of
+   * that trade", the nearest capture is then at most three days off, and
+   * dynasty values drift a percent or two a week absent injury news. That sits
+   * far below the noise in any verdict built on top of it.
+   */
+  const seenWeek = new Set();
   for (const row of rows.slice(1)) {
     const day = (row[0] || '').trim();
     if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) continue;
     if (since && day < since) continue;
+    if (until && day >= until) continue;
+    if (weekly) {
+      const k = weekKey(day);
+      if (seenWeek.has(k)) continue;
+      seenWeek.add(k);
+    }
 
     for (let c = 1; c < header.length; c++) {
       const asset = (header[c] || '').trim();
@@ -179,7 +216,7 @@ async function loadPlayerIndex() {
  * source revising its own history cannot quietly change what we already told a
  * league. A day we have is a day we keep.
  */
-async function ingest({ source = 'ktc', since = null, dryRun = false } = {}) {
+async function ingest({ source = 'ktc', since = null, until = null, weekly = false, dryRun = false } = {}) {
   const spec = SOURCES[source];
   if (!spec) throw new Error(`unknown value source: ${source}`);
 
@@ -188,7 +225,7 @@ async function ingest({ source = 'ktc', since = null, dryRun = false } = {}) {
     unmatched: new Set(), ambiguous: new Set(), written: 0 };
 
   for (const s of spec.series) {
-    const records = await spec.fetch(s, { since });
+    const records = await spec.fetch(s, { since, weekly, until });
     summary.series++;
     summary.rows += records.length;
 
@@ -328,4 +365,47 @@ async function valueFor(sleeperId, { superflex = false, source = 'ktc' } = {}) {
   return rows[0] || null;
 }
 
-module.exports = { ingest, valueFor, bestAvailable, leagueVariant, haveValuesFor, playerIndex, SOURCES, normalise, isPick, parseCsv };
+
+/**
+ * Thin old captures down to one a week.
+ *
+ * The daily cron adds about 692 rows a day, which is ~99MB a year — so the
+ * table outgrows the historical backfill inside a year and then keeps going.
+ * Recent days stay daily because "what is this worth now" and any sense of
+ * which way a value is moving both want them; beyond the window the only
+ * question these rows answer is "what was this worth around then", and a week
+ * is finer than that question needs.
+ *
+ * DELETES ROWS, so it is written to be boring: nothing inside the window is
+ * ever touched, the FIRST capture of each week survives, and dryRun reports
+ * exactly what would go without going.
+ */
+async function thin({ days = 90, dryRun = false } = {}) {
+  const { rows: [before] } = await db.query(
+    `select count(*)::int n, count(distinct captured_on)::int days from player_values`);
+
+  const scope = `captured_on < (current_date - ($1 || ' days')::interval)`;
+  const { rows: [doomed] } = await db.query(
+    `select count(*)::int n from player_values
+      where ${scope}
+        and captured_on not in (
+          select min(captured_on) from player_values
+           where ${scope}
+           group by date_trunc('week', captured_on))`, [String(days)]);
+
+  if (dryRun) return { before, wouldDelete: doomed.n, deleted: 0, dryRun: true };
+
+  const { rowCount } = await db.query(
+    `delete from player_values
+      where ${scope}
+        and captured_on not in (
+          select min(captured_on) from player_values
+           where ${scope}
+           group by date_trunc('week', captured_on))`, [String(days)]);
+
+  const { rows: [after] } = await db.query(
+    `select count(*)::int n, count(distinct captured_on)::int days from player_values`);
+  return { before, after, deleted: rowCount, dryRun: false };
+}
+
+module.exports = { ingest, thin, weekKey, valueFor, bestAvailable, leagueVariant, haveValuesFor, playerIndex, SOURCES, normalise, isPick, parseCsv };
