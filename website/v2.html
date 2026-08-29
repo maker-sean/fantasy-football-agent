@@ -49,46 +49,77 @@
    template every product on the internet uses; it describes the product where
    the transcript above it demonstrates one. Each claim now carries the actual
    message that backs it, in the same bubbles the hero already uses.
-   Scoped to this review page so approving it is a copy-paste and rejecting it
-   costs nothing.
+
+   ONE DOM, TWO LAYOUTS. Stacked and alternating on a wide screen, where there
+   is room to read. A single horizontal rail on a phone, because four full
+   sections of transcript turned the page into a scroll nobody finishes — and
+   swiping sideways through four short ones is how people already read chat.
 --------------------------------------------------------------------------- */
 .proof { border-top: 1px solid var(--line); }
-.proof .wrap { padding-top: 74px; padding-bottom: 74px; }
+.proof .wrap { padding-top: 64px; padding-bottom: 64px; }
 .proof h2 { margin: 0 0 14px; max-width: 20ch; }
 .proof .lede { margin: 0 0 30px; max-width: 56ch; }
 
-/* The artifact itself: a chat panel, not a card. Labelled like an interface so
-   it reads as a thing that happened rather than a thing being claimed. */
+.rail-item h3 { margin: 0 0 10px; font-size: 1.35rem; }
+.rail-item .lede { margin: 0 0 20px; font-size: .95rem; }
+
 .exchange {
   background: var(--surface); border: 1px solid var(--line);
   border-radius: var(--radius); overflow: hidden;
 }
 .exchange-bar {
   display: flex; justify-content: space-between; align-items: center;
-  padding: 10px 16px; border-bottom: 1px solid var(--line);
+  padding: 9px 14px; border-bottom: 1px solid var(--line);
   background: var(--carbon);
-  font-family: var(--mono); font-size: .7rem; letter-spacing: .06em;
+  font-family: var(--mono); font-size: .68rem; letter-spacing: .06em;
   text-transform: uppercase; color: var(--muted);
 }
 .exchange-bar .tag { color: var(--turf); }
-.exchange .msgs { padding: 20px 18px; gap: 16px; }
-.exchange .bubble { font-size: .95rem; line-height: 1.5; }
+.exchange .msgs { padding: 16px 14px; gap: 13px; }
+.exchange .bubble { font-size: .92rem; line-height: 1.5; }
 
-/* A grade, which is the most repeatable thing the bot produces and deserves to
-   look like a verdict rather than like body copy. */
-.grade { font-family: var(--mono); font-weight: 700; letter-spacing: .02em; }
+/* A grade is the most repeatable thing this produces and should read as a
+   verdict, not as body copy. */
+.grade { font-family: var(--mono); font-weight: 700; }
 .grade.good { color: var(--turf); }
 .grade.bad { color: var(--amber); }
 
-/* Alternate the reading rhythm so four sections in a row do not scan as a list.
-   Wide enough only where there is room; stacked on a phone regardless. */
+/* ---- phone: one rail, swiped sideways ---------------------------------- */
+.rail {
+  display: flex; gap: 14px;
+  overflow-x: auto; scroll-snap-type: x mandatory;
+  -webkit-overflow-scrolling: touch;
+  /* Bleed to the screen edges so a half-visible next card says "swipe me"
+     without a caption telling anybody to. */
+  margin: 0 calc(var(--gutter, 20px) * -1);
+  padding: 4px var(--gutter, 20px) 18px;
+  scrollbar-width: none;
+}
+.rail::-webkit-scrollbar { display: none; }
+.rail-item {
+  flex: 0 0 86%; scroll-snap-align: start; min-width: 0;
+}
+.rail-hint {
+  font-family: var(--mono); font-size: .7rem; letter-spacing: .06em;
+  text-transform: uppercase; color: var(--muted); margin: 0 0 14px;
+}
+
+/* ---- desktop: stacked, alternating ------------------------------------- */
 @media (min-width: 900px) {
-  .proof .wrap.split {
+  .rail {
+    display: block; overflow: visible; margin: 0; padding: 0;
+  }
+  .rail-hint { display: none; }
+  .rail-item {
     display: grid; grid-template-columns: 0.85fr 1.15fr;
     gap: 54px; align-items: center;
+    padding: 52px 0; border-top: 1px solid var(--line);
   }
-  .proof .wrap.split.flip > .exchange { order: -1; }
-  .proof h2 { margin-top: 0; }
+  .rail-item:first-child { border-top: 0; padding-top: 8px; }
+  /* Alternate which side the transcript sits on, so four in a row do not scan
+     as a list. */
+  .rail-item:nth-child(even) > .exchange { order: -1; }
+  .rail-item h3 { font-size: 1.7rem; }
 }
 </style>
 </head>
@@ -212,90 +243,80 @@
       never gets bored, never misses a week, and never lets a bad start go unmentioned. Everything
       below is a real answer, with the names changed.
     </p>
-  </div>
-</section>
 
-<section class="proof">
-  <div class="wrap split">
-    <div>
-      <p class="eyebrow">Trades</p>
-      <h2>Every trade gets a letter.</h2>
-      <p class="lede">
-        It prices both sides on the day the deal was made &mdash; not today, when one of those
-        players is worth double &mdash; and grades it against the trades your league actually
-        makes. An A+ means the most lopsided tenth, not merely a good day.
-      </p>
-    </div>
-    <div class="exchange">
-      <div class="exchange-bar"><span>League group chat</span><span class="tag">Graded</span></div>
-      <div class="msgs">
-        <div class="msg">
-          <div class="who">Dave &middot; 9:14 PM</div>
-          <div class="bubble">commish grade my trade with Theo</div>
+    <p class="rail-hint">Swipe &rarr;</p>
+    <div class="rail">
+
+      <div class="rail-item">
+        <div>
+          <p class="eyebrow">Trades</p>
+          <h3>Every trade gets a letter.</h3>
+          <p class="lede">Both sides priced on the day the deal was made, graded against the trades
+          your league actually makes. It will bring up a bad one years later, unprompted.</p>
         </div>
-        <div class="msg bot">
-          <div class="who">Commish AI &middot; 9:14 PM</div>
-          <div class="bubble">Dave sent Theo a 2026 Mid 2nd and a 2027 Mid 2nd for a 2026 Early 2nd. <span class="grade good">Theo A+</span>, <span class="grade bad">Dave D</span>. Rough one to headline the season with.</div>
-        </div>
-        <div class="msg">
-          <div class="who">Dave &middot; 9:15 PM</div>
-          <div class="bubble">how did you get that</div>
-        </div>
-        <div class="msg bot">
-          <div class="who">Commish AI &middot; 9:15 PM</div>
-          <div class="bubble">Theo ahead by 3,370, 29.4% of everything in the deal. Two mid seconds for one early second, that&rsquo;s just a bad swap.</div>
+        <div class="exchange">
+          <div class="exchange-bar"><span>League group chat</span><span class="tag">Graded</span></div>
+          <div class="msgs">
+            <div class="msg">
+              <div class="who">Mike &middot; 9:14 PM</div>
+              <div class="bubble">worst trade in league history?</div>
+            </div>
+            <div class="msg bot">
+              <div class="who">Commish AI &middot; 9:14 PM</div>
+              <div class="bubble">2020 week 5. Dave sent Ana Joshua Kelley and got Justin Jefferson back. <span class="grade good">Ana A+</span>, <span class="grade bad">Dave F</span>.
+
+Kelley scored 21.3 the rest of that year. Jefferson scored 159.1. Dave has been quiet about it for six seasons and I understand why.</div>
+            </div>
+            <div class="msg">
+              <div class="who">Dave &middot; 9:15 PM</div>
+              <div class="bubble">i was rebuilding</div>
+            </div>
+            <div class="msg bot">
+              <div class="who">Commish AI &middot; 9:15 PM</div>
+              <div class="bubble">You finished 11th that year and 11th the next one. Rebuilding what.</div>
+            </div>
+          </div>
         </div>
       </div>
-    </div>
-  </div>
-</section>
 
-<section class="proof">
-  <div class="wrap split flip">
-    <div>
-      <p class="eyebrow">Trade targets</p>
-      <h2>It tells you who to call.</h2>
-      <p class="lede">
-        It simulates every one-for-one swap in your league and keeps the ones where
-        <em>both</em> starting lineups get better and the values are close enough to be worth
-        asking about. It won&rsquo;t tell you what the other manager will say &mdash; it has read
-        their roster, not their mind.
-      </p>
-    </div>
-    <div class="exchange">
-      <div class="exchange-bar"><span>League group chat</span><span class="tag">Suggested</span></div>
-      <div class="msgs">
-        <div class="msg">
-          <div class="who">Ana &middot; 11:02 AM</div>
-          <div class="bubble">who should i be trading with</div>
+      <div class="rail-item">
+        <div>
+          <p class="eyebrow">Trade targets</p>
+          <h3>It tells you who to call.</h3>
+          <p class="lede">It simulates every swap in the league and keeps the ones where
+          <em>both</em> lineups get better. It won&rsquo;t tell you what the other manager will say
+          &mdash; it has read their roster, not their mind.</p>
         </div>
-        <div class="msg bot">
-          <div class="who">Commish AI &middot; 11:02 AM</div>
-          <div class="bubble">Two worth floating. Theo: send Waddle, get Breece Hall &mdash; +7.2 projected lineup points for you, +7.6 for him, values 2% apart. Or Mike: send Pittman, get Dobbins.
+        <div class="exchange">
+          <div class="exchange-bar"><span>League group chat</span><span class="tag">Suggested</span></div>
+          <div class="msgs">
+            <div class="msg">
+              <div class="who">Ana &middot; 11:02 AM</div>
+              <div class="bubble">who should i be trading with</div>
+            </div>
+            <div class="msg bot">
+              <div class="who">Commish AI &middot; 11:02 AM</div>
+              <div class="bubble">Worth floating at Theo: send Waddle, get Breece Hall. +7.2 projected lineup points for you, +7.6 for him, values 2% apart.
 
-You&rsquo;re 4 of 12 on projected lineup, so you&rsquo;re a buyer. Stop hoarding picks.</div>
+You&rsquo;re 4 of 12 on projected lineup. You&rsquo;re a buyer. Stop hoarding picks.</div>
+            </div>
+          </div>
         </div>
       </div>
-    </div>
-  </div>
-</section>
 
-<section class="proof">
-  <div class="wrap split">
-    <div>
-      <p class="eyebrow">Draft night</p>
-      <h2>It grades the draft while you&rsquo;re still arguing about it.</h2>
-      <p class="lede">
-        A day before, an hour before, then the moment the last pick is in. Every roster ranked on
-        the starting lineup it can actually field, with what each team is thin at.
-      </p>
-    </div>
-    <div class="exchange">
-      <div class="exchange-bar"><span>League group chat</span><span class="tag">Draft night</span></div>
-      <div class="msgs">
-        <div class="msg bot">
-          <div class="who">Commish AI &middot; 11:47 PM</div>
-          <div class="bubble">Draft is done. Graded on the starting lineup each roster can field.
+      <div class="rail-item">
+        <div>
+          <p class="eyebrow">Draft night</p>
+          <h3>It grades the draft while you&rsquo;re still arguing about it.</h3>
+          <p class="lede">A day before, an hour before, then the moment the last pick is in. Every
+          roster ranked on the lineup it can actually field.</p>
+        </div>
+        <div class="exchange">
+          <div class="exchange-bar"><span>League group chat</span><span class="tag">Draft night</span></div>
+          <div class="msgs">
+            <div class="msg bot">
+              <div class="who">Commish AI &middot; 11:47 PM</div>
+              <div class="bubble">Draft is done.
 
 Best of it:
   Ana <span class="grade good">A+</span>, strongest at QB/WR
@@ -303,50 +324,49 @@ Best of it:
 
 Rough day:
   Mike <span class="grade bad">D</span>, thin at QB/RB/TE
-  Dave <span class="grade bad">D</span>, cannot fill TE
-
-6 others in between &mdash; ask me for a name.</div>
-        </div>
-        <div class="msg">
-          <div class="who">Mike &middot; 11:48 PM</div>
-          <div class="bubble">i was on a flight</div>
-        </div>
-      </div>
-    </div>
-  </div>
-</section>
-
-<section class="proof">
-  <div class="wrap split flip">
-    <div>
-      <p class="eyebrow">Six seasons of receipts</p>
-      <h2>It remembers what your league forgot.</h2>
-      <p class="lede">
-        Every game, every lineup, every trade back to the season you started. It will not crown a
-        &ldquo;best manager&rdquo; it cannot compute &mdash; but it will tell you the exact number,
-        the week, and who did it.
-      </p>
-    </div>
-    <div class="exchange">
-      <div class="exchange-bar"><span>League group chat</span><span class="tag">582 games on file</span></div>
-      <div class="msgs">
-        <div class="msg">
-          <div class="who">Theo &middot; 8:20 PM</div>
-          <div class="bubble">highest score anyone&rsquo;s ever had?</div>
-        </div>
-        <div class="msg bot">
-          <div class="who">Commish AI &middot; 8:20 PM</div>
-          <div class="bubble">Ana, 201.88, 2020 week 3. Nobody&rsquo;s touched it since.</div>
-        </div>
-        <div class="msg">
-          <div class="who">Dave &middot; 8:21 PM</div>
-          <div class="bubble">who&rsquo;s the worst trader here</div>
-        </div>
-        <div class="msg bot">
-          <div class="who">Commish AI &middot; 8:21 PM</div>
-          <div class="bubble">Mike. Down about an early 1st across everything he&rsquo;s done, and it&rsquo;s moved against him since he made them.</div>
+  Dave <span class="grade bad">D</span>, cannot fill TE</div>
+            </div>
+            <div class="msg">
+              <div class="who">Mike &middot; 11:48 PM</div>
+              <div class="bubble">i was on a flight</div>
+            </div>
+            <div class="msg bot">
+              <div class="who">Commish AI &middot; 11:49 PM</div>
+              <div class="bubble">You autodrafted three kickers. The plane did that.</div>
+            </div>
+          </div>
         </div>
       </div>
+
+      <div class="rail-item">
+        <div>
+          <p class="eyebrow">Six seasons of receipts</p>
+          <h3>It remembers what your league forgot.</h3>
+          <p class="lede">Every game, every lineup, back to the season you started. It won&rsquo;t
+          crown a &ldquo;best manager&rdquo; it can&rsquo;t compute &mdash; but it has the number,
+          the week, and the name.</p>
+        </div>
+        <div class="exchange">
+          <div class="exchange-bar"><span>League group chat</span><span class="tag">582 games on file</span></div>
+          <div class="msgs">
+            <div class="msg">
+              <div class="who">Theo &middot; 8:20 PM</div>
+              <div class="bubble">commish who&rsquo;s the worst starter in this league</div>
+            </div>
+            <div class="msg bot">
+              <div class="who">Commish AI &middot; 8:20 PM</div>
+              <div class="bubble">Can&rsquo;t crown a worst, that&rsquo;s not a stat I have. What I do have: Dave benched Jonathan Taylor for 39.8 points in a 2024 playoff game and started David Montgomery, who scored nothing.
+
+That&rsquo;s the single worst lineup call on record and it happened in an elimination week.</div>
+            </div>
+            <div class="msg">
+              <div class="who">Dave &middot; 8:21 PM</div>
+              <div class="bubble">why do you remember that</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
     </div>
   </div>
 </section>
@@ -480,7 +500,6 @@ Rough day:
         </ul>
         <a class="btn ghost" href="start.html?plan=dynasty" style="display:block; text-align:center">Start trial</a>
       </div>
-    </div>
     </div>
 
     <p class="small muted fine-print">
