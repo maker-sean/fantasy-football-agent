@@ -32,6 +32,171 @@ const nameFor = (ctx, rid) => {
 const QUERIES = {
 
   /*
+   * Who to trade with, and for whom.
+   *
+   * A trade is zero-sum in value and NOT zero-sum in lineup: a starting-calibre
+   * quarterback on the bench of a one-quarterback league is worth nothing to
+   * his owner and plenty to somebody else. The match is found by simulating
+   * every one-for-one swap and keeping the ones where both lineups improve AND
+   * the two sides are close enough in value that the other manager might say
+   * yes — without that second test the search proposes a bench receiver for a
+   * first round back, which both lineups do prefer and no human accepts.
+   */
+  trade_targets: {
+    describe: 'Suggests specific trades: who to trade with and which players, where BOTH '
+            + 'rosters improve and the values are close enough to be accepted. Use for '
+            + '"who should I trade with", "should I make a trade", "how do I fix my roster", '
+            + '"who needs what I have", "any trades I should make". Argument: manager=<name>.',
+    args: { manager: 'string, whose roster to find trades for' },
+    async run(ctx, args) {
+      const sleeper = require('./sleeper');
+      const mm = require('./matchmaker');
+
+      const hits = args.manager
+        ? (ctx.members || []).filter(x => (x.name || '').toLowerCase()
+            .includes(String(args.manager).toLowerCase()))
+        : [];
+      if (!args.manager) {
+        return 'Trade suggestions are for one roster at a time. Ask whose — this needs a'
+             + ' manager name before it can look.';
+      }
+      if (!hits.length) return `No manager matching "${args.manager}" is in this league.`;
+      if (hits.length > 1) {
+        return `"${args.manager}" matches ${hits.length} managers — `
+             + `${hits.map(h => h.name).join(' and ')}. Different rosters; ask which.`;
+      }
+      const me = hits[0];
+
+      const [lg, rosters, proj] = await Promise.all([
+        sleeper.leagueSettings(ctx.sleeperLeagueId).catch(() => null),
+        sleeper.rosters(ctx.sleeperLeagueId).catch(() => null),
+        sleeper.seasonProjections(ctx.season).catch(() => null),
+      ]);
+      if (!lg || !rosters || !proj) return 'Could not read the league from Sleeper right now.';
+      if (!rosters.some(r => (r.players || []).length)) {
+        return 'Nobody has drafted yet, so there are no rosters to trade between.';
+      }
+
+      /*
+       * Dynasty prices from the market; redraft has no market and season points
+       * are the currency there, which findTrades falls back to on its own.
+       */
+      let values = null;
+      if (ctx.valueVariant?.dynasty) {
+        const { rows } = await db.query(
+          `select sleeper_id, value from player_values
+            where source = 'ktc' and superflex = $1 and sleeper_id is not null
+              and captured_on = (select max(captured_on) from player_values)`,
+          [Boolean(ctx.valueVariant?.superflex)]);
+        if (rows.length) values = new Map(rows.map(r => [String(r.sleeper_id), r.value]));
+      }
+
+      const out = mm.findTrades({
+        rosters, rosterPositions: lg.roster_positions, proj, values,
+        rosterId: me.rosterId,
+      });
+      if (!out) return `Could not build a lineup for ${me.name}.`;
+
+      const nameOf = rid => {
+        const x = (ctx.members || []).find(y => Number(y.rosterId) === Number(rid));
+        return x?.name || `roster ${rid}`;
+      };
+
+      const L = [`TRADE TARGETS for ${me.name}. Every one-for-one swap in the league was`
+               + ' simulated; these are the ones where BOTH starting lineups get better and the'
+               + ' two sides are close enough in value to be worth proposing.'];
+
+      if (!out.best.length) {
+        /*
+         * No fit is a real answer and a useful one — it means the roster has no
+         * surplus anybody else needs at a price they would take, which is worth
+         * saying rather than padding with a proposal that fails one of the two
+         * tests.
+         */
+        return L[0] + '\n  NONE found. Nobody in this league both wants what is spare here and'
+             + ' has something this roster needs at a fair price. That is a real answer: say'
+             + ' there is no clean one-for-one right now rather than inventing one.';
+      }
+
+      L.push('  These are SUGGESTIONS, not deals. Nobody has agreed to anything.');
+      for (const t of out.best.slice(0, 4)) {
+        L.push(`    With ${nameOf(t.rosterId)}: send ${t.give.name} (${t.give.position}),`
+             + ` get ${t.get.name} (${t.get.position}).`
+             + ` ${me.name} +${t.myGain} projected lineup points, ${nameOf(t.rosterId)}`
+             + ` +${t.theirGain}. Values are ${t.edge}% apart`
+             + `${t.favours === 'neither' ? ', dead level' : `, tilting to ${t.favours === 'you' ? me.name : nameOf(t.rosterId)}`}.`);
+      }
+      L.push('  Both sides improving is the whole point — say so. A swap that only helps one'
+           + ' roster is not in this list, because it would not get accepted.');
+
+      /*
+       * PLAYERS FOR PICKS, which the swap search cannot express.
+       *
+       * It keeps trades where both LINEUPS improve, and a pick improves nobody's
+       * lineup this year — so every contender-and-rebuilder trade fails that
+       * test by construction. That is not a gap in the search, it is a different
+       * kind of trade: one side is buying now and the other is selling now, and
+       * each is measured on the axis it cares about.
+       *
+       * Dynasty only, and not because of a setting — in redraft a future pick is
+       * not an asset and the whole shape is meaningless.
+       */
+      if (ctx.valueVariant?.dynasty && values) {
+        const { rows: pv } = await db.query(
+          `select name, value from player_values
+            where position = 'PICK' and superflex = $1
+              and captured_on = (select max(captured_on) from player_values)`,
+          [Boolean(ctx.valueVariant?.superflex)]);
+        const pickValues = new Map(pv.map(r => [r.name, r.value]));
+        const traded = await fetch(
+          `https://api.sleeper.app/v1/league/${ctx.sleeperLeagueId}/traded_picks`)
+          .then(r => r.json()).catch(() => []);
+        const seasons = [String(Number(ctx.season) + 1), String(Number(ctx.season) + 2)];
+        const inventory = mm.pickInventory({
+          rosters, tradedPicks: traded, seasons, rounds: lg.settings?.rounds || 4 });
+
+        const pk = mm.findPickTrades({
+          rosters, rosterPositions: lg.roster_positions, proj, values, pickValues,
+          inventory, rosterId: me.rosterId,
+        });
+        if (pk) {
+          const ord = r => ({ 1: '1st', 2: '2nd', 3: '3rd', 4: '4th' }[r] || `${r}th`);
+          L.push('');
+          if (pk.role === 'middle') {
+            /*
+             * A team in the middle is told it is in the middle, rather than
+             * pushed to commit to a direction its own standing does not support.
+             */
+            L.push(`  PLAYERS FOR PICKS: ${me.name} sits ${pk.rank} of ${pk.of} on projected`
+                 + ' lineup — neither buying nor selling. Say they are in the middle and that'
+                 + ' this only makes sense once they pick a direction.');
+          } else if (!pk.deals.length) {
+            L.push(`  PLAYERS FOR PICKS: ${me.name} is ${pk.rank} of ${pk.of}, so a`
+                 + ` ${pk.role === 'buying' ? 'buyer' : 'seller'} — but no fair player-for-picks`
+                 + ' deal is available right now. Say that plainly.');
+          } else {
+            L.push(`  PLAYERS FOR PICKS. ${me.name} is ${pk.rank} of ${pk.of} on projected`
+                 + ` lineup, so ${pk.role === 'buying'
+                   ? 'a BUYER: spend picks on somebody who starts now'
+                   : 'a SELLER: turn players who will not win you this year into picks'}.`);
+            for (const d of pk.deals.slice(0, 3)) {
+              const picks = d.picks.map(x => `${x.season} ${x.band.toLowerCase()} ${ord(x.round)}`
+                + ` (originally ${nameOf(x.from)}'s)`).join(' and ');
+              L.push(`    ${nameOf(d.seller)} sends ${d.player.name} to ${nameOf(d.buyer)}`
+                   + ` for ${picks}. ${nameOf(d.buyer)} +${d.buyerGain} projected lineup points;`
+                   + ` values ${d.edge}% apart.`);
+            }
+            L.push('    A future pick is priced by whose it is — a contender\'s own first lands'
+                 + ' late and is worth less. That is a guess about next year\'s standings, so'
+                 + ' call these fair rather than exact.');
+          }
+        }
+      }
+      return L.join('\n');
+    },
+  },
+
+  /*
    * Who has gained and lost value in trades, at the time and in hindsight.
    *
    * TOP AND BOTTOM ONLY. A league can have hundreds of trades and a dozen

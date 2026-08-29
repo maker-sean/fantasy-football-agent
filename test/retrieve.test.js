@@ -184,6 +184,24 @@ const dies = msg => ({ messages: { create: async () => { throw new Error(msg); }
     assert.strictEqual(r.lookup.args.season, '2024');
   });
 
+  await it('an argument value keeps its spaces', async () => {
+    /*
+     * Splitting the lookup line on whitespace threw away everything after the
+     * first space: "manager=Sean M." became "Sean", which in a league holding a
+     * Sean M. and a Sean C. matched two people and refused to answer. The
+     * router had named the right person; the parser lost the surname.
+     */
+    const r = await route('q', { client: says('sections: none\nlookup: trade_targets manager=Sean M.') });
+    assert.strictEqual(r.lookup.args.manager, 'Sean M.');
+  });
+
+  await it('several arguments still separate correctly', async () => {
+    const r = await route('worst trade in 2024', {
+      client: says('sections: none\nlookup: trade_value manager=Sean M. season=2024 order=lopsided') });
+    assert.deepStrictEqual(r.lookup.args,
+      { manager: 'Sean M.', season: '2024', order: 'lopsided' });
+  });
+
   await it('a placeholder is never passed through as an argument', async () => {
     /*
      * The router answered "was my trade fair" with manager=<asking person>,

@@ -68,6 +68,7 @@ Some facts are always present and are NEVER a reason to name a section: the leag
 You may also request ONE lookup, which runs a real query and computes an answer that is not in any section. Lookups available:
 - trade_extremes: the fairest or the most lopsided trades. Arguments: order=even or order=lopsided (required), manager=<name> (optional), season=<year> (optional).
 - trade_value: GRADES a trade — a letter for each side — on what the pieces were worth on the day it was made, plus what it did to each roster's starting lineup. Works in dynasty and keeper leagues, where trades are not graded on points. Arguments: manager=<name> (optional), season=<year> (optional), order=lopsided|even|recent (optional — use order=lopsided for "worst trade ever" and order=even for "fairest trade"). Use for "was that trade fair", "did I win that trade", "grade that trade", "how did the X and Y trade look", "what was the worst trade". ALWAYS prefer this over the trades section when the question is whether a trade was GOOD; the section only lists what happened.
+- trade_targets: SUGGESTS specific trades to make — which manager to approach and which players — where both rosters improve and the values are close enough to be accepted. Argument: manager=<name> (required). Use for "who should I trade with", "should I trade", "how do I fix my roster", "who needs what I have".
 - trade_ledger: who has gained or lost the most VALUE in trades, both at the time of each trade and as things stand now. Argument: manager=<name> (optional). Use for "who wins the most trades", "who is the best trader", "who helped their team most", "has my trading been good".
 - draft_grades: grades and RANKS every team on the roster it drafted, with each team's strongest and weakest positions. Argument: manager=<name> (optional). Use for "grade my draft", "who drafted best", "how did my team do", "rank the teams", "who is the best team this year", "am I any good".
 - injuries: who is hurt and how badly, from a player list refreshed every morning, including depth chart rank. Arguments: player=<name> (optional), manager=<name> (optional). Use for "is X playing", "is X hurt", "who is banged up on my team", "any injuries this week". ALWAYS use this for a question about whether somebody is healthy — never answer that from memory.
@@ -176,11 +177,20 @@ async function route(question, opts = {}) {
   if (lkLine && !/^\s*none\b/i.test(lkLine)) {
     const parts = lkLine.trim().split(/\s+/);
     const name = parts.shift();
+    /*
+     * A VALUE MAY CONTAIN SPACES, and splitting on whitespace threw the rest of
+     * it away. "manager=Sean M." became "Sean", which in a league holding both
+     * a Sean M. and a Sean C. matched two people and refused to answer — the
+     * router had named the right person and the parser lost the surname.
+     *
+     * Each pair runs to the next key= or to the end, so a name keeps its parts.
+     */
+    const pairs = [...lkLine.trim().slice(name.length).matchAll(/([a-z_]+)=([^=]*?)(?=\s+[a-z_]+=|$)/gi)]
+      .map(m => [m[1], m[2].trim()]);
     const { QUERIES } = require('./retrievers');
     if (QUERIES[name]) {
       const args = {};
-      for (const kv of parts) {
-        const [k, v] = kv.split('=');
+      for (const [k, v] of pairs) {
         if (!k || !v) continue;
         const spec = QUERIES[name].args[k];
         if (!spec) continue;
@@ -254,6 +264,28 @@ async function route(question, opts = {}) {
     const stray = secLine.toLowerCase().split(/[,\s]+/).map(w => w.trim())
       .find(w => QUERIES[w] && !NAMES.includes(w));
     if (stray) lookup = { name: stray, args: {} };
+  }
+
+  /*
+   * A MANAGER NAMED IN THE QUESTION, when the router forgot to pass one.
+   *
+   * "What should Tyler do with his roster" came back as a lookup with no
+   * arguments — the name was right there in the sentence and the reply asked
+   * whose roster it should look at. This is not guessing: it matches only
+   * against the managers this league actually has, so an unknown name stays
+   * unknown, and it never overrides an argument the router did supply.
+   */
+  if (lookup && !lookup.args.manager) {
+    const { QUERIES } = require('./retrievers');
+    if (QUERIES[lookup.name]?.args?.manager) {
+      const hay = haystack.toLowerCase();
+      const named = (ctx?.members || [])
+        .map(m => m.name)
+        .filter(Boolean)
+        .filter(n => hay.includes(n.toLowerCase()));
+      // Exactly one match, or it is ambiguous and the query says so itself.
+      if (named.length === 1) lookup.args.manager = named[0];
+    }
   }
 
   let sections = [...new Set(picked)];
