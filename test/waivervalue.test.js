@@ -12,7 +12,7 @@
 const assert = require('assert');
 if (!process.env.DATABASE_URL) require('dotenv').config();
 
-const wv = require('../src/waivers');
+const wv = require('../src/waivervalue');
 const db = require('../src/db');
 
 let pass = 0;

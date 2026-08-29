@@ -57,7 +57,7 @@ const QUERIES = {
       season: 'string, a year like 2025, or omit for the most recent completed season',
     },
     async run(ctx, args) {
-      const wv = require('./waivers');
+      const wv = require('./waivervalue');
 
       /*
        * The season has to be one with a FINAL snapshot: the whole measure is
