@@ -67,79 +67,103 @@
   background: var(--surface); border: 1px solid var(--line);
   border-radius: var(--radius); overflow: hidden;
 }
-.exchange-bar {
-  display: flex; justify-content: space-between; align-items: center;
-  padding: 9px 14px; border-bottom: 1px solid var(--line);
-  background: var(--carbon);
-  font-family: var(--mono); font-size: .68rem; letter-spacing: .06em;
-  text-transform: uppercase; color: var(--muted);
-}
-.exchange-bar .tag { color: var(--turf); }
-.exchange .msgs { padding: 16px 14px 12px; gap: 14px; }
-.exchange .bubble { font-size: .92rem; line-height: 1.5; position: relative; }
-
 /* ---------------------------------------------------------------------------
-   MESSAGES THAT LOOK LIKE MESSAGES.
-   The transcript is the whole argument for the page, and a rounded rectangle
-   with a label over it reads as a diagram of a chat rather than a chat. The
-   parts a phone actually draws — a tail on the bubble, an avatar beside the
-   person, the time set quietly next to the name, a delivery receipt under the
-   last thing sent — are what make somebody believe it happened.
---------------------------------------------------------------------------- */
-.exchange .msg { display: grid; grid-template-columns: 26px 1fr; gap: 8px; max-width: 88%; }
-.exchange .msg > .who { grid-column: 2; }
-.exchange .msg > .bubble { grid-column: 2; }
-.exchange .msg.bot { grid-template-columns: 1fr; max-width: 92%; }
+   A THREAD, NOT A DIAGRAM OF ONE.
+   Modelled on real screenshots rather than on the idea of a chat, which
+   corrected four things I had guessed:
 
+   THE BOT IS RECEIVED. It sits left, in grey, behind an app icon. Green on the
+   right is what YOU send. Putting the bot in the green made it the phone's
+   owner, which is backwards and was the single thing stopping this reading as
+   a screenshot.
+
+   THE HEADER IS THE GROUP. Overlapping avatars, the group name with its emoji,
+   then the participants listed underneath — that block is what a phone shows
+   and what makes a mock instantly legible as a group thread.
+
+   NAMES ARE NAMES, sentence case above the bubble, not labels in caps.
+
+   NO PER-MESSAGE TIMESTAMP AND NO DELIVERY RECEIPT. A thread stamps a session,
+   centred, once — and a group chat carries no receipt at all.
+--------------------------------------------------------------------------- */
+.chat-head {
+  display: flex; flex-direction: column; align-items: center; gap: 3px;
+  padding: 14px 12px 12px; border-bottom: 1px solid var(--line);
+  background: var(--carbon);
+}
+.face-row { display: flex; margin-bottom: 4px; }
+.face {
+  width: 34px; height: 34px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: .8rem; font-weight: 700; color: #0d1b14;
+  border: 2px solid var(--carbon); margin-left: -9px;
+}
+.face:first-child { margin-left: 0; }
+.face.f1 { background: #6b7bf0; color: #0b1030; }
+.face.f2 { background: #35b6a0; }
+.face.f3 { background: #d08a45; }
+.face.f4 { background: var(--turf); }
+.group-name { font-size: .92rem; font-weight: 700; color: var(--text); }
+.group-who { font-size: .74rem; color: var(--muted); }
+
+/* One stamp for the session, centred, the way a phone breaks up a thread. */
+.daystamp { text-align: center; margin: 2px 0 4px; font-size: .72rem; color: var(--muted); }
+.daystamp b { color: var(--text); font-weight: 600; }
+
+.exchange .msgs { padding: 12px 12px 16px; gap: 9px; }
+.exchange .bubble { font-size: .93rem; line-height: 1.42; position: relative; }
+
+/* Received: avatar bottom-left, name above, grey bubble with a tail. */
+.exchange .msg {
+  display: grid; grid-template-columns: 30px 1fr; gap: 8px;
+  max-width: 92%; align-self: flex-start;
+}
+.exchange .msg > .who, .exchange .msg > .bubble { grid-column: 2; }
+.exchange .msg .who {
+  font-size: .74rem; font-weight: 400; color: var(--muted);
+  text-transform: none; letter-spacing: 0; margin: 0 0 3px 4px;
+}
 .av {
   grid-row: 1 / span 2; align-self: end;
-  width: 26px; height: 26px; border-radius: 50%;
-  background: var(--raised); border: 1px solid var(--line);
-  color: var(--muted); font-size: .68rem; font-weight: 700;
+  width: 30px; height: 30px; border-radius: 50%;
+  background: #9fc9ea; color: #16324a;
+  font-size: .72rem; font-weight: 700;
   display: flex; align-items: center; justify-content: center;
-  margin-bottom: 2px;
+  margin-bottom: 1px;
 }
+/* The bot is an app, so it wears the app's mark rather than initials. */
+.av.app { background: var(--turf); color: #08130d; border-radius: 9px; font-size: .6rem; letter-spacing: -.02em; }
 
-/* The name in caps, the time beside it in the muted weight a phone uses. */
-.exchange .msg .who { font-size: .66rem; letter-spacing: .06em; margin-bottom: 4px; }
-.exchange .msg .who .t { font-weight: 400; letter-spacing: 0; text-transform: none; opacity: .72; }
-
-/*
- * The tail, drawn the way a phone draws it: one shape carrying the bubble's
- * own colour, and a second in the PANEL's colour cutting the curve back out.
- * Both have to match their backgrounds exactly or the notch shows a seam.
- */
-.exchange .msg:not(.bot) .bubble { border-radius: 17px 17px 17px 4px; }
-.exchange .msg:not(.bot) .bubble::before,
-.exchange .msg:not(.bot) .bubble::after { content: ''; position: absolute; bottom: 0; }
-.exchange .msg:not(.bot) .bubble::before {
+.exchange .msg .bubble {
+  background: var(--raised); border: 0; color: var(--text);
+  border-radius: 18px 18px 18px 5px;
+}
+.exchange .msg .bubble::before, .exchange .msg .bubble::after {
+  content: ''; position: absolute; bottom: 0;
+}
+.exchange .msg .bubble::before {
   left: -7px; width: 16px; height: 17px;
   background: var(--raised); border-bottom-right-radius: 16px;
 }
-.exchange .msg:not(.bot) .bubble::after {
+.exchange .msg .bubble::after {
   left: -16px; width: 16px; height: 17px;
   background: var(--surface); border-bottom-right-radius: 12px;
 }
 
-.exchange .msg.bot .bubble { border-radius: 17px 17px 4px 17px; }
-.exchange .msg.bot .bubble::before,
-.exchange .msg.bot .bubble::after { content: ''; position: absolute; bottom: 0; }
-.exchange .msg.bot .bubble::before {
-  right: -7px; width: 16px; height: 17px;
-  background: var(--turf-dim); border-bottom-left-radius: 16px;
-  border-right: 1px solid var(--turf); border-bottom: 1px solid var(--turf);
+/* Sent: no avatar, no name, green, hard against the right. */
+.exchange .msg.me { grid-template-columns: 1fr; align-self: flex-end; max-width: 84%; }
+.exchange .msg.me .who { display: none; }
+.exchange .msg.me .bubble {
+  background: var(--turf); color: #06170e; font-weight: 500;
+  border-radius: 18px 18px 5px 18px;
 }
-.exchange .msg.bot .bubble::after {
-  right: -16px; width: 17px; height: 18px;
-  background: var(--surface); border-bottom-left-radius: 12px;
+.exchange .msg.me .bubble::before {
+  left: auto; right: -7px; background: var(--turf);
+  border-bottom-right-radius: 0; border-bottom-left-radius: 16px;
 }
-
-/* Sent, and seen. The last thing the bot said carries a receipt, which is the
-   detail that makes a mock read as a screenshot. */
-.receipt {
-  align-self: flex-end; font-size: .62rem; letter-spacing: .06em;
-  text-transform: uppercase; color: var(--muted); opacity: .7;
-  margin: -6px 2px 0 0;
+.exchange .msg.me .bubble::after {
+  left: auto; right: -16px; width: 17px; height: 18px;
+  border-bottom-right-radius: 0; border-bottom-left-radius: 12px;
 }
 
 /* A grade is the most repeatable thing this produces and should read as a
@@ -287,7 +311,7 @@
         </div>
 
         <div class="msg">
-          <span class="av" aria-hidden="true">D</span><div class="who">Dave · Sunday 8:31 AM</div>
+          <div class="who">Jake · Sunday 8:31 AM</div>
           <div class="bubble">wait that game is at 9:30??</div>
         </div>
 
@@ -304,7 +328,7 @@
                  replacing that message's dwell and the usual human lead-in. A
                  reaction this short is fired off immediately, not composed. -->
             <div class="msg" data-animate data-after="2000">
-              <div class="who">Dave · Tuesday 9:04 AM</div>
+              <div class="who">Jake · Tuesday 9:04 AM</div>
               <div class="bubble">every single week with this thing</div>
             </div>
             <!-- Quotes the bot verbatim. If the message above is ever rewritten,
@@ -346,24 +370,25 @@
           your league actually makes. It will bring up a bad one years later, unprompted.</p>
         </div>
         <div class="exchange">
-          <div class="exchange-bar"><span>League group chat</span><span class="tag">Graded</span></div>
+          <div class="chat-head"><span class="face-row" aria-hidden="true"><span class="face f1">J</span><span class="face f2">S</span><span class="face f3">M</span><span class="face f4">🏈</span></span><span class="group-name">🏈 The League</span><span class="group-who">Jake, Sarah, Mike, Commish AI</span></div>
           <div class="msgs">
-            <div class="msg">
-              <span class="av" aria-hidden="true">M</span><div class="who">Mike<span class="t"> 9:14 PM</span></div>
+            <p class="daystamp"><b>Tuesday</b> 8:12 AM</p>
+            <div class="msg me">
+              <div class="who">Mike</div>
               <div class="bubble">worst trade in league history?</div>
             </div>
             <div class="msg bot">
-              <div class="who">Commish AI<span class="t"> 9:14 PM</span></div>
-              <div class="bubble">2020 week 5. Dave sent Ana Joshua Kelley and got Justin Jefferson back. <span class="grade good">Ana A+</span>, <span class="grade bad">Dave F</span>.
+              <span class="av app" aria-hidden="true">AI</span>
+              <div class="who">Commish AI</div>
+              <div class="bubble">2020 week 5. Jake sent Sarah Joshua Kelley and got Justin Jefferson back. <span class="grade good">Sarah A+</span>, <span class="grade bad">Jake F</span>.
 
-Kelley scored 21.3 the rest of that year. Jefferson scored 159.1. Dave has been quiet about it for six seasons and I understand why.</div>
+Kelley scored 21.3 the rest of that year. Jefferson scored 159.1. Jake has been quiet about it for six seasons and I understand why.</div>
             </div>
             <div class="msg">
-              <span class="av" aria-hidden="true">D</span><div class="who">Dave<span class="t"> 9:15 PM</span></div>
+              <span class="av" aria-hidden="true">J</span><div class="who">Jake</div>
               <div class="bubble">i was rebuilding</div>
             </div>
           </div>
-            <p class="receipt">Delivered</p>
         </div>
       </div>
 
@@ -376,28 +401,30 @@ Kelley scored 21.3 the rest of that year. Jefferson scored 159.1. Dave has been 
           &mdash; it has read their roster, not their mind.</p>
         </div>
         <div class="exchange">
-          <div class="exchange-bar"><span>League group chat</span><span class="tag">Suggested</span></div>
+          <div class="chat-head"><span class="face-row" aria-hidden="true"><span class="face f1">J</span><span class="face f2">S</span><span class="face f3">M</span><span class="face f4">🏈</span></span><span class="group-name">🏈 The League</span><span class="group-who">Jake, Sarah, Mike, Commish AI</span></div>
           <div class="msgs">
-            <div class="msg">
-              <span class="av" aria-hidden="true">A</span><div class="who">Ana<span class="t"> 11:02 AM</span></div>
+            <p class="daystamp"><b>Tuesday</b> 8:12 AM</p>
+            <div class="msg me">
+              <div class="who">Sarah</div>
               <div class="bubble">who should i be trading with</div>
             </div>
             <div class="msg bot">
-              <div class="who">Commish AI<span class="t"> 11:02 AM</span></div>
-              <div class="bubble">Worth floating at Theo: send Waddle, get Breece Hall. +7.2 projected lineup points for you, +7.6 for him, values 2% apart.
+              <span class="av app" aria-hidden="true">AI</span>
+              <div class="who">Commish AI</div>
+              <div class="bubble">Worth floating at Sarah: send Waddle, get Breece Hall. +7.2 projected lineup points for you, +7.6 for him, values 2% apart.
 
 You&rsquo;re 4 of 12 on projected lineup. You&rsquo;re a buyer. Stop hoarding picks.</div>
             </div>
             <div class="msg">
-              <span class="av" aria-hidden="true">A</span><div class="who">Ana<span class="t"> 11:04 AM</span></div>
+              <span class="av" aria-hidden="true">S</span><div class="who">Sarah</div>
               <div class="bubble">will he go for it</div>
             </div>
             <div class="msg bot">
-              <div class="who">Commish AI<span class="t"> 11:04 AM</span></div>
+              <span class="av app" aria-hidden="true">AI</span>
+              <div class="who">Commish AI</div>
               <div class="bubble">No idea. I read his roster, not his mind.</div>
             </div>
           </div>
-            <p class="receipt">Delivered</p>
         </div>
       </div>
 
@@ -409,30 +436,32 @@ You&rsquo;re 4 of 12 on projected lineup. You&rsquo;re a buyer. Stop hoarding pi
           roster ranked on the lineup it can actually field.</p>
         </div>
         <div class="exchange">
-          <div class="exchange-bar"><span>League group chat</span><span class="tag">Draft night</span></div>
+          <div class="chat-head"><span class="face-row" aria-hidden="true"><span class="face f1">J</span><span class="face f2">S</span><span class="face f3">M</span><span class="face f4">🏈</span></span><span class="group-name">🏈 The League</span><span class="group-who">Jake, Sarah, Mike, Commish AI</span></div>
           <div class="msgs">
+            <p class="daystamp"><b>Tuesday</b> 8:12 AM</p>
             <div class="msg bot">
-              <div class="who">Commish AI<span class="t"> 11:47 PM</span></div>
+              <span class="av app" aria-hidden="true">AI</span>
+              <div class="who">Commish AI</div>
               <div class="bubble">Draft is done.
 
 Best of it:
-  Ana <span class="grade good">A+</span>, strongest at QB/WR
-  Theo <span class="grade good">A</span>, strongest at WR
+  Sarah <span class="grade good">A+</span>, strongest at QB/WR
+  Sarah <span class="grade good">A</span>, strongest at WR
 
 Rough day:
   Mike <span class="grade bad">D</span>, thin at QB/RB/TE
-  Dave <span class="grade bad">D</span>, cannot fill TE</div>
+  Jake <span class="grade bad">D</span>, cannot fill TE</div>
             </div>
-            <div class="msg">
-              <span class="av" aria-hidden="true">M</span><div class="who">Mike<span class="t"> 11:48 PM</span></div>
+            <div class="msg me">
+              <div class="who">Mike</div>
               <div class="bubble">i was on a flight</div>
             </div>
             <div class="msg bot">
-              <div class="who">Commish AI<span class="t"> 11:49 PM</span></div>
+              <span class="av app" aria-hidden="true">AI</span>
+              <div class="who">Commish AI</div>
               <div class="bubble">You autodrafted three kickers. The plane did that.</div>
             </div>
           </div>
-            <p class="receipt">Delivered</p>
         </div>
       </div>
 
@@ -619,7 +648,7 @@ Rough day:
          promising something that never fires on the live transport. -->
     <details class="faq-item">
       <summary>Can we ask it things?</summary>
-      <p>Say its name and it answers. It has been reading the whole time, so it knows who won the league in 2023, who has the worst bench luck, and what your record is against Dave. Don't say its name and it stays out of the way.</p>
+      <p>Say its name and it answers. It has been reading the whole time, so it knows who won the league in 2023, who has the worst bench luck, and what your record is against Jake. Don't say its name and it stays out of the way.</p>
     </details>
 
     <details class="faq-item">
