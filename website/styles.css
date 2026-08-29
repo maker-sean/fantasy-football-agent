@@ -798,3 +798,252 @@ input[type="range"] { accent-color: var(--turf); }
   font-size: .84rem; color: var(--muted); line-height: 1.45;
 }
 .plan-more li::before { content: "✓"; position: absolute; left: 0; color: var(--turf); }
+
+
+/* ===========================================================================
+ * THE HOMEPAGE PROOF SECTION — transcripts, not feature tiles.
+ *
+ * Was three feature tiles, which is the shape every AI product's homepage has
+ * and says nothing a competitor could not copy onto theirs by tea time. What
+ * this thing actually does is talk in a group chat, so the homepage shows it
+ * talking in a group chat and lets the reader judge whether it is any good.
+ *
+ * Every rule below is scoped under .proof, .rail, .exchange or .chat. Several
+ * of the class names inside — .msg, .bubble, .msgs, .who, .typing — are also
+ * styled bare further up this file for the phone mock and the SMS cards, and
+ * are deliberately NOT overridden here: these only ever apply inside .chat.
+ * ========================================================================= */
+/* ---------------------------------------------------------------------------
+   EXCHANGES, which replace the three feature tiles.
+   Three equal boxes with a noun-phrase heading and two lines of copy is the
+   template every product on the internet uses; it describes the product where
+   the transcript above it demonstrates one. Each claim now carries the actual
+   message that backs it, in the same bubbles the hero already uses.
+
+   ONE DOM, TWO LAYOUTS. Stacked and alternating on a wide screen, where there
+   is room to read. A single horizontal rail on a phone, because four full
+   sections of transcript turned the page into a scroll nobody finishes — and
+   swiping sideways through four short ones is how people already read chat.
+--------------------------------------------------------------------------- */
+.proof { border-top: 1px solid var(--line); }
+.proof .wrap { padding-top: 64px; padding-bottom: 64px; }
+.proof h2 { margin: 0 0 14px; max-width: 20ch; }
+.proof .lede { margin: 0 0 30px; max-width: 56ch; }
+
+.rail-item h3 { margin: 0 0 10px; font-size: 1.35rem; }
+.rail-item .lede { margin: 0 0 20px; font-size: .95rem; }
+
+.exchange {
+  background: var(--surface); border: 1px solid var(--line);
+  border-radius: var(--radius); overflow: hidden;
+}
+/* ---------------------------------------------------------------------------
+   A THREAD, NOT A DIAGRAM OF ONE.
+   Modelled on real screenshots rather than on the idea of a chat, which
+   corrected four things I had guessed:
+
+   THE BOT IS RECEIVED. It sits left, in grey, behind an app icon. Green on the
+   right is what YOU send. Putting the bot in the green made it the phone's
+   owner, which is backwards and was the single thing stopping this reading as
+   a screenshot.
+
+   THE HEADER IS THE GROUP. Overlapping avatars, the group name with its emoji,
+   then the participants listed underneath — that block is what a phone shows
+   and what makes a mock instantly legible as a group thread.
+
+   NAMES ARE NAMES, sentence case above the bubble, not labels in caps.
+
+   NO PER-MESSAGE TIMESTAMP AND NO DELIVERY RECEIPT. A thread stamps a session,
+   centred, once — and a group chat carries no receipt at all.
+--------------------------------------------------------------------------- */
+.chat-head {
+  display: flex; flex-direction: column; align-items: center; gap: 3px;
+  padding: 14px 12px 12px; border-bottom: 1px solid var(--line);
+  background: var(--carbon);
+}
+.face-row { display: flex; margin-bottom: 4px; }
+.face {
+  width: 34px; height: 34px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: .8rem; font-weight: 700; color: #0d1b14;
+  border: 2px solid var(--carbon); margin-left: -9px;
+}
+.face:first-child { margin-left: 0; }
+.face.f1 { background: #6b7bf0; color: #0b1030; }
+.face.f2 { background: #35b6a0; }
+.face.f3 { background: #d08a45; }
+.face.f4 { background: var(--turf); }
+.group-name { font-size: .92rem; font-weight: 700; color: var(--text); }
+.group-who { font-size: .74rem; color: var(--muted); }
+
+/* One stamp for the session, centred, the way a phone breaks up a thread. */
+.daystamp { text-align: center; margin: 2px 0 4px; font-size: .72rem; color: var(--muted); }
+.daystamp b { color: var(--text); font-weight: 600; }
+
+.chat .msgs { padding: 12px 12px 16px; gap: 9px; }
+.chat .bubble { font-size: .93rem; line-height: 1.42; position: relative; }
+
+/* Received: avatar bottom-left, name above, grey bubble with a tail. */
+.chat .msg {
+  display: grid; grid-template-columns: 30px 1fr; gap: 8px;
+  max-width: 92%; align-self: flex-start;
+}
+.chat .msg > .who, .chat .msg > .bubble { grid-column: 2; }
+.chat .msg .who {
+  font-size: .74rem; font-weight: 400; color: var(--muted);
+  text-transform: none; letter-spacing: 0; margin: 0 0 3px 4px;
+}
+.av {
+  grid-row: 1 / span 2; align-self: end;
+  width: 30px; height: 30px; border-radius: 50%;
+  background: #9fc9ea; color: #16324a;
+  font-size: .72rem; font-weight: 700;
+  display: flex; align-items: center; justify-content: center;
+  margin-bottom: 1px;
+}
+/*
+ * The bot wears the app's mark rather than initials, and it is a CIRCLE like
+ * every other avatar in the thread — a rounded square among round faces reads
+ * as a rendering mistake before it reads as a logo.
+ */
+.av.app {
+  background: var(--turf); color: #08130d; border-radius: 50%;
+  flex-direction: column; gap: 1px; line-height: 1;
+}
+.av.app b { font-family: var(--serif); font-size: .82rem; font-weight: 700; }
+.av.app i { display: flex; gap: 1.5px; }
+.av.app i::before, .av.app i::after, .av.app i span {
+  content: ''; width: 2px; height: 2px; border-radius: 50%; background: #08130d;
+}
+
+.chat .msg .bubble {
+  background: var(--raised); border: 0; color: var(--text);
+  border-radius: 18px 18px 18px 5px;
+}
+.chat .msg .bubble::before, .chat .msg .bubble::after {
+  content: ''; position: absolute; bottom: 0;
+}
+.chat .msg .bubble::before {
+  left: -7px; width: 16px; height: 17px;
+  background: var(--raised); border-bottom-right-radius: 16px;
+}
+.chat .msg .bubble::after {
+  left: -16px; width: 16px; height: 17px;
+  background: var(--surface); border-bottom-right-radius: 12px;
+}
+
+/*
+ * REDUCED MOTION MUST NOT FLATTEN THE LAYOUT.
+ *
+ * styles.css reveals staggered messages by setting .msg.pending to display:
+ * block for anyone who asked their OS to stop animating things. That was
+ * written when a message was a plain block; these are grids with an avatar
+ * column, so the override would strip the avatar out of its own row for
+ * exactly the readers who cannot see the animation anyway.
+ */
+@media (prefers-reduced-motion: reduce) {
+  .chat .msgs .msg.pending { display: grid; }
+  .chat .msgs .msg.pending.me { display: grid; }
+}
+
+/*
+ * COMMISH IS US.
+ *
+ * The bot sends the green ones, on the right, because on this page the product
+ * is the one talking and the league is who it is talking to. A real member's
+ * screenshot would have their own messages there — but nobody visiting is a
+ * member yet, and putting Commish in the grey made it a bystander in its own
+ * demo.
+ *
+ * It keeps its avatar, which iMessage would not do for the sender. That is a
+ * deliberate break: the mark is the product's, and losing it is a worse trade
+ * than the small inaccuracy.
+ */
+.chat .msg.me { grid-template-columns: 1fr 30px; align-self: flex-end; max-width: 88%; }
+.chat .msg.me > .who, .chat .msg.me > .bubble { grid-column: 1; }
+.chat .msg.me .who { text-align: right; margin: 0 4px 3px 0; }
+.chat .msg.me .av { grid-column: 2; grid-row: 1 / span 2; }
+.chat .msg.me .typing i { background: rgba(6, 23, 14, .5); }
+.chat .msg.me .bubble {
+  background: var(--turf); color: #06170e; font-weight: 500;
+  border-radius: 18px 18px 5px 18px;
+}
+.chat .msg.me .bubble::before {
+  left: auto; right: -7px; background: var(--turf);
+  border-bottom-right-radius: 0; border-bottom-left-radius: 16px;
+}
+.chat .msg.me .bubble::after {
+  left: auto; right: -16px; width: 17px; height: 18px;
+  border-bottom-right-radius: 0; border-bottom-left-radius: 12px;
+}
+
+/* A grade is the most repeatable thing this produces and should read as a
+   verdict, not as body copy. */
+.grade { font-family: var(--mono); font-weight: 700; }
+.grade.good { color: var(--turf); }
+.grade.bad { color: var(--amber); }
+
+/* ---- phone: one rail, swiped sideways ---------------------------------- */
+.rail {
+  display: flex; gap: 14px;
+  overflow-x: auto; scroll-snap-type: x mandatory;
+  -webkit-overflow-scrolling: touch;
+  /* Bleed to the screen edges so a half-visible next card says "swipe me"
+     without a caption telling anybody to. */
+  margin: 0 calc(var(--gutter, 20px) * -1);
+  padding: 4px var(--gutter, 20px) 18px;
+  scrollbar-width: none;
+}
+.rail::-webkit-scrollbar { display: none; }
+/*
+ * IDENTICAL CARDS, because a rail of different shapes reads as a mistake.
+ *
+ * Flex already makes the items equal HEIGHT — they stretch to the tallest — but
+ * the copy above each transcript is a different length, so every panel started
+ * and finished at a different point and the whole rail looked ragged while
+ * being technically aligned.
+ *
+ * The copy block gets a floor, the panel takes whatever is left, and the
+ * message list absorbs the difference. Transcripts are balanced to three
+ * messages each so the panels are filling with content rather than with air.
+ */
+.rail-item {
+  flex: 0 0 86%; scroll-snap-align: start; min-width: 0;
+  display: flex; flex-direction: column;
+}
+/*
+ * A FLOOR TALL ENOUGH TO BIND. At 168px every copy block already cleared it, so
+ * each one kept its natural height (199, 225, 210) and the panels below started
+ * and finished at three different points — the cards were the same size and
+ * still looked ragged, which is the worst of both. 232 clears the longest with
+ * a little headroom for a copy edit.
+ */
+.rail-item > div:first-child { min-height: 232px; }
+.rail-item .exchange { flex: 1; display: flex; flex-direction: column; }
+.rail-item .chat .msgs { flex: 1; }
+.rail-hint {
+  font-family: var(--mono); font-size: .7rem; letter-spacing: .06em;
+  text-transform: uppercase; color: var(--muted); margin: 0 0 14px;
+}
+
+/* ---- desktop: stacked, alternating ------------------------------------- */
+@media (min-width: 900px) {
+  .rail {
+    display: block; overflow: visible; margin: 0; padding: 0;
+  }
+  .rail-hint { display: none; }
+  .rail-item {
+    display: grid; grid-template-columns: 0.85fr 1.15fr;
+    gap: 54px; align-items: center;
+    padding: 52px 0; border-top: 1px solid var(--line);
+  }
+  /* The phone's equalisers are meaningless in a stacked two-column layout and
+     would only force empty space into the copy column. */
+  .rail-item > div:first-child { min-height: 0; }
+  .rail-item .exchange { display: block; }
+  .rail-item:first-child { border-top: 0; padding-top: 8px; }
+  /* Alternate which side the transcript sits on, so four in a row do not scan
+     as a list. */
+  .rail-item:nth-child(even) > .exchange { order: -1; }
+  .rail-item h3 { font-size: 1.7rem; }
+}
