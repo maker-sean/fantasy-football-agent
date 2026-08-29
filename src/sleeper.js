@@ -519,10 +519,67 @@ async function projections(season, week) {
 const STATS_TTL_MS = Number(process.env.SEASON_STATS_TTL_MS || 6 * 60 * 60 * 1000);
 const statsCache = new Map();
 
+/*
+ * A season nobody can change any more.
+ *
+ * Sleeper serves these one position at a time, so a season costs four calls and
+ * five seasons of draft history costs twenty — paid again after every deploy,
+ * because the cache was a Map that dies with the process.
+ */
+const isFinished = season => Number(season) < Number(new Date().getFullYear());
+
+async function statsFromDb(season, scoring) {
+  const db = require('./db');
+  const { rows } = await db.query(
+    `select player_id, position, rank, points, games_played, name
+       from season_stats where season = $1 and scoring = $2`, [String(season), scoring]);
+  if (!rows.length) return null;
+  return new Map(rows.map(r => [String(r.player_id), {
+    position: r.position, rank: r.rank,
+    points: r.points == null ? 0 : Number(r.points),
+    gamesPlayed: r.games_played ?? 0, name: r.name,
+  }]));
+}
+
+async function statsToDb(season, scoring, byPlayer) {
+  const db = require('./db');
+  const entries = [...byPlayer.entries()];
+  for (let i = 0; i < entries.length; i += 500) {
+    const chunk = entries.slice(i, i + 500);
+    const vals = chunk.map((_, n) => {
+      const b = n * 8;
+      return `($${b + 1},$${b + 2},$${b + 3},$${b + 4},$${b + 5},$${b + 6},$${b + 7},$${b + 8})`;
+    }).join(',');
+    const params = chunk.flatMap(([id, v]) =>
+      [String(season), scoring, String(id), v.position, v.rank, v.points, v.gamesPlayed, v.name]);
+    await db.query(
+      `insert into season_stats
+         (season, scoring, player_id, position, rank, points, games_played, name)
+       values ${vals}
+       on conflict (season, scoring, player_id) do nothing`, params);
+  }
+}
+
 async function seasonStats(season, { scoring = 'half_ppr', live = false } = {}) {
   const key = `${season}:${scoring}`;
   const hit = statsCache.get(key);
   if (hit && (!hit.live || Date.now() - hit.at < STATS_TTL_MS)) return hit.byPlayer;
+
+  /*
+   * Read a finished season from Postgres before asking Sleeper. Never the
+   * current one, and never when the caller wants live numbers — a stale row
+   * there would be worse than the four calls it saves.
+   */
+  if (!live && isFinished(season)) {
+    const stored = await statsFromDb(season, scoring).catch(err => {
+      console.error('[sleeper] season stats cache read failed:', err.message);
+      return null;
+    });
+    if (stored) {
+      statsCache.set(key, { at: Date.now(), live: false, byPlayer: stored });
+      return stored;
+    }
+  }
 
   const byPlayer = new Map();
   for (const position of ['QB', 'RB', 'WR', 'TE']) {
@@ -554,6 +611,16 @@ async function seasonStats(season, { scoring = 'half_ppr', live = false } = {}) 
     }
   }
   statsCache.set(key, { at: Date.now(), live, byPlayer });
+
+  /*
+   * Persisted only when the season is over and the caller was not asking for
+   * live numbers. Written after the fetch succeeded, so a half-built season
+   * never becomes the permanent answer.
+   */
+  if (!live && isFinished(season) && byPlayer.size) {
+    await statsToDb(season, scoring, byPlayer).catch(err =>
+      console.error('[sleeper] season stats cache write failed:', err.message));
+  }
   return byPlayer;
 }
 

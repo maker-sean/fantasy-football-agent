@@ -25,14 +25,67 @@ const db = require('./db');
 const sleeper = require('./sleeper');
 
 /** Walk previous_league_id back to the beginning. Newest first. */
-async function chain(sleeperLeagueId, { max = 20 } = {}) {
+const chainMemo = new Map();
+
+/*
+ * "0" is where a chain ENDS, not a league.
+ *
+ * Sleeper marks the oldest season with previous_league_id: "0", and "0" is
+ * truthy — so the loop asked for a league that cannot exist, once per walk, and
+ * four times per reply. Four HTTP calls guaranteed to fail.
+ */
+const isEnd = id => !id || id === '0' || id === 0;
+
+/**
+ * Every season this league has been, oldest last.
+ *
+ * CACHED HARD, in process and in Postgres, because for a given id this cannot
+ * change: previous_league_id is fixed when a league is created. It was costing
+ * 28 of the 55 Sleeper calls a single reply made — the same six leagues fetched
+ * four times, by four callers that each solved "get the chain" for themselves.
+ *
+ * @param opts.fresh  skip both caches and re-walk, for a chain believed wrong
+ */
+async function chain(sleeperLeagueId, { max = 20, fresh = false } = {}) {
+  if (isEnd(sleeperLeagueId)) return [];
+  const key = String(sleeperLeagueId);
+
+  if (!fresh) {
+    const memo = chainMemo.get(key);
+    if (memo) return memo;
+    try {
+      const { rows } = await db.query(
+        'select chain from league_chains where sleeper_league_id = $1', [key]);
+      if (rows.length && Array.isArray(rows[0].chain) && rows[0].chain.length) {
+        chainMemo.set(key, rows[0].chain);
+        return rows[0].chain;
+      }
+    } catch (err) {
+      // A cache that cannot be read must never stop the walk.
+      console.error('[history] chain cache read failed:', err.message);
+    }
+  }
+
   const out = [];
   let id = sleeperLeagueId;
-  while (id && out.length < max) {
+  while (!isEnd(id) && out.length < max) {
     const lg = await sleeper.league(id).catch(() => null);
     if (!lg) break;
     out.push(lg);
     id = lg.previous_league_id;
+  }
+
+  if (out.length) {
+    chainMemo.set(key, out);
+    // Written after the walk succeeded, never before: a half-walked chain
+    // cached is a league that permanently forgets its own history.
+    await db.query(
+      `insert into league_chains (sleeper_league_id, chain, refreshed_at)
+       values ($1, $2, now())
+       on conflict (sleeper_league_id) do update
+         set chain = excluded.chain, refreshed_at = now()`,
+      [key, JSON.stringify(out)]).catch(err =>
+        console.error('[history] chain cache write failed:', err.message));
   }
   return out;
 }
