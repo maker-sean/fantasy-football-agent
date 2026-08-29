@@ -692,11 +692,66 @@ async function liveLeagueBySleeperId(sleeperLeagueId) {
   return rows[0] || null;
 }
 
+// ------------------------------------------------- transport identities ----
+
+/*
+ * Who a sender is, on whatever transport they arrived over.
+ *
+ * These sit ALONGSIDE the phone helpers rather than replacing them. Every
+ * existing query against members.phone still works and every SMS league still
+ * resolves the way it always did; 0045 backfilled a sendblue identity for each
+ * bound phone so both routes agree. Discord is the only case that has nothing
+ * to say to the old column.
+ */
+
+/** The member behind an id on a provider, optionally scoped to one league. */
+async function memberByExternalId(provider, externalId, { leagueId = null } = {}) {
+  if (!provider || !externalId) return null;
+  const { rows } = await query(
+    `select m.*
+       from member_identities i
+       join members m on m.id = i.member_id
+      where i.provider = $1 and i.external_id = $2
+        and ($3::uuid is null or m.league_id = $3)
+      limit 1`,
+    [String(provider), String(externalId), leagueId]
+  );
+  return rows[0] || null;
+}
+
+/**
+ * Bind a transport id to a member.
+ *
+ * Idempotent on (provider, external_id, member_id). The handle is refreshed on
+ * a repeat because a Discord nickname changes and the stale one is what a recap
+ * would call them.
+ */
+async function bindIdentity(memberId, provider, externalId, { handle = null } = {}) {
+  const { rows } = await query(
+    `insert into member_identities (member_id, provider, external_id, handle)
+     values ($1,$2,$3,$4)
+     on conflict (provider, external_id, member_id)
+       do update set handle = coalesce(excluded.handle, member_identities.handle)
+     returning *`,
+    [memberId, String(provider), String(externalId), handle]
+  );
+  return rows[0];
+}
+
+/** Every identity a member has, across providers. */
+async function identitiesFor(memberId) {
+  const { rows } = await query(
+    'select * from member_identities where member_id = $1 order by created_at asc', [memberId]);
+  return rows;
+}
+
+
 module.exports = {
   liveLeagueBySleeperId,
   pool, query, normalizePhone,
   leagueByChat, leagueById, activeLeagues, upsertLeague,
   upsertMember, bindMember, renameMember, recordClaim, boundPhones,
+  memberByExternalId, bindIdentity, identitiesFor,
   suppress, unsuppress, isSuppressed,
   upsertAccount, accountByEmail, accountByAuthId, accountByPhone,
   upsertAccountByPhone, acceptTerms,
