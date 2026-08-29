@@ -41,6 +41,9 @@ const publicView = (row, remaining) => ({
   // Whether this code was minted by another league's founder pass, without
   // saying WHICH league — the referrer did not agree to be named to strangers.
   referral: !!row.created_by_league_id,
+  // Null until somebody decides the league has used the product long enough
+  // to be asked to vouch for it. See 0043_promo_release.sql.
+  releasedAt: row.released_at || null,
 });
 
 /**
@@ -280,6 +283,56 @@ function shareFor(code) {
 }
 
 /**
+ * The passes a league is allowed to SEE, which is not the same as the passes
+ * it has.
+ *
+ * Every pass is minted at go-live and none is handed over then. Asking
+ * somebody to recommend a product they have used for four minutes wastes the
+ * ask, so this returns nothing until a pass has been released — and the
+ * onboarding screen, which renders nothing for an empty list, therefore does
+ * not appear at all until somebody decides it should.
+ */
+async function releasedPasses(leagueId) {
+  const { rows } = await db.query(
+    `select * from promo_codes
+      where created_by_league_id = $1 and released_at is not null
+      order by created_at asc`, [leagueId]);
+  return Promise.all(rows.map(async r => publicView(r, await remainingFor(r.code))));
+}
+
+/**
+ * Leagues that have used it long enough to be worth asking.
+ *
+ * Live for at least `days`, holding passes nobody has handed them. The default
+ * is three days because that is roughly a Tuesday recap plus a waiver run —
+ * the point at which a commissioner has actually seen the thing work rather
+ * than seen it arrive.
+ */
+async function readyToRelease({ days = 3 } = {}) {
+  const { rows } = await db.query(
+    `select l.id, l.name, l.chat_linked_at,
+            extract(day from now() - l.chat_linked_at)::int as days_live,
+            array_agg(p.code order by p.created_at) as codes
+       from leagues l
+       join promo_codes p on p.created_by_league_id = l.id and p.released_at is null
+      where l.onboarding_state = 'live'
+        and l.chat_linked_at is not null
+        and l.chat_linked_at < now() - ($1 || ' days')::interval
+      group by l.id, l.name, l.chat_linked_at
+      order by l.chat_linked_at asc`, [String(days)]);
+  return rows;
+}
+
+/** Hand a league its passes. Idempotent; re-releasing keeps the first date. */
+async function release(leagueId) {
+  const { rows } = await db.query(
+    `update promo_codes set released_at = coalesce(released_at, now()), updated_at = now()
+      where created_by_league_id = $1
+      returning *`, [leagueId]);
+  return Promise.all(rows.map(async r => publicView(r, await remainingFor(r.code))));
+}
+
+/**
  * Who the cohort actually is.
  *
  * The question this whole table exists to answer: which leagues came in on an
@@ -311,7 +364,7 @@ async function cohort({ code = null } = {}) {
 async function summary() {
   const { rows } = await db.query(
     `select p.code, p.label, p.discount_type, p.discount_value, p.max_uses,
-            p.current_uses, p.is_active, p.valid_until,
+            p.current_uses, p.is_active, p.valid_until, p.released_at,
             p.created_by_league_id is not null as is_referral,
             (select count(*) from promo_claims c
               where c.code = p.code and c.state = 'reserved'
@@ -328,5 +381,6 @@ module.exports = {
   PILOT_CODE, RESERVATION_DAYS,
   normalize, slugFor, publicView,
   validate, reserve, redeem, remainingFor, seedFor,
-  mintFounderPasses, shareFor, cohort, summary,
+  mintFounderPasses, releasedPasses, readyToRelease, release,
+  shareFor, cohort, summary,
 };

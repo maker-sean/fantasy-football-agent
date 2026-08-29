@@ -11,8 +11,17 @@
  *   npm run promo -- --code REDDIT50 # only that code's leagues
  *   npm run promo -- --passes        # every founder pass and whether it landed
  *
- * Read only. Nothing here spends a slot or mints a code — a slot is spent when
- * a league goes live, in src/chatlink.js, and nowhere else.
+ *   npm run promo -- --ready         # leagues worth asking for a referral
+ *   npm run promo -- --ready --days 7
+ *   npm run promo -- --release <league-id>   # hand that league its passes
+ *
+ * PASSES ARE MINTED AT GO-LIVE AND HANDED OVER LATER. A commissioner four
+ * minutes into using this has nothing to base a recommendation on, so the ask
+ * is held until the thing has caught something — --ready is the list of who is
+ * far enough in, and --release is what makes their codes visible to them.
+ *
+ * Everything except --release is read only. A slot is spent when a league goes
+ * live, in src/chatlink.js, and nowhere else.
  */
 require('dotenv').config();
 const db = require('../src/db');
@@ -27,6 +36,41 @@ const pad = (s, n) => String(s == null ? '' : s).padEnd(n).slice(0, n);
 const day = d => (d ? new Date(d).toISOString().slice(0, 10) : '');
 
 (async () => {
+  /* --release: hand one league the passes it earned. */
+  const releasing = arg('release');
+  if (releasing && releasing !== true) {
+    const out = await promo.release(releasing);
+    if (!out.length) {
+      console.log('\n  No passes for that league id. Is it live, and did it use a code?\n');
+    } else {
+      console.log('\n  Released:');
+      for (const p of out) console.log('    ' + p.code + '  ' + promo.shareFor(p.code).url);
+      console.log('');
+    }
+    return db.pool.end();
+  }
+
+  /* --ready: who has used it long enough to be asked. */
+  if (arg('ready')) {
+    const days = Number(arg('days')) || 3;
+    const rows = await promo.readyToRelease({ days });
+    console.log(`\nREADY TO ASK  (live ${days}+ days, passes not yet handed over)\n`);
+    if (!rows.length) console.log('  Nobody yet.\n');
+    for (const r of rows) {
+      console.log('  ' + r.name + '   ' + r.days_live + ' days live');
+      console.log('    id      ' + r.id);
+      // The exact text to send, so it does not get retyped differently each
+      // time and quietly start promising something else.
+      for (const code of r.codes) {
+        const sh = promo.shareFor(code);
+        console.log('    ' + code);
+        console.log('      ' + sh.body);
+      }
+      console.log('    release npm run promo -- --release ' + r.id + '\n');
+    }
+    return db.pool.end();
+  }
+
   const codes = await promo.summary();
 
   console.log('\nCODES');
@@ -38,7 +82,11 @@ const day = d => (d ? new Date(d).toISOString().slice(0, 10) : '');
     if (c.is_referral && !arg('passes')) continue;
     const status = !c.is_active ? 'off'
       : c.valid_until && new Date(c.valid_until) <= new Date() ? 'expired'
-      : c.remaining <= 0 ? 'FULL' : 'open';
+      : c.remaining <= 0 ? 'FULL'
+      // A pass nobody has been given is not "open" to anybody — saying so
+      // would read as a code sitting unused when it has never been sent.
+      : (c.is_referral && !c.released_at) ? 'held'
+      : 'open';
     console.log('  ' + pad(c.code, 22) + pad(c.discount_type, 12)
       + pad(c.current_uses, 6) + pad(c.reserved, 6) + pad(c.remaining, 6) + status);
   }

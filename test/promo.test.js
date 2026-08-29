@@ -219,6 +219,45 @@ async function makeLeague(n, name) {
     assert.ok(s.smsUri.startsWith('sms:?&body='));
   });
 
+  console.log('\nminted at go-live, handed over later');
+
+  await it('a fresh league sees none of the passes it just earned', async () => {
+    // The ask is worth one shot. Four minutes in, a commissioner has nothing
+    // to base a recommendation on, so nothing is shown.
+    const lg = (await db.query('select * from leagues where sleeper_league_id = $1', [SL(1)])).rows[0];
+    const minted = await db.query(
+      'select code from promo_codes where created_by_league_id = $1', [lg.id]);
+    assert.strictEqual(minted.rows.length, 2, 'they exist');
+    assert.deepStrictEqual(await promo.releasedPasses(lg.id), [], 'and are not shown');
+  });
+
+  await it('a league is only ready once it has been live long enough', async () => {
+    const lg = (await db.query('select * from leagues where sleeper_league_id = $1', [SL(1)])).rows[0];
+    await db.query(`update leagues set chat_linked_at = now() - interval '1 day' where id = $1`, [lg.id]);
+    assert.strictEqual((await promo.readyToRelease({ days: 3 })).length, 0, 'one day is too soon');
+
+    await db.query(`update leagues set chat_linked_at = now() - interval '9 days' where id = $1`, [lg.id]);
+    const ready = await promo.readyToRelease({ days: 3 });
+    assert.strictEqual(ready.length, 1);
+    assert.strictEqual(ready[0].codes.length, 2);
+  });
+
+  await it('releasing hands them over, and drops the league off the list', async () => {
+    const lg = (await db.query('select * from leagues where sleeper_league_id = $1', [SL(1)])).rows[0];
+    const out = await promo.release(lg.id);
+    assert.strictEqual(out.length, 2);
+    assert.strictEqual((await promo.releasedPasses(lg.id)).length, 2, 'now visible');
+    assert.strictEqual((await promo.readyToRelease({ days: 3 })).length, 0, 'no longer pending');
+  });
+
+  await it('releasing twice keeps the first date rather than resetting it', async () => {
+    const lg = (await db.query('select * from leagues where sleeper_league_id = $1', [SL(1)])).rows[0];
+    const first = (await promo.releasedPasses(lg.id))[0].releasedAt;
+    await promo.release(lg.id);
+    const again = (await promo.releasedPasses(lg.id))[0].releasedAt;
+    assert.strictEqual(String(first), String(again));
+  });
+
   console.log('\nwho the fifty are');
 
   await it('invited, referred and organic are told apart', async () => {

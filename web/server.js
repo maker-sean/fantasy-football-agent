@@ -1099,12 +1099,26 @@ app.post('/api/leagues/:leagueId/complete-onboarding', requireAccount, loadLeagu
       [req.league.id, req.league.sleeper_league_id]);
     const claim = claims[0] || null;
 
-    // Only a live league has earned passes. Anything else gets an honest state
-    // and no codes, which is what the success screen should render anyway.
+    /*
+     * EARNED IS NOT THE SAME AS RELEASED.
+     *
+     * A live league's passes are minted the moment it goes live, and this
+     * returns none of them until somebody has released them by hand. Asking a
+     * commissioner to recommend the product to a friend four minutes after it
+     * joined their group chat spends the ask before they have anything to base
+     * it on; a few days later, after it has caught something, they offer.
+     *
+     * The screen renders nothing for an empty list and falls through to the
+     * dashboard, so this one condition is what decides whether the referral
+     * step exists at all.
+     */
     let passes = [];
     if (live && claim && claim.state === 'redeemed') {
-      passes = await promo.mintFounderPasses(req.league.id,
+      // Minting stays here as the repair path for a league whose mint failed
+      // at go-live. It is idempotent and it does not release anything.
+      await promo.mintFounderPasses(req.league.id,
         { seed: await promo.seedFor(req.league) });
+      passes = await promo.releasedPasses(req.league.id);
     }
 
     res.json({
