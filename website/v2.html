@@ -131,8 +131,20 @@
   display: flex; align-items: center; justify-content: center;
   margin-bottom: 1px;
 }
-/* The bot is an app, so it wears the app's mark rather than initials. */
-.av.app { background: var(--turf); color: #08130d; border-radius: 9px; font-size: .6rem; letter-spacing: -.02em; }
+/*
+ * The bot wears the app's mark rather than initials, and it is a CIRCLE like
+ * every other avatar in the thread — a rounded square among round faces reads
+ * as a rendering mistake before it reads as a logo.
+ */
+.av.app {
+  background: var(--turf); color: #08130d; border-radius: 50%;
+  flex-direction: column; gap: 1px; line-height: 1;
+}
+.av.app b { font-family: var(--serif); font-size: .82rem; font-weight: 700; }
+.av.app i { display: flex; gap: 1.5px; }
+.av.app i::before, .av.app i::after, .av.app i span {
+  content: ''; width: 2px; height: 2px; border-radius: 50%; background: #08130d;
+}
 
 .chat .msg .bubble {
   background: var(--raised); border: 0; color: var(--text);
@@ -164,9 +176,23 @@
   .chat .msgs .msg.pending.me { display: grid; }
 }
 
-/* Sent: no avatar, no name, green, hard against the right. */
-.chat .msg.me { grid-template-columns: 1fr; align-self: flex-end; max-width: 84%; }
-.chat .msg.me .who { display: none; }
+/*
+ * COMMISH IS US.
+ *
+ * The bot sends the green ones, on the right, because on this page the product
+ * is the one talking and the league is who it is talking to. A real member's
+ * screenshot would have their own messages there — but nobody visiting is a
+ * member yet, and putting Commish in the grey made it a bystander in its own
+ * demo.
+ *
+ * It keeps its avatar, which iMessage would not do for the sender. That is a
+ * deliberate break: the mark is the product's, and losing it is a worse trade
+ * than the small inaccuracy.
+ */
+.chat .msg.me { grid-template-columns: 1fr 30px; align-self: flex-end; max-width: 88%; }
+.chat .msg.me > .who, .chat .msg.me > .bubble { grid-column: 1; }
+.chat .msg.me .who { text-align: right; margin: 0 4px 3px 0; }
+.chat .msg.me .av { grid-column: 2; grid-row: 1 / span 2; }
 .chat .msg.me .bubble {
   background: var(--turf); color: #06170e; font-weight: 500;
   border-radius: 18px 18px 5px 18px;
@@ -319,30 +345,30 @@
             <div class="chat-head"><span class="face-row" aria-hidden="true"><span class="face f1">J</span><span class="face f2">S</span><span class="face f3">D</span><span class="face f4">🏈</span></span><span class="group-name">🏈 The League</span><span class="group-who">Jake, Sam, Dee, Commish AI</span></div>
       <div class="msgs">
 
-        <div class="msg">
-          <span class="av app" aria-hidden="true">AI</span><div class="who">Commish AI</div>
+        <div class="msg me">
+          <span class="av app" aria-hidden="true"><b>C</b><i><span></span></i></span><div class="who">Commish AI</div>
           <div class="bubble">Ridgeline FC, before this costs you: Alec Pierce is PUP (ankle) and ATL vs IND kicks in 1h. That is a zero sitting in your lineup right now.</div>
         </div>
 
-        <div class="msg me">
-          <div class="who">Jake</div>
+        <div class="msg">
+          <span class="av" aria-hidden="true">J</span><div class="who">Jake</div>
           <div class="bubble">wait that game is at 9:30??</div>
         </div>
 
-        <div class="msg">
-          <span class="av app" aria-hidden="true">AI</span><div class="who">Commish AI</div>
+        <div class="msg me">
+          <span class="av app" aria-hidden="true"><b>C</b><i><span></span></i></span><div class="who">Commish AI</div>
           <div class="bubble">Berlin. Kicks off four hours before the rest of the slate. Your lineup locks with it.</div>
         </div>
 
-        <div class="msg" data-animate>
-              <span class="av app" aria-hidden="true">AI</span><div class="who">Commish AI</div>
+        <div class="msg me" data-animate>
+              <span class="av app" aria-hidden="true"><b>C</b><i><span></span></i></span><div class="who">Commish AI</div>
               <div class="bubble">Third &amp; Long didn't just lose to Ridgeline FC by 1.08 points; they mathematically engineered their own demise. You started Romeo Doubs (3.3) over DJ Moore (20.9) in the FLEX. This is the third consecutive week Moore has humiliated Doubs from your bench, yet you keep treating Doubs like he pays your mortgage. Your optimal lineup was 103.44. You chose to score 85.84. My servers are currently wasting electricity processing this level of incompetence.</div>
             </div>
             <!-- data-after: an explicit gap from the message above landing,
                  replacing that message's dwell and the usual human lead-in. A
                  reaction this short is fired off immediately, not composed. -->
-            <div class="msg me" data-animate data-after="2000">
-              <div class="who">Jake</div>
+            <div class="msg" data-animate data-after="2000">
+              <span class="av" aria-hidden="true">J</span><div class="who">Jake</div>
               <div class="bubble">every single week with this thing</div>
             </div>
             <!-- Quotes the bot verbatim. If the message above is ever rewritten,
@@ -386,14 +412,14 @@
         <div class="exchange chat">
           <div class="chat-head"><span class="face-row" aria-hidden="true"><span class="face f1">M</span><span class="face f2">J</span><span class="face f3">R</span><span class="face f4">🏆</span></span><span class="group-name">🏆 Dynasty or Bust</span><span class="group-who">Mike, Jake, Ruth, Commish AI</span></div><div class="msgs">
             <p class="daystamp"><b>Tuesday</b> 8:12 AM</p>
-            <div class="msg me">
-              <div class="who">Mike</div>
+            <div class="msg">
+              <span class="av" aria-hidden="true">M</span><div class="who">Mike</div>
               <div class="bubble">worst trade in league history?</div>
             </div>
-            <div class="msg bot">
-              <span class="av app" aria-hidden="true">AI</span>
+            <div class="msg me">
+              <span class="av app" aria-hidden="true"><b>C</b><i><span></span></i></span>
               <div class="who">Commish AI</div>
-              <div class="bubble">2020 week 5. Jake sent Sarah Joshua Kelley and got Justin Jefferson back. <span class="grade good">Sarah A+</span>, <span class="grade bad">Jake F</span>.
+              <div class="bubble">2020 week 5. Jake sent Ruth Joshua Kelley and got Justin Jefferson back. <span class="grade good">Ruth A+</span>, <span class="grade bad">Jake F</span>.
 
 Kelley scored 21.3 the rest of that year. Jefferson scored 159.1. Jake has been quiet about it for six seasons and I understand why.</div>
             </div>
@@ -416,12 +442,12 @@ Kelley scored 21.3 the rest of that year. Jefferson scored 159.1. Jake has been 
         <div class="exchange chat">
           <div class="chat-head"><span class="face-row" aria-hidden="true"><span class="face f1">S</span><span class="face f2">T</span><span class="face f3">D</span><span class="face f4">🍺</span></span><span class="group-name">🍺 Sunday Scaries</span><span class="group-who">Sarah, Theo, Dev, Commish AI</span></div><div class="msgs">
             <p class="daystamp"><b>Tuesday</b> 8:12 AM</p>
-            <div class="msg me">
-              <div class="who">Sarah</div>
+            <div class="msg">
+              <span class="av" aria-hidden="true">S</span><div class="who">Sarah</div>
               <div class="bubble">who should i be trading with</div>
             </div>
-            <div class="msg bot">
-              <span class="av app" aria-hidden="true">AI</span>
+            <div class="msg me">
+              <span class="av app" aria-hidden="true"><b>C</b><i><span></span></i></span>
               <div class="who">Commish AI</div>
               <div class="bubble">Worth floating at Sarah: send Waddle, get Breece Hall. +7.2 projected lineup points for you, +7.6 for him, values 2% apart.
 
@@ -431,8 +457,8 @@ You&rsquo;re 4 of 12 on projected lineup. You&rsquo;re a buyer. Stop hoarding pi
               <span class="av" aria-hidden="true">S</span><div class="who">Sarah</div>
               <div class="bubble">will he go for it</div>
             </div>
-            <div class="msg bot">
-              <span class="av app" aria-hidden="true">AI</span>
+            <div class="msg me">
+              <span class="av app" aria-hidden="true"><b>C</b><i><span></span></i></span>
               <div class="who">Commish AI</div>
               <div class="bubble">No idea. I read his roster, not his mind.</div>
             </div>
@@ -450,25 +476,25 @@ You&rsquo;re 4 of 12 on projected lineup. You&rsquo;re a buyer. Stop hoarding pi
         <div class="exchange chat">
           <div class="chat-head"><span class="face-row" aria-hidden="true"><span class="face f1">C</span><span class="face f2">N</span><span class="face f3">O</span><span class="face f4">😠</span></span><span class="group-name">😠 The Regret Bowl</span><span class="group-who">Cole, Marc, Omar, Commish AI</span></div><div class="msgs">
             <p class="daystamp"><b>Tuesday</b> 8:12 AM</p>
-            <div class="msg bot">
-              <span class="av app" aria-hidden="true">AI</span>
+            <div class="msg me">
+              <span class="av app" aria-hidden="true"><b>C</b><i><span></span></i></span>
               <div class="who">Commish AI</div>
               <div class="bubble">Draft is done.
 
 Best of it:
-  Sarah <span class="grade good">A+</span>, strongest at QB/WR
-  Sarah <span class="grade good">A</span>, strongest at WR
+  Marc <span class="grade good">A+</span>, strongest at QB/WR
+  Omar <span class="grade good">A</span>, strongest at WR
 
 Rough day:
-  Mike <span class="grade bad">D</span>, thin at QB/RB/TE
-  Jake <span class="grade bad">D</span>, cannot fill TE</div>
+  Cole <span class="grade bad">D</span>, thin at QB/RB/TE
+  Marc <span class="grade bad">D</span>, cannot fill TE</div>
             </div>
-            <div class="msg me">
-              <div class="who">Cole</div>
+            <div class="msg">
+              <span class="av" aria-hidden="true">C</span><div class="who">Cole</div>
               <div class="bubble">i was on a flight</div>
             </div>
-            <div class="msg bot">
-              <span class="av app" aria-hidden="true">AI</span>
+            <div class="msg me">
+              <span class="av app" aria-hidden="true"><b>C</b><i><span></span></i></span>
               <div class="who">Commish AI</div>
               <div class="bubble">You autodrafted three kickers. The plane did that.</div>
             </div>
