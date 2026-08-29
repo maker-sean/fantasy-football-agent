@@ -60,12 +60,32 @@
       an AI provider to generate replies. Details below.</p>
     </div>
 
-    <h2>Who we are</h2>
+    
+    <!-- Expand/collapse, and the reason it exists.
+         
+         A privacy policy that is collapsed by default has two real
+         problems: find-in-page does not reliably reach inside a closed
+         <details> outside Chromium, and printing one gives you a page of
+         headings. This control fixes the first, and the script at the
+         bottom opens everything before a print and when a link points at
+         a specific section. Nothing here is hidden from anybody who wants
+         it, which for this particular document is the whole point. -->
+    <p class="legal-controls">
+      <button type="button" class="linkish" id="expand-all"
+              aria-expanded="false">Expand all sections</button>
+    </p>
+
+    <details class="legal-item faq-item" id="who-we-are">
+      <summary>Who we are</summary>
+
     <p>Commish is operated by {{BUSINESS_NAME}}, based in {{JURISDICTION_SHORT}}, United States. Reach us any time at
     {{SUPPORT_CONTACT}}. It is monitored and is the fastest way to
     reach a person. If you need a postal address for a formal request, ask and we will provide one.</p>
+    </details>
 
-    <h2>What we collect</h2>
+    <details class="legal-item faq-item" id="what-we-collect">
+      <summary>What we collect</summary>
+
     <table>
       <tr><th>Data</th><th>Why</th></tr>
       <tr>
@@ -93,8 +113,11 @@
     payment processor involved. If that changes we will say so here first, and card details would be
     handled by a payment provider rather than stored by us. We also never ask for your Sleeper
     password; Commish only reads data Sleeper already makes public.</p>
+    </details>
 
-    <h2>Who your data goes to</h2>
+    <details class="legal-item faq-item" id="who-your-data-goes-to">
+      <summary>Who your data goes to</summary>
+
     <p>We use these providers to run the service. They process data on our behalf and are not permitted
     to use it for their own purposes:</p>
     <ul>
@@ -105,8 +128,11 @@
       group chat messages and your league's statistics are sent to Anthropic's API for this.</strong>
       Your phone number is not included in what is sent for text generation.</li>
     </ul>
+    </details>
 
-    <h2>What we never do</h2>
+    <details class="legal-item faq-item" id="what-we-never-do">
+      <summary>What we never do</summary>
+
     <ul>
       <li>We do not sell your personal information.</li>
       <li>We do not share your mobile phone number or the contents of your messages with third parties
@@ -115,14 +141,20 @@
       <li>We do not message you individually unless you have messaged us first or your commissioner has
       set you up to receive approval requests.</li>
     </ul>
+    </details>
 
-    <h2>How long we keep it</h2>
+    <details class="legal-item faq-item" id="how-long-we-keep-it">
+      <summary>How long we keep it</summary>
+
     <p>League data and messages are kept while your league is active, because the agent's value depends
     on remembering past seasons. If you cancel or ask for deletion, we remove your league's data within
     30 days, except where we must keep records for legal or accounting
     reasons.</p>
+    </details>
 
-    <h2>Your choices</h2>
+    <details class="legal-item faq-item" id="your-choices">
+      <summary>Your choices</summary>
+
     <ul>
       <li><strong>Stop the messages.</strong> Reply <kbd>STOP</kbd> in the chat, leave the group, or ask
       your commissioner to remove the number.</li>
@@ -132,28 +164,45 @@
       <li><strong>Depending on where you live</strong>, you may have additional rights to access, correct,
       delete, or restrict processing of your data. We honor these regardless of where you live.</li>
     </ul>
+    </details>
 
-    <h2>A group chat is a shared space</h2>
+    <details class="legal-item faq-item" id="a-group-chat-is-a-shared-space">
+      <summary>A group chat is a shared space</summary>
+
     <p>Anything you write in a group chat is visible to everyone else in it, including the agent. The
     agent may quote or summarize league <em>statistics</em> in messages it sends to that same group. It
     does not repeat your messages to anyone outside the group.</p>
+    </details>
 
-    <h2>Security</h2>
+    <details class="legal-item faq-item" id="security">
+      <summary>Security</summary>
+
     <p>Data is encrypted in transit and at rest by our hosting providers. Access to production data is
     limited to people who need it to operate the service. No system is perfectly secure, and we cannot
     guarantee absolute security.</p>
+    </details>
 
-    <h2>Children</h2>
+    <details class="legal-item faq-item" id="children">
+      <summary>Children</summary>
+
     <p>Commish is not directed at children under 13, and we do not knowingly collect their information.
     If you believe a child under 13 has been added to a league, contact us at
     {{SUPPORT_CONTACT}} and we will remove the data.</p>
+    </details>
 
-    <h2>Changes</h2>
+    <details class="legal-item faq-item" id="changes">
+      <summary>Changes</summary>
+
     <p>If we change this policy materially, we will update the date above and notify active leagues in
     their group chat before the change takes effect.</p>
+    </details>
 
-    <h2>Contact</h2>
+    <details class="legal-item faq-item" id="contact">
+      <summary>Contact</summary>
+
     <p>{{SUPPORT_CONTACT}}</p>
+    </details>
+
   </div>
 </div>
 
@@ -169,5 +218,77 @@
   </div>
 </footer>
 <script>document.getElementById('yr').textContent = new Date().getFullYear();</script>
+<script>
+/*
+ * Three things that keep a collapsed legal document honest.
+ *
+ * The sections collapse because that is what was asked for, and collapsing a
+ * privacy policy costs three things that this puts back:
+ *
+ * PRINTING. A closed <details> prints as a heading and nothing else, so a
+ * printed policy would be a table of contents. Everything opens before the
+ * print dialog and closes again after, so the page looks unchanged.
+ *
+ * LINKING. Every section carries an id off its own heading, so a link can
+ * point at one — and a section nobody can see is a broken link. A page loaded
+ * with a hash opens that section and scrolls to it.
+ *
+ * FINDING. Browser find-in-page does not reliably reach inside a closed
+ * <details> outside Chromium, which on a policy is the difference between
+ * answerable and not. Hence the expand-all control, which is also the fastest
+ * way to read the whole thing.
+ */
+(function () {
+  var items = [].slice.call(document.querySelectorAll('.legal-item'));
+  if (!items.length) return;
+
+  var btn = document.getElementById('expand-all');
+
+  function setAll(open) {
+    items.forEach(function (d) { d.open = open; });
+    if (btn) {
+      btn.textContent = open ? 'Collapse all sections' : 'Expand all sections';
+      btn.setAttribute('aria-expanded', String(open));
+    }
+  }
+
+  if (btn) {
+    btn.addEventListener('click', function () {
+      setAll(!items.every(function (d) { return d.open; }));
+    });
+    // Opening or closing one by hand should leave the button telling the truth.
+    items.forEach(function (d) {
+      d.addEventListener('toggle', function () {
+        var all = items.every(function (x) { return x.open; });
+        btn.textContent = all ? 'Collapse all sections' : 'Expand all sections';
+        btn.setAttribute('aria-expanded', String(all));
+      });
+    });
+  }
+
+  function openHash() {
+    if (!location.hash) return;
+    var el = document.querySelector(location.hash);
+    if (el && el.classList.contains('legal-item')) {
+      el.open = true;
+      el.scrollIntoView();
+    }
+  }
+  window.addEventListener('hashchange', openHash);
+  openHash();
+
+  // Print with everything visible, then put it back the way it was.
+  var before = null;
+  window.addEventListener('beforeprint', function () {
+    before = items.map(function (d) { return d.open; });
+    items.forEach(function (d) { d.open = true; });
+  });
+  window.addEventListener('afterprint', function () {
+    if (!before) return;
+    items.forEach(function (d, i) { d.open = before[i]; });
+    before = null;
+  });
+})();
+</script>
 </body>
 </html>

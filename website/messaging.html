@@ -66,17 +66,40 @@
 
     <p>What you are agreeing to when Commish is part of your league's group text.</p>
 
-    <h2>How you opt in</h2>
+    
+    <!-- Expand/collapse, and the reason it exists.
+         
+         A privacy policy that is collapsed by default has two real
+         problems: find-in-page does not reliably reach inside a closed
+         <details> outside Chromium, and printing one gives you a page of
+         headings. This control fixes the first, and the script at the
+         bottom opens everything before a print and when a link points at
+         a specific section. Nothing here is hidden from anybody who wants
+         it, which for this particular document is the whole point. -->
+    <p class="legal-controls">
+      <button type="button" class="linkish" id="expand-all"
+              aria-expanded="false">Expand all sections</button>
+    </p>
+
+    <details class="legal-item faq-item" id="how-you-opt-in">
+      <summary>How you opt in</summary>
+
     <p>Your league commissioner adds the Commish number to your league's group text. Being in that
     group chat is the opt-in, so messages arrive in the thread you're already part of. Nobody is
     messaged individually without asking for it first.</p>
+    </details>
 
-    <h2>How you opt out</h2>
+    <details class="legal-item faq-item" id="how-you-opt-out">
+      <summary>How you opt out</summary>
+
     <p>Reply <kbd>STOP</kbd> at any time and you'll get no further messages. Reply <kbd>HELP</kbd> for
     contact information. You can also simply leave the group chat, or ask your commissioner to remove
     the number from it.</p>
+    </details>
 
-    <h2>How often it messages</h2>
+    <details class="legal-item faq-item" id="how-often-it-messages">
+      <summary>How often it messages</summary>
+
     <table>
       <tr><th>Message</th><th>When</th></tr>
       <tr><td>Weekly recap</td><td>Once a week during the NFL season</td></tr>
@@ -87,11 +110,16 @@
     <p class="small muted">Typically a handful of messages a week in season. Far fewer outside it,
     where there is little beyond the occasional trade. Message and data rates may apply. Carriers are
     not liable for delayed or undelivered messages.</p>
+    </details>
 
-    <h2>What we do with your number</h2>
+    <details class="legal-item faq-item" id="what-we-do-with-your-number">
+      <summary>What we do with your number</summary>
+
     <p>Your phone number is used to send these messages and to tell managers apart within your league.
     <strong>We do not sell it, and we do not share it with third parties for their marketing.</strong>
     Details are in the <a href="privacy.html">privacy policy</a>.</p>
+    </details>
+
   </div>
 </div>
 
@@ -107,5 +135,77 @@
   </div>
 </footer>
 <script>document.getElementById('yr').textContent = new Date().getFullYear();</script>
+<script>
+/*
+ * Three things that keep a collapsed legal document honest.
+ *
+ * The sections collapse because that is what was asked for, and collapsing a
+ * privacy policy costs three things that this puts back:
+ *
+ * PRINTING. A closed <details> prints as a heading and nothing else, so a
+ * printed policy would be a table of contents. Everything opens before the
+ * print dialog and closes again after, so the page looks unchanged.
+ *
+ * LINKING. Every section carries an id off its own heading, so a link can
+ * point at one — and a section nobody can see is a broken link. A page loaded
+ * with a hash opens that section and scrolls to it.
+ *
+ * FINDING. Browser find-in-page does not reliably reach inside a closed
+ * <details> outside Chromium, which on a policy is the difference between
+ * answerable and not. Hence the expand-all control, which is also the fastest
+ * way to read the whole thing.
+ */
+(function () {
+  var items = [].slice.call(document.querySelectorAll('.legal-item'));
+  if (!items.length) return;
+
+  var btn = document.getElementById('expand-all');
+
+  function setAll(open) {
+    items.forEach(function (d) { d.open = open; });
+    if (btn) {
+      btn.textContent = open ? 'Collapse all sections' : 'Expand all sections';
+      btn.setAttribute('aria-expanded', String(open));
+    }
+  }
+
+  if (btn) {
+    btn.addEventListener('click', function () {
+      setAll(!items.every(function (d) { return d.open; }));
+    });
+    // Opening or closing one by hand should leave the button telling the truth.
+    items.forEach(function (d) {
+      d.addEventListener('toggle', function () {
+        var all = items.every(function (x) { return x.open; });
+        btn.textContent = all ? 'Collapse all sections' : 'Expand all sections';
+        btn.setAttribute('aria-expanded', String(all));
+      });
+    });
+  }
+
+  function openHash() {
+    if (!location.hash) return;
+    var el = document.querySelector(location.hash);
+    if (el && el.classList.contains('legal-item')) {
+      el.open = true;
+      el.scrollIntoView();
+    }
+  }
+  window.addEventListener('hashchange', openHash);
+  openHash();
+
+  // Print with everything visible, then put it back the way it was.
+  var before = null;
+  window.addEventListener('beforeprint', function () {
+    before = items.map(function (d) { return d.open; });
+    items.forEach(function (d) { d.open = true; });
+  });
+  window.addEventListener('afterprint', function () {
+    if (!before) return;
+    items.forEach(function (d, i) { d.open = before[i]; });
+    before = null;
+  });
+})();
+</script>
 </body>
 </html>

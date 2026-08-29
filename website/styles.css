@@ -1135,3 +1135,26 @@ input[type="range"] { accent-color: var(--turf); }
 .pass.spent { opacity: .55; }
 .pass.spent .pass-code { color: var(--muted); text-decoration: line-through; }
 .pass.spent .btn[aria-disabled="true"] { pointer-events: none; opacity: .5; }
+
+/*
+ * Legal sections, collapsed. Borrows the FAQ's chevron and rules by carrying
+ * .faq-item as well, so there is one disclosure look on the site rather than
+ * two that drift.
+ */
+.legal-controls { margin: 26px 0 6px; }
+.legal-item summary { font-size: 1.1rem; }
+/* h2 spacing does not apply any more — the summary IS the heading — so the
+   first child inside needs the top margin the h2 used to provide. */
+.legal-item > *:not(summary):first-of-type { margin-top: 4px; }
+.legal-item > *:last-child { margin-bottom: 24px; }
+.legal-item p { color: var(--muted); max-width: 68ch; }
+.legal-item h3 { margin-top: 22px; }
+
+/* Printing gets the document, not the summary of one. The script opens every
+   section before the dialog; this makes sure nothing is styled away. */
+@media print {
+  .legal-controls { display: none; }
+  .legal-item, .legal-item > * { display: block !important; }
+  .legal-item summary { list-style: none; font-weight: 700; }
+  .legal-item summary::after { display: none; }
+}
