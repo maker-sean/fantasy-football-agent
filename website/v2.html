@@ -96,9 +96,32 @@
   scrollbar-width: none;
 }
 .rail::-webkit-scrollbar { display: none; }
+/*
+ * IDENTICAL CARDS, because a rail of different shapes reads as a mistake.
+ *
+ * Flex already makes the items equal HEIGHT — they stretch to the tallest — but
+ * the copy above each transcript is a different length, so every panel started
+ * and finished at a different point and the whole rail looked ragged while
+ * being technically aligned.
+ *
+ * The copy block gets a floor, the panel takes whatever is left, and the
+ * message list absorbs the difference. Transcripts are balanced to three
+ * messages each so the panels are filling with content rather than with air.
+ */
 .rail-item {
   flex: 0 0 86%; scroll-snap-align: start; min-width: 0;
+  display: flex; flex-direction: column;
 }
+/*
+ * A FLOOR TALL ENOUGH TO BIND. At 168px every copy block already cleared it, so
+ * each one kept its natural height (199, 225, 210) and the panels below started
+ * and finished at three different points — the cards were the same size and
+ * still looked ragged, which is the worst of both. 232 clears the longest with
+ * a little headroom for a copy edit.
+ */
+.rail-item > div:first-child { min-height: 232px; }
+.rail-item .exchange { flex: 1; display: flex; flex-direction: column; }
+.rail-item .exchange .msgs { flex: 1; }
 .rail-hint {
   font-family: var(--mono); font-size: .7rem; letter-spacing: .06em;
   text-transform: uppercase; color: var(--muted); margin: 0 0 14px;
@@ -115,6 +138,10 @@
     gap: 54px; align-items: center;
     padding: 52px 0; border-top: 1px solid var(--line);
   }
+  /* The phone's equalisers are meaningless in a stacked two-column layout and
+     would only force empty space into the copy column. */
+  .rail-item > div:first-child { min-height: 0; }
+  .rail-item .exchange { display: block; }
   .rail-item:first-child { border-top: 0; padding-top: 8px; }
   /* Alternate which side the transcript sits on, so four in a row do not scan
      as a list. */
@@ -271,10 +298,6 @@ Kelley scored 21.3 the rest of that year. Jefferson scored 159.1. Dave has been 
               <div class="who">Dave &middot; 9:15 PM</div>
               <div class="bubble">i was rebuilding</div>
             </div>
-            <div class="msg bot">
-              <div class="who">Commish AI &middot; 9:15 PM</div>
-              <div class="bubble">You finished 11th that year and 11th the next one. Rebuilding what.</div>
-            </div>
           </div>
         </div>
       </div>
@@ -299,6 +322,14 @@ Kelley scored 21.3 the rest of that year. Jefferson scored 159.1. Dave has been 
               <div class="bubble">Worth floating at Theo: send Waddle, get Breece Hall. +7.2 projected lineup points for you, +7.6 for him, values 2% apart.
 
 You&rsquo;re 4 of 12 on projected lineup. You&rsquo;re a buyer. Stop hoarding picks.</div>
+            </div>
+            <div class="msg">
+              <div class="who">Ana &middot; 11:04 AM</div>
+              <div class="bubble">will he go for it</div>
+            </div>
+            <div class="msg bot">
+              <div class="who">Commish AI &middot; 11:04 AM</div>
+              <div class="bubble">No idea. I read his roster, not his mind.</div>
             </div>
           </div>
         </div>
@@ -333,35 +364,6 @@ Rough day:
             <div class="msg bot">
               <div class="who">Commish AI &middot; 11:49 PM</div>
               <div class="bubble">You autodrafted three kickers. The plane did that.</div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div class="rail-item">
-        <div>
-          <p class="eyebrow">Six seasons of receipts</p>
-          <h3>It remembers what your league forgot.</h3>
-          <p class="lede">Every game, every lineup, back to the season you started. It won&rsquo;t
-          crown a &ldquo;best manager&rdquo; it can&rsquo;t compute &mdash; but it has the number,
-          the week, and the name.</p>
-        </div>
-        <div class="exchange">
-          <div class="exchange-bar"><span>League group chat</span><span class="tag">582 games on file</span></div>
-          <div class="msgs">
-            <div class="msg">
-              <div class="who">Theo &middot; 8:20 PM</div>
-              <div class="bubble">commish who&rsquo;s the worst starter in this league</div>
-            </div>
-            <div class="msg bot">
-              <div class="who">Commish AI &middot; 8:20 PM</div>
-              <div class="bubble">Can&rsquo;t crown a worst, that&rsquo;s not a stat I have. What I do have: Dave benched Jonathan Taylor for 39.8 points in a 2024 playoff game and started David Montgomery, who scored nothing.
-
-That&rsquo;s the single worst lineup call on record and it happened in an elimination week.</div>
-            </div>
-            <div class="msg">
-              <div class="who">Dave &middot; 8:21 PM</div>
-              <div class="bubble">why do you remember that</div>
             </div>
           </div>
         </div>
