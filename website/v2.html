@@ -193,6 +193,7 @@
 .chat .msg.me > .who, .chat .msg.me > .bubble { grid-column: 1; }
 .chat .msg.me .who { text-align: right; margin: 0 4px 3px 0; }
 .chat .msg.me .av { grid-column: 2; grid-row: 1 / span 2; }
+.chat .msg.me .typing i { background: rgba(6, 23, 14, .5); }
 .chat .msg.me .bubble {
   background: var(--turf); color: #06170e; font-weight: 500;
   border-radius: 18px 18px 5px 18px;
@@ -772,6 +773,8 @@ document.getElementById('yr').textContent = new Date().getFullYear();
   if (!animated.length) return;
   animated.forEach(m => m.classList.add('pending'));
 
+  // The dots sit where the reply will, so it lands in place rather than
+  // jumping sides. That means the Commish row: right-aligned, green.
   const typing = document.createElement('div');
   typing.innerHTML = '<div class="bubble typing"><i></i><i></i><i></i></div>';
 
@@ -808,18 +811,18 @@ document.getElementById('yr').textContent = new Date().getFullYear();
     let prevDwell = 0;
 
     for (const m of animated) {
-      const isBot = m.classList.contains('bot');
+      const isCommish = m.classList.contains('me');
       const custom = m.dataset.after ? Number(m.dataset.after) : null;
 
       if (custom !== null) {
         await wait(custom);
       } else {
         await wait(prevDwell);
-        if (!isBot) await wait(PACE.humanLead);
+        if (!isCommish) await wait(PACE.humanLead);
       }
 
-      if (isBot) {
-        typing.className = 'msg bot';
+      if (isCommish) {
+        typing.className = 'msg me';
         msgs.insertBefore(typing, m);
         await reveal();
         await wait(typingFor(m));
