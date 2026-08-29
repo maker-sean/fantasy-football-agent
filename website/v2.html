@@ -75,8 +75,72 @@
   text-transform: uppercase; color: var(--muted);
 }
 .exchange-bar .tag { color: var(--turf); }
-.exchange .msgs { padding: 16px 14px; gap: 13px; }
-.exchange .bubble { font-size: .92rem; line-height: 1.5; }
+.exchange .msgs { padding: 16px 14px 12px; gap: 14px; }
+.exchange .bubble { font-size: .92rem; line-height: 1.5; position: relative; }
+
+/* ---------------------------------------------------------------------------
+   MESSAGES THAT LOOK LIKE MESSAGES.
+   The transcript is the whole argument for the page, and a rounded rectangle
+   with a label over it reads as a diagram of a chat rather than a chat. The
+   parts a phone actually draws — a tail on the bubble, an avatar beside the
+   person, the time set quietly next to the name, a delivery receipt under the
+   last thing sent — are what make somebody believe it happened.
+--------------------------------------------------------------------------- */
+.exchange .msg { display: grid; grid-template-columns: 26px 1fr; gap: 8px; max-width: 88%; }
+.exchange .msg > .who { grid-column: 2; }
+.exchange .msg > .bubble { grid-column: 2; }
+.exchange .msg.bot { grid-template-columns: 1fr; max-width: 92%; }
+
+.av {
+  grid-row: 1 / span 2; align-self: end;
+  width: 26px; height: 26px; border-radius: 50%;
+  background: var(--raised); border: 1px solid var(--line);
+  color: var(--muted); font-size: .68rem; font-weight: 700;
+  display: flex; align-items: center; justify-content: center;
+  margin-bottom: 2px;
+}
+
+/* The name in caps, the time beside it in the muted weight a phone uses. */
+.exchange .msg .who { font-size: .66rem; letter-spacing: .06em; margin-bottom: 4px; }
+.exchange .msg .who .t { font-weight: 400; letter-spacing: 0; text-transform: none; opacity: .72; }
+
+/*
+ * The tail, drawn the way a phone draws it: one shape carrying the bubble's
+ * own colour, and a second in the PANEL's colour cutting the curve back out.
+ * Both have to match their backgrounds exactly or the notch shows a seam.
+ */
+.exchange .msg:not(.bot) .bubble { border-radius: 17px 17px 17px 4px; }
+.exchange .msg:not(.bot) .bubble::before,
+.exchange .msg:not(.bot) .bubble::after { content: ''; position: absolute; bottom: 0; }
+.exchange .msg:not(.bot) .bubble::before {
+  left: -7px; width: 16px; height: 17px;
+  background: var(--raised); border-bottom-right-radius: 16px;
+}
+.exchange .msg:not(.bot) .bubble::after {
+  left: -16px; width: 16px; height: 17px;
+  background: var(--surface); border-bottom-right-radius: 12px;
+}
+
+.exchange .msg.bot .bubble { border-radius: 17px 17px 4px 17px; }
+.exchange .msg.bot .bubble::before,
+.exchange .msg.bot .bubble::after { content: ''; position: absolute; bottom: 0; }
+.exchange .msg.bot .bubble::before {
+  right: -7px; width: 16px; height: 17px;
+  background: var(--turf-dim); border-bottom-left-radius: 16px;
+  border-right: 1px solid var(--turf); border-bottom: 1px solid var(--turf);
+}
+.exchange .msg.bot .bubble::after {
+  right: -16px; width: 17px; height: 18px;
+  background: var(--surface); border-bottom-left-radius: 12px;
+}
+
+/* Sent, and seen. The last thing the bot said carries a receipt, which is the
+   detail that makes a mock read as a screenshot. */
+.receipt {
+  align-self: flex-end; font-size: .62rem; letter-spacing: .06em;
+  text-transform: uppercase; color: var(--muted); opacity: .7;
+  margin: -6px 2px 0 0;
+}
 
 /* A grade is the most repeatable thing this produces and should read as a
    verdict, not as body copy. */
@@ -176,7 +240,7 @@
         agree about. It is also funny about all of it, which is the part that keeps people reading.
       </p>
       <div class="hero-actions">
-        <a class="btn" href="start.html">Get started: find your league</a>
+        <a class="btn" href="start.html">Find your league</a>
         <a class="btn ghost" href="#how">What it does</a>
       </div>
       <!-- The price, at the button rather than only in the pricing section a
@@ -223,7 +287,7 @@
         </div>
 
         <div class="msg">
-          <div class="who">Dave · Sunday 8:31 AM</div>
+          <span class="av" aria-hidden="true">D</span><div class="who">Dave · Sunday 8:31 AM</div>
           <div class="bubble">wait that game is at 9:30??</div>
         </div>
 
@@ -285,20 +349,21 @@
           <div class="exchange-bar"><span>League group chat</span><span class="tag">Graded</span></div>
           <div class="msgs">
             <div class="msg">
-              <div class="who">Mike &middot; 9:14 PM</div>
+              <span class="av" aria-hidden="true">M</span><div class="who">Mike<span class="t"> 9:14 PM</span></div>
               <div class="bubble">worst trade in league history?</div>
             </div>
             <div class="msg bot">
-              <div class="who">Commish AI &middot; 9:14 PM</div>
+              <div class="who">Commish AI<span class="t"> 9:14 PM</span></div>
               <div class="bubble">2020 week 5. Dave sent Ana Joshua Kelley and got Justin Jefferson back. <span class="grade good">Ana A+</span>, <span class="grade bad">Dave F</span>.
 
 Kelley scored 21.3 the rest of that year. Jefferson scored 159.1. Dave has been quiet about it for six seasons and I understand why.</div>
             </div>
             <div class="msg">
-              <div class="who">Dave &middot; 9:15 PM</div>
+              <span class="av" aria-hidden="true">D</span><div class="who">Dave<span class="t"> 9:15 PM</span></div>
               <div class="bubble">i was rebuilding</div>
             </div>
           </div>
+            <p class="receipt">Delivered</p>
         </div>
       </div>
 
@@ -314,24 +379,25 @@ Kelley scored 21.3 the rest of that year. Jefferson scored 159.1. Dave has been 
           <div class="exchange-bar"><span>League group chat</span><span class="tag">Suggested</span></div>
           <div class="msgs">
             <div class="msg">
-              <div class="who">Ana &middot; 11:02 AM</div>
+              <span class="av" aria-hidden="true">A</span><div class="who">Ana<span class="t"> 11:02 AM</span></div>
               <div class="bubble">who should i be trading with</div>
             </div>
             <div class="msg bot">
-              <div class="who">Commish AI &middot; 11:02 AM</div>
+              <div class="who">Commish AI<span class="t"> 11:02 AM</span></div>
               <div class="bubble">Worth floating at Theo: send Waddle, get Breece Hall. +7.2 projected lineup points for you, +7.6 for him, values 2% apart.
 
 You&rsquo;re 4 of 12 on projected lineup. You&rsquo;re a buyer. Stop hoarding picks.</div>
             </div>
             <div class="msg">
-              <div class="who">Ana &middot; 11:04 AM</div>
+              <span class="av" aria-hidden="true">A</span><div class="who">Ana<span class="t"> 11:04 AM</span></div>
               <div class="bubble">will he go for it</div>
             </div>
             <div class="msg bot">
-              <div class="who">Commish AI &middot; 11:04 AM</div>
+              <div class="who">Commish AI<span class="t"> 11:04 AM</span></div>
               <div class="bubble">No idea. I read his roster, not his mind.</div>
             </div>
           </div>
+            <p class="receipt">Delivered</p>
         </div>
       </div>
 
@@ -346,7 +412,7 @@ You&rsquo;re 4 of 12 on projected lineup. You&rsquo;re a buyer. Stop hoarding pi
           <div class="exchange-bar"><span>League group chat</span><span class="tag">Draft night</span></div>
           <div class="msgs">
             <div class="msg bot">
-              <div class="who">Commish AI &middot; 11:47 PM</div>
+              <div class="who">Commish AI<span class="t"> 11:47 PM</span></div>
               <div class="bubble">Draft is done.
 
 Best of it:
@@ -358,14 +424,15 @@ Rough day:
   Dave <span class="grade bad">D</span>, cannot fill TE</div>
             </div>
             <div class="msg">
-              <div class="who">Mike &middot; 11:48 PM</div>
+              <span class="av" aria-hidden="true">M</span><div class="who">Mike<span class="t"> 11:48 PM</span></div>
               <div class="bubble">i was on a flight</div>
             </div>
             <div class="msg bot">
-              <div class="who">Commish AI &middot; 11:49 PM</div>
+              <div class="who">Commish AI<span class="t"> 11:49 PM</span></div>
               <div class="bubble">You autodrafted three kickers. The plane did that.</div>
             </div>
           </div>
+            <p class="receipt">Delivered</p>
         </div>
       </div>
 
