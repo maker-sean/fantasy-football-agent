@@ -210,6 +210,21 @@ const JOBS = [
     const out = await require('./src/ledgerrecap').run(sendblue, { dryRun: DRY_RUN });
     if (out.phase) console.log(`[ledger] ${out.phase}: sent ${out.sent.length}, skipped ${out.skipped.length}`);
   }],
+  /*
+   * Draft: a day out, an hour out, and the recap once it finishes.
+   *
+   * Every twenty minutes because the recap has to wait for Sleeper to write the
+   * picks onto rosters, and there is no event to wait on — polling is the only
+   * way to notice a draft ended. The countdowns fire the first pass after their
+   * moment rather than inside a narrow window, so a reminder can be late but
+   * never missed and never doubled.
+   */
+  ['draft_announce', '*/20 * * * *', async () => {
+    const out = await require('./src/draftannounce').run(sendblue, { dryRun: DRY_RUN });
+    if (out.sent.length) {
+      console.log(`[draft] sent ${out.sent.map(s => `${s.league}:${s.phase}`).join(', ')}`);
+    }
+  }],
   ['members',        '30 4 * * *',  () => snapshots.syncMembers()],
   // The weekly recap — Tuesday morning, after Monday night has settled and the
   // postscore capture has run. Queues a draft and texts the owner; it does not
