@@ -118,7 +118,28 @@ const QUERIES = {
              + ' there is no clean one-for-one right now rather than inventing one.';
       }
 
-      L.push('  These are SUGGESTIONS, not deals. Nobody has agreed to anything.');
+      /*
+       * NOBODY HAS BEEN ASKED.
+       *
+       * "Renshaw will take Waddle for Breece Hall" reads as a deal already
+       * agreed, and what actually happened is that a lineup was simulated.
+       * Saying it that way in a group chat puts words in another manager's
+       * mouth, and the first thing he does is deny it — which costs more trust
+       * than the suggestion was ever worth.
+       *
+       * The honest shape is one-sided: this is good for the asker, and here is
+       * the reason the other manager might listen. His roster is evidence about
+       * his needs, never about his intent.
+       */
+      L.push('  These are MODELLED, not offered. Nobody has been asked and nobody has agreed.');
+      L.push('  Never predict what another manager will do. Not "will take", not "will listen",'
+           + ' not "would send", not "wants" — every one of those is a claim about somebody who'
+           + ' has not been asked, and the first thing he does is deny it in front of everybody.'
+           + ' You are reading their roster, not their mind.');
+      L.push('  Use "worth asking", "worth floating", "might have a reason to listen". Then give'
+           + ' the reason FROM THE ROSTER: what they are thin at, and what they would be getting.');
+      L.push('  Frame it from the asker\'s side: good for them first, then why the other manager'
+           + ' has a reason to consider it.');
       for (const t of out.best.slice(0, 4)) {
         L.push(`    With ${nameOf(t.rosterId)}: send ${t.give.name} (${t.give.position}),`
              + ` get ${t.get.name} (${t.get.position}).`
@@ -182,9 +203,11 @@ const QUERIES = {
             for (const d of pk.deals.slice(0, 3)) {
               const picks = d.picks.map(x => `${x.season} ${x.band.toLowerCase()} ${ord(x.round)}`
                 + ` (originally ${nameOf(x.from)}'s)`).join(' and ');
-              L.push(`    ${nameOf(d.seller)} sends ${d.player.name} to ${nameOf(d.buyer)}`
-                   + ` for ${picks}. ${nameOf(d.buyer)} +${d.buyerGain} projected lineup points;`
-                   + ` values ${d.edge}% apart.`);
+              L.push(`    Worth asking ${nameOf(pk.role === 'buying' ? d.seller : d.buyer)}:`
+                   + ` ${d.player.name} moves to ${nameOf(d.buyer)} for ${picks}.`
+                   + ` It would add ${d.buyerGain} projected lineup points to`
+                   + ` ${nameOf(d.buyer)}, and the values are ${d.edge}% apart. Nobody has`
+                   + ' been asked.');
             }
             L.push('    A future pick is priced by whose it is — a contender\'s own first lands'
                  + ' late and is worth less. That is a guess about next year\'s standings, so'

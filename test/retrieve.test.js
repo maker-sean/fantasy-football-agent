@@ -374,6 +374,26 @@ const dies = msg => ({ messages: { create: async () => { throw new Error(msg); }
       assert.match(out, /THIS league's settings/);
     });
 
+    await it('trade suggestions never put words in another manager\'s mouth', async () => {
+      /*
+       * "Renshaw will take Waddle for Breece Hall" reads as a deal already
+       * agreed, when what happened is that a lineup was simulated. Said in a
+       * group chat it puts words in another manager's mouth, and the first
+       * thing he does is deny it in front of everybody — which costs more
+       * trust than the suggestion was ever worth.
+       */
+      const members = (ctx.members || []).map(m => m.name).filter(Boolean);
+      if (!members.length) return console.log('       (skip: no members)');
+      const out = await retrievers.run(ctx, { name: 'trade_targets', args: { manager: members[0] } });
+      if (/^No manager|Nobody has drafted|Could not/.test(out)) {
+        return console.log('       (skip: nothing to suggest)');
+      }
+      assert.match(out, /MODELLED, not offered/);
+      assert.match(out, /Nobody has been asked/);
+      assert.match(out, /Never predict what another manager will do/);
+      assert.match(out, /worth asking/i, 'the block must supply the softer phrasing to use');
+    });
+
     await it('the grade is the headline and the arithmetic is marked as working', async () => {
       /*
        * What people want is the letter and who came off worse. The totals, the
