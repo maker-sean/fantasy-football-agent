@@ -32,6 +32,145 @@ const nameFor = (ctx, rid) => {
 const QUERIES = {
 
   /*
+   * What the waiver wire bought, and what it threw away.
+   *
+   * A league argues about a $75 claim for one week and forgets it. The snapshot
+   * remembers: seventy-five dollars, five weeks on the roster, started zero of
+   * them, nought points.
+   *
+   * STARTED points only. A pickup who scored ninety on a bench won nobody
+   * anything, and counting bench production would flatter every panic add in
+   * the league.
+   *
+   * NOT EVERY LEAGUE USES FAAB — one of these two runs fifty claims a season
+   * with no bids at all — so the money lines appear only where money exists,
+   * and the value questions answer either way.
+   */
+  waivers: {
+    describe: 'What waiver claims and drops were actually worth: money wasted, free pickups '
+            + 'that won weeks, and players dropped who then produced for somebody else. '
+            + 'Use for "who wasted the most FAAB", "best waiver pickup", "worst drop", '
+            + '"who works the wire", "biggest waiver bust". Arguments: manager=<name> '
+            + '(optional), season=<year> (optional, defaults to the last completed season).',
+    args: {
+      manager: 'string, a manager name, or omit for the whole league',
+      season: 'string, a year like 2025, or omit for the most recent completed season',
+    },
+    async run(ctx, args) {
+      const wv = require('./waivers');
+
+      /*
+       * The season has to be one with a FINAL snapshot: the whole measure is
+       * what a player did after the claim, and that is read out of the weekly
+       * lineups a completed season leaves behind.
+       */
+      const { rows: seasons } = await db.query(
+        `select s.season, l.sleeper_league_id
+           from snapshots s join leagues l on l.id = s.league_id
+          where l.sleeper_league_id = any($1::text[]) and s.kind = 'final'
+          order by s.season desc`, [ctx.chainIds || []]);
+      if (!seasons.length) {
+        return 'No completed season is captured for this league, so there is nothing to judge a'
+             + ' waiver claim against yet. Say that, rather than that nobody has made one.';
+      }
+      const pick = args.season
+        ? seasons.find(x => String(x.season) === String(args.season))
+        : seasons[0];
+      if (!pick) {
+        return `No completed season ${args.season} is on file. Seasons available: `
+             + `${seasons.map(x => x.season).join(', ')}.`;
+      }
+
+      const result = await wv.cached(pick.sleeper_league_id, {
+        season: pick.season,
+        transactionsFor: wk => fetch(
+          `https://api.sleeper.app/v1/league/${pick.sleeper_league_id}/transactions/${wk}`)
+          .then(r => r.json()),
+      });
+      if (!result) return `Could not read the ${pick.season} waiver wire.`;
+      const h = wv.highlights(result);
+
+      const ids = [...new Set([...result.adds, ...result.drops].map(x => x.playerId))];
+      const { rows: pl } = await db.query(
+        'select player_id, full_name from players where player_id = any($1::text[])', [ids]);
+      const nameOf = new Map(pl.map(r => [String(r.player_id), r.full_name]));
+      const player = id => nameOf.get(String(id)) || `player ${id}`;
+      const who = rid => {
+        const m = (ctx.members || []).find(x => Number(x.rosterId) === Number(rid));
+        return m?.name || `roster ${rid}`;
+      };
+
+      const only = args.manager
+        ? (ctx.members || []).filter(x => (x.name || '').toLowerCase()
+            .includes(String(args.manager).toLowerCase()))
+        : null;
+      if (only && !only.length) return `No manager matching "${args.manager}" is in this league.`;
+      if (only && only.length > 1) {
+        return `"${args.manager}" matches ${only.length} managers — `
+             + `${only.map(m => m.name).join(' and ')}. Ask which.`;
+      }
+      const mine = only ? Number(only[0].rosterId) : null;
+      const keep = rows => (mine == null ? rows : rows.filter(r => r.rosterId === mine));
+
+      const L = [`WAIVER WIRE, ${pick.season}. Points counted are what these players scored`
+               + ' WHILE STARTED after the move — a pickup who put up ninety on a bench won'
+               + ' nobody anything.'
+               + (result.faab ? ' This league uses FAAB, so the money is real.'
+                              : ' This league does NOT use FAAB, so there is no money to waste'
+                                + ' here — never mention a budget or a bid.')];
+
+      if (result.faab) {
+        const wasted = keep(h.wasted);
+        if (wasted.length) {
+          L.push('  MONEY BURNED:');
+          for (const a of wasted.slice(0, 4)) {
+            L.push(`    ${who(a.rosterId)} paid $${a.bid} for ${player(a.playerId)} in week`
+                 + ` ${a.week}, started them ${a.started} of ${a.held} weeks they held them,`
+                 + ` ${a.points} points.`);
+          }
+        }
+      }
+
+      const steals = keep(h.steals);
+      if (steals.length) {
+        L.push('  BEST PICKUPS:');
+        for (const a of steals.slice(0, 4)) {
+          L.push(`    ${who(a.rosterId)} added ${player(a.playerId)} in week ${a.week}`
+               + `${result.faab ? ` for $${a.bid}` : ''} — ${a.points} points started after.`);
+        }
+      }
+
+      const regrets = keep(h.regrets);
+      if (regrets.length) {
+        L.push('  DROPS THAT CAME BACK:');
+        for (const d of regrets.slice(0, 4)) {
+          L.push(`    ${who(d.rosterId)} dropped ${player(d.playerId)} in week ${d.week};`
+               + ` ${d.points} points for ${who(d.landedOn)} after that.`);
+        }
+      }
+
+      if (!result.faab || mine != null) {
+        const byM = keep(h.byManager);
+        if (byM.length) {
+          L.push('  ACTIVITY:');
+          for (const m of byM.slice(0, 4)) {
+            L.push(`    ${who(m.rosterId)}: ${m.adds} adds`
+                 + `${result.faab ? `, $${m.spent} spent` : ''}, ${Math.round(m.points)} started`
+                 + ' points out of them.');
+          }
+          L.push('    Busier is not better and you must not say it is. Report the counts.');
+        }
+      }
+
+      if (L.length === 1) {
+        return L[0] + '\n  Nothing stands out either way that season — no ruinous claim, no'
+             + ' pickup that changed anything. Say so plainly.';
+      }
+      return L.join('\n');
+    },
+  },
+
+  /*
    * Who to trade with, and for whom.
    *
    * A trade is zero-sum in value and NOT zero-sum in lineup: a starting-calibre
