@@ -65,8 +65,24 @@ const it = async (n, f) => {
 
   await it('a flex swap is only claimed when the slot really is a flex', async () => {
     const FLEX = { FLEX: ['RB', 'WR', 'TE'], SUPER_FLEX: ['QB', 'RB', 'WR', 'TE'], REC_FLEX: ['WR', 'TE'] };
+    /*
+     * TWO PLAYERS SHARE A NAME, and this map used to let the wrong one win.
+     *
+     * There is a QB Lamar Jackson and a CB Lamar Jackson, an RB Kenneth Walker
+     * and a WR Kenneth Walker. The query had no ORDER BY and a Map keeps the
+     * LAST writer, so which one this test believed in came down to physical row
+     * order — it passed for months and started failing the day the players
+     * table was resynced, on production output that was correct all along.
+     *
+     * Production never had the bug: it works from the player_id in the
+     * snapshot. Only this check resolves by name, so it needs the same tiebreak
+     * src/playervalues.js already uses — the one currently on an NFL roster is
+     * the one anybody means.
+     */
     const { rows: players } = await db.query(
-      'select player_id, full_name, position from players where position is not null');
+      `select player_id, full_name, position, team from players
+        where position is not null
+        order by case when team is null then 1 else 0 end desc, player_id`);
     const posOf = new Map(players.map(p => [p.full_name, p.position]));
 
     for (const m of worst) {
@@ -82,8 +98,11 @@ const it = async (n, f) => {
     // The failure the naive version produces: a QB "should have started" at RB.
     for (const m of worst) {
       if (['FLEX', 'SUPER_FLEX', 'REC_FLEX'].includes(m.slot)) continue;
+      // Same collision, same tiebreak: a bare LIMIT 1 here picks a homonym at
+      // random, which is how a CB came to be claimed for a QB slot.
       const { rows: [p] } = await db.query(
-        'select position from players where full_name = $1 limit 1', [m.benched]);
+        `select position from players where full_name = $1
+          order by case when team is null then 1 else 0 end, player_id limit 1`, [m.benched]);
       if (!p) continue;
       assert.strictEqual(p.position, m.slot,
         `${m.benched} is a ${p.position} and was claimed for a ${m.slot} slot`);

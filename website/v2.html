@@ -110,16 +110,16 @@
 .daystamp { text-align: center; margin: 2px 0 4px; font-size: .72rem; color: var(--muted); }
 .daystamp b { color: var(--text); font-weight: 600; }
 
-.exchange .msgs { padding: 12px 12px 16px; gap: 9px; }
-.exchange .bubble { font-size: .93rem; line-height: 1.42; position: relative; }
+.chat .msgs { padding: 12px 12px 16px; gap: 9px; }
+.chat .bubble { font-size: .93rem; line-height: 1.42; position: relative; }
 
 /* Received: avatar bottom-left, name above, grey bubble with a tail. */
-.exchange .msg {
+.chat .msg {
   display: grid; grid-template-columns: 30px 1fr; gap: 8px;
   max-width: 92%; align-self: flex-start;
 }
-.exchange .msg > .who, .exchange .msg > .bubble { grid-column: 2; }
-.exchange .msg .who {
+.chat .msg > .who, .chat .msg > .bubble { grid-column: 2; }
+.chat .msg .who {
   font-size: .74rem; font-weight: 400; color: var(--muted);
   text-transform: none; letter-spacing: 0; margin: 0 0 3px 4px;
 }
@@ -134,34 +134,48 @@
 /* The bot is an app, so it wears the app's mark rather than initials. */
 .av.app { background: var(--turf); color: #08130d; border-radius: 9px; font-size: .6rem; letter-spacing: -.02em; }
 
-.exchange .msg .bubble {
+.chat .msg .bubble {
   background: var(--raised); border: 0; color: var(--text);
   border-radius: 18px 18px 18px 5px;
 }
-.exchange .msg .bubble::before, .exchange .msg .bubble::after {
+.chat .msg .bubble::before, .chat .msg .bubble::after {
   content: ''; position: absolute; bottom: 0;
 }
-.exchange .msg .bubble::before {
+.chat .msg .bubble::before {
   left: -7px; width: 16px; height: 17px;
   background: var(--raised); border-bottom-right-radius: 16px;
 }
-.exchange .msg .bubble::after {
+.chat .msg .bubble::after {
   left: -16px; width: 16px; height: 17px;
   background: var(--surface); border-bottom-right-radius: 12px;
 }
 
+/*
+ * REDUCED MOTION MUST NOT FLATTEN THE LAYOUT.
+ *
+ * styles.css reveals staggered messages by setting .msg.pending to display:
+ * block for anyone who asked their OS to stop animating things. That was
+ * written when a message was a plain block; these are grids with an avatar
+ * column, so the override would strip the avatar out of its own row for
+ * exactly the readers who cannot see the animation anyway.
+ */
+@media (prefers-reduced-motion: reduce) {
+  .chat .msgs .msg.pending { display: grid; }
+  .chat .msgs .msg.pending.me { display: grid; }
+}
+
 /* Sent: no avatar, no name, green, hard against the right. */
-.exchange .msg.me { grid-template-columns: 1fr; align-self: flex-end; max-width: 84%; }
-.exchange .msg.me .who { display: none; }
-.exchange .msg.me .bubble {
+.chat .msg.me { grid-template-columns: 1fr; align-self: flex-end; max-width: 84%; }
+.chat .msg.me .who { display: none; }
+.chat .msg.me .bubble {
   background: var(--turf); color: #06170e; font-weight: 500;
   border-radius: 18px 18px 5px 18px;
 }
-.exchange .msg.me .bubble::before {
+.chat .msg.me .bubble::before {
   left: auto; right: -7px; background: var(--turf);
   border-bottom-right-radius: 0; border-bottom-left-radius: 16px;
 }
-.exchange .msg.me .bubble::after {
+.chat .msg.me .bubble::after {
   left: auto; right: -16px; width: 17px; height: 18px;
   border-bottom-right-radius: 0; border-bottom-left-radius: 12px;
 }
@@ -209,7 +223,7 @@
  */
 .rail-item > div:first-child { min-height: 232px; }
 .rail-item .exchange { flex: 1; display: flex; flex-direction: column; }
-.rail-item .exchange .msgs { flex: 1; }
+.rail-item .chat .msgs { flex: 1; }
 .rail-hint {
   font-family: var(--mono); font-size: .7rem; letter-spacing: .06em;
   text-transform: uppercase; color: var(--muted); margin: 0 0 14px;
@@ -290,7 +304,7 @@
     <div class="hero-phone">
       <div class="phone" aria-hidden="false">
         <div class="phone-bezel">
-          <div class="phone-screen">
+          <div class="phone-screen chat">
             <div class="phone-status">
               <span>9:41</span>
               <span class="phone-island"></span>
@@ -302,40 +316,40 @@
                 </svg>
               </span>
             </div>
-            <div class="thread-bar"><span>League group chat</span><span class="live">● 12</span></div>
+            <div class="chat-head"><span class="face-row" aria-hidden="true"><span class="face f1">J</span><span class="face f2">S</span><span class="face f3">D</span><span class="face f4">🏈</span></span><span class="group-name">🏈 The League</span><span class="group-who">Jake, Sam, Dee, Commish AI</span></div>
       <div class="msgs">
 
-        <div class="msg bot">
-          <div class="who">Commish AI · Sunday 8:30 AM</div>
+        <div class="msg">
+          <span class="av app" aria-hidden="true">AI</span><div class="who">Commish AI</div>
           <div class="bubble">Ridgeline FC, before this costs you: Alec Pierce is PUP (ankle) and ATL vs IND kicks in 1h. That is a zero sitting in your lineup right now.</div>
         </div>
 
-        <div class="msg">
-          <div class="who">Jake · Sunday 8:31 AM</div>
+        <div class="msg me">
+          <div class="who">Jake</div>
           <div class="bubble">wait that game is at 9:30??</div>
         </div>
 
-        <div class="msg bot">
-          <div class="who">Commish AI · Sunday 8:31 AM</div>
+        <div class="msg">
+          <span class="av app" aria-hidden="true">AI</span><div class="who">Commish AI</div>
           <div class="bubble">Berlin. Kicks off four hours before the rest of the slate. Your lineup locks with it.</div>
         </div>
 
-        <div class="msg bot" data-animate>
-              <div class="who">Commish AI · Tuesday 9:02 AM</div>
+        <div class="msg" data-animate>
+              <span class="av app" aria-hidden="true">AI</span><div class="who">Commish AI</div>
               <div class="bubble">Third &amp; Long didn't just lose to Ridgeline FC by 1.08 points; they mathematically engineered their own demise. You started Romeo Doubs (3.3) over DJ Moore (20.9) in the FLEX. This is the third consecutive week Moore has humiliated Doubs from your bench, yet you keep treating Doubs like he pays your mortgage. Your optimal lineup was 103.44. You chose to score 85.84. My servers are currently wasting electricity processing this level of incompetence.</div>
             </div>
             <!-- data-after: an explicit gap from the message above landing,
                  replacing that message's dwell and the usual human lead-in. A
                  reaction this short is fired off immediately, not composed. -->
-            <div class="msg" data-animate data-after="2000">
-              <div class="who">Jake · Tuesday 9:04 AM</div>
+            <div class="msg me" data-animate data-after="2000">
+              <div class="who">Jake</div>
               <div class="bubble">every single week with this thing</div>
             </div>
             <!-- Quotes the bot verbatim. If the message above is ever rewritten,
                  this line has to be rewritten with it: nothing checks that the
                  quoted phrase still exists, and a mismatch here is invisible. -->
             <div class="msg" data-animate>
-              <div class="who">Mike · Tuesday 9:05 AM</div>
+              <span class="av" aria-hidden="true">M</span><div class="who">Mike</div>
               <div class="bubble">"wasting electricity processing this" 💀</div>
             </div>
 
@@ -369,9 +383,8 @@
           <p class="lede">Both sides priced on the day the deal was made, graded against the trades
           your league actually makes. It will bring up a bad one years later, unprompted.</p>
         </div>
-        <div class="exchange">
-          <div class="chat-head"><span class="face-row" aria-hidden="true"><span class="face f1">J</span><span class="face f2">S</span><span class="face f3">M</span><span class="face f4">🏈</span></span><span class="group-name">🏈 The League</span><span class="group-who">Jake, Sarah, Mike, Commish AI</span></div>
-          <div class="msgs">
+        <div class="exchange chat">
+          <div class="chat-head"><span class="face-row" aria-hidden="true"><span class="face f1">M</span><span class="face f2">J</span><span class="face f3">R</span><span class="face f4">🏆</span></span><span class="group-name">🏆 Dynasty or Bust</span><span class="group-who">Mike, Jake, Ruth, Commish AI</span></div><div class="msgs">
             <p class="daystamp"><b>Tuesday</b> 8:12 AM</p>
             <div class="msg me">
               <div class="who">Mike</div>
@@ -400,9 +413,8 @@ Kelley scored 21.3 the rest of that year. Jefferson scored 159.1. Jake has been 
           <em>both</em> lineups get better. It won&rsquo;t tell you what the other manager will say
           &mdash; it has read their roster, not their mind.</p>
         </div>
-        <div class="exchange">
-          <div class="chat-head"><span class="face-row" aria-hidden="true"><span class="face f1">J</span><span class="face f2">S</span><span class="face f3">M</span><span class="face f4">🏈</span></span><span class="group-name">🏈 The League</span><span class="group-who">Jake, Sarah, Mike, Commish AI</span></div>
-          <div class="msgs">
+        <div class="exchange chat">
+          <div class="chat-head"><span class="face-row" aria-hidden="true"><span class="face f1">S</span><span class="face f2">T</span><span class="face f3">D</span><span class="face f4">🍺</span></span><span class="group-name">🍺 Sunday Scaries</span><span class="group-who">Sarah, Theo, Dev, Commish AI</span></div><div class="msgs">
             <p class="daystamp"><b>Tuesday</b> 8:12 AM</p>
             <div class="msg me">
               <div class="who">Sarah</div>
@@ -435,9 +447,8 @@ You&rsquo;re 4 of 12 on projected lineup. You&rsquo;re a buyer. Stop hoarding pi
           <p class="lede">A day before, an hour before, then the moment the last pick is in. Every
           roster ranked on the lineup it can actually field.</p>
         </div>
-        <div class="exchange">
-          <div class="chat-head"><span class="face-row" aria-hidden="true"><span class="face f1">J</span><span class="face f2">S</span><span class="face f3">M</span><span class="face f4">🏈</span></span><span class="group-name">🏈 The League</span><span class="group-who">Jake, Sarah, Mike, Commish AI</span></div>
-          <div class="msgs">
+        <div class="exchange chat">
+          <div class="chat-head"><span class="face-row" aria-hidden="true"><span class="face f1">C</span><span class="face f2">N</span><span class="face f3">O</span><span class="face f4">😠</span></span><span class="group-name">😠 The Regret Bowl</span><span class="group-who">Cole, Marc, Omar, Commish AI</span></div><div class="msgs">
             <p class="daystamp"><b>Tuesday</b> 8:12 AM</p>
             <div class="msg bot">
               <span class="av app" aria-hidden="true">AI</span>
@@ -453,7 +464,7 @@ Rough day:
   Jake <span class="grade bad">D</span>, cannot fill TE</div>
             </div>
             <div class="msg me">
-              <div class="who">Mike</div>
+              <div class="who">Cole</div>
               <div class="bubble">i was on a flight</div>
             </div>
             <div class="msg bot">
