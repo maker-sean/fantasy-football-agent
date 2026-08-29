@@ -168,6 +168,30 @@
       </p>
     </div>
 
+    <!-- Locked in ------------------------------------------------------------
+         
+         The moment the league actually goes live, and the only moment anybody
+         is pleased enough to text a friend about it. That is the whole reason
+         the passes are handed over HERE rather than in an email nobody opens:
+         the ask lands while the good feeling is still in the room.
+         
+         Shown only when there are passes to show. A league that came in
+         organically goes straight to the dashboard as before — an empty
+         "share your passes" card would be a worse ending than no card. -->
+    <div id="v-passes" class="view" hidden>
+      <h1>You're locked in for the 2026 Season.</h1>
+      <p class="lede" id="passes-sub">
+        You have 2 Commish VIP Passes to share with friends running other leagues.
+      </p>
+
+      <div id="passes-list"></div>
+
+      <p class="row">
+        <button class="btn" id="passes-done" type="button">Go to my league</button>
+      </p>
+      <p id="passes-msg" class="msg-line" role="status" aria-live="polite"></p>
+    </div>
+
     <!-- Dashboard ----------------------------------------------------------->
     <div id="v-dashboard" class="view" hidden>
       <p class="eyebrow">Commissioner</p>

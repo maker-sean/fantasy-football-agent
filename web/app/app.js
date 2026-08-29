@@ -642,8 +642,78 @@ async function checkChat() {
     $('wait-title').textContent = 'Heard you. Your league is live.';
     $('wait-note').textContent = 'The agent is in your chat and will start with this week.';
     await refreshMe();
-    setTimeout(showDashboard, 1600);
+    setTimeout(showPassesOrDashboard, 1600);
   } catch { /* transient; the next tick retries */ }
+}
+
+// -------------------------------------------------------------- passes ----
+
+/*
+ * The passes screen, or the dashboard if there is nothing to hand over.
+ *
+ * Asks the server what this league ended up with. The server does not mint
+ * anything on the strength of this call — the passes were created when the
+ * league went live, by the message that proved it — so a league that came in
+ * organically gets an empty list here and goes where it always went.
+ *
+ * A FAILURE HERE GOES TO THE DASHBOARD. Onboarding is finished either way and
+ * the passes are a bonus; blocking the end of setup on a bookkeeping endpoint
+ * would turn a nice moment into a dead screen.
+ */
+async function showPassesOrDashboard() {
+  let passes = [];
+  try {
+    const d = await api('POST', `/api/leagues/${CURRENT.id}/complete-onboarding`);
+    passes = d.passes || [];
+  } catch { /* the dashboard is the right fallback */ }
+
+  if (!passes.length) return showDashboard();
+
+  view('v-passes');
+  $('passes-sub').textContent =
+    `You have ${passes.length} Commish VIP Pass${passes.length === 1 ? '' : 'es'} to share `
+    + 'with friends running other leagues — 50% off their full season.';
+
+  const box = $('passes-list');
+  box.innerHTML = '';
+  for (const p of passes) {
+    const row = document.createElement('div');
+    row.className = 'pass' + (p.available ? '' : ' spent');
+    row.innerHTML =
+      '<div class="pass-code"></div>'
+      + '<div class="row">'
+      +   '<a class="btn" target="_blank" rel="noopener">Text it to a friend</a>'
+      +   '<button class="btn ghost" type="button">Copy link</button>'
+      + '</div>'
+      + '<p class="small muted pass-state"></p>';
+
+    row.querySelector('.pass-code').textContent = p.code;
+    const sms = row.querySelector('a');
+    const copy = row.querySelector('button');
+
+    if (p.available) {
+      // Built on the server so the text and the link cannot drift into
+      // quoting different offers at the same friend.
+      sms.href = p.smsUri;
+      copy.addEventListener('click', async () => {
+        try {
+          await navigator.clipboard.writeText(p.url);
+          say($('passes-msg'), 'Link copied.', 'ok');
+        } catch {
+          say($('passes-msg'), 'Copy failed — the link is ' + p.url, 'err');
+        }
+      });
+      row.querySelector('.pass-state').textContent = 'Good for one league.';
+    } else {
+      // Someone used it. Say so rather than offering a send that will fail on
+      // the other end, in front of the friend it was sent to.
+      sms.removeAttribute('href');
+      sms.setAttribute('aria-disabled', 'true');
+      copy.disabled = true;
+      row.querySelector('.pass-state').textContent = 'Used — thanks for the referral.';
+    }
+    box.appendChild(row);
+  }
 }
 
 // ----------------------------------------------------------- dashboard ----

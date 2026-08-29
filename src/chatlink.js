@@ -54,6 +54,40 @@ async function tryLink(msg, { provider = 'sendblue' } = {}) {
 
   const league = await db.setOnboardingState(leagueId, 'live', { chatId: msg.chatId });
   console.log(`[chatlink] ${league.name} is live — confirmed by a message from ${msg.chatId}`);
+
+  /*
+   * This is where a promo slot is actually spent, and where the founder passes
+   * are minted.
+   *
+   * NOT on an endpoint the browser calls. Onboarding does not complete because
+   * a page said so — it completes here, when a real message arrives in the real
+   * group chat, which is the one step nobody can fake by re-posting a form. A
+   * client callable "complete onboarding" would let anyone holding a session
+   * spend cohort slots and mint referral codes in a loop.
+   *
+   * Wrapped, because a promo bookkeeping failure must never stop a league going
+   * live. Going live is the product; the discount is a note about billing that
+   * does not exist yet. redeem() and mintFounderPasses() are both idempotent,
+   * so a message that arrives twice does not spend two slots, and a failure
+   * here can be repaired by replaying it.
+   */
+  try {
+    const promo = require('./promo');
+    const claimed = await promo.redeem({
+      leagueId, sleeperLeagueId: league.sleeper_league_id,
+    });
+    if (claimed.ok && !claimed.alreadyRedeemed) {
+      console.log(`[promo] ${league.name} redeemed ${claimed.claim.code}`);
+      const seed = await promo.seedFor(league);
+      const passes = await promo.mintFounderPasses(leagueId, { seed });
+      if (passes.length) {
+        console.log(`[promo] ${league.name} passes: ${passes.map(p => p.code).join(', ')}`);
+      }
+    }
+  } catch (err) {
+    console.error('[promo] redemption failed (league is live regardless):', err.message);
+  }
+
   return league;
 }
 

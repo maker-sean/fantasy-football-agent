@@ -577,6 +577,43 @@ app.post('/api/me/terms', requireAccount, wrap(async (req, res) => {
  * self-contained: an <img> pointing at a QR service would leak every visitor's
  * league id to a third party, on a site whose privacy policy promises otherwise.
  */
+/**
+ * Is this promo code good, and how many slots are left on it?
+ *
+ * Public, like the rest of the pre-account funnel: the person asking is on the
+ * start page and has no session yet. It leaks nothing an attacker wants —
+ * whether a code is live, and a count — and for a code that came off a Reddit
+ * post, both are already public.
+ *
+ * A no comes back with a REASON rather than a bare false, because the page
+ * renders each one differently. "The cohort is full" is a different screen from
+ * "we don't recognise that", and collapsing them would tell fifty people their
+ * code was mistyped on the day the pilot filled up.
+ */
+app.get('/api/promo/validate', wrap(async (req, res) => {
+  const promo = require('../src/promo');
+  const out = await promo.validate(req.query?.code);
+  // 200 either way. The code being full is an answer, not a failed request, and
+  // a 4xx here would land in the browser console of every visitor who arrives
+  // after slot fifty.
+  res.json(out.ok
+    ? { valid: true, promo: out.promo }
+    : { valid: false, reason: out.reason, promo: out.promo || null,
+        message: promoMessage(out.reason) });
+}));
+
+/** One place for the copy, so the page and the API cannot drift apart. */
+function promoMessage(reason) {
+  switch (reason) {
+    case 'exhausted':
+      return 'The 50 free beta slots are full. You are enrolling in our 7-day free trial.';
+    case 'expired':  return 'That code has expired.';
+    case 'inactive': return 'That code is no longer active.';
+    case 'missing':  return 'Enter a code.';
+    default:         return "We don't recognise that code.";
+  }
+}
+
 app.post('/api/signup-intent', wrap(async (req, res) => {
   const sleeperLeagueId = String(req.body?.sleeperLeagueId || '').trim();
   if (!/^\d{6,25}$/.test(sleeperLeagueId)) return res.status(400).json({ error: 'bad_league_id' });
@@ -604,6 +641,40 @@ app.post('/api/signup-intent', wrap(async (req, res) => {
   const signup = require('../src/signup');
   const issued = await signup.issueCode({ sleeperLeagueId, league: lg, profile });
 
+  /*
+   * Hold a pilot slot, if they arrived on a link that grants one.
+   *
+   * This is the moment the cohort is actually defined. The person came from a
+   * Reddit post or another commissioner's text, and this is the first point
+   * where that fact is attached to a name and an email — after this they are
+   * one of twenty-three signups that month and nothing says which door they
+   * used.
+   *
+   * A FAILURE HERE DOES NOT FAIL THE SIGNUP. Somebody who typed a dead code
+   * still wants to onboard, and the promo is the least important thing on the
+   * screen. The reason comes back so the page can say what happened, and the
+   * banner for an exhausted pilot is written to be reassuring rather than an
+   * error: they get the trial instead.
+   */
+  let promoOut = null;
+  const rawPromo = req.body?.promo || req.body?.ref;
+  if (rawPromo) {
+    const promo = require('../src/promo');
+    const source = req.body?.ref && !req.body?.promo ? 'ref' : 'promo';
+    try {
+      const r = await promo.reserve(rawPromo, {
+        sleeperLeagueId, signupCode: issued.code, email: profile.email, source,
+      });
+      promoOut = r.ok
+        ? { applied: true, ...r.promo }
+        : { applied: false, reason: r.reason, message: promoMessage(r.reason),
+            code: promo.normalize(rawPromo) };
+    } catch (err) {
+      console.error('[promo] reserve failed:', err.message);
+      promoOut = { applied: false, reason: 'error', message: promoMessage('error') };
+    }
+  }
+
   const number = process.env.SENDBLUE_FROM_NUMBER || null;
   const body = `${signup.KEYWORD} ${issued.code}`;
   // Both separators appear in the wild — iOS historically wanted &, Android ?.
@@ -630,6 +701,7 @@ app.post('/api/signup-intent', wrap(async (req, res) => {
     smsUri,
     qrSvg,
     league: { name: lg.name, season: lg.season, totalRosters: lg.total_rosters },
+    promo: promoOut,
   });
 }));
 
@@ -1001,6 +1073,59 @@ app.get('/api/leagues/:leagueId/chat-status', requireAccount, loadLeague, wrap(a
   });
 }));
 
+/**
+ * What this league ended up with, and the passes it has to give away.
+ *
+ * The spec called this complete-onboarding and had it do the completing. It
+ * does not: a league goes live in src/chatlink.js when a real message lands in
+ * the group chat, and the redemption and the minting happen there. If this
+ * endpoint spent slots, anybody holding a session could drain the cohort and
+ * print referral codes by calling it in a loop.
+ *
+ * So it reads. The one write it will do is a repair — a league that is live
+ * with no passes, because the mint failed the first time — and minting is
+ * idempotent and gated on the league genuinely being live.
+ */
+app.post('/api/leagues/:leagueId/complete-onboarding', requireAccount, loadLeague,
+  wrap(async (req, res) => {
+    const promo = require('../src/promo');
+    const live = req.league.onboarding_state === 'live';
+
+    const { rows: claims } = await db.query(
+      `select c.*, p.discount_type, p.discount_value, p.label
+         from promo_claims c join promo_codes p on p.code = c.code
+        where c.league_id = $1 or (c.sleeper_league_id = $2 and c.state = 'reserved')
+        order by c.created_at desc limit 1`,
+      [req.league.id, req.league.sleeper_league_id]);
+    const claim = claims[0] || null;
+
+    // Only a live league has earned passes. Anything else gets an honest state
+    // and no codes, which is what the success screen should render anyway.
+    let passes = [];
+    if (live && claim && claim.state === 'redeemed') {
+      passes = await promo.mintFounderPasses(req.league.id,
+        { seed: await promo.seedFor(req.league) });
+    }
+
+    res.json({
+      state: req.league.onboarding_state,
+      live,
+      promo: claim && {
+        code: claim.code,
+        state: claim.state,
+        discountType: claim.discount_type,
+        discountValue: Number(claim.discount_value),
+        label: claim.label,
+      },
+      passes: passes.map(p => ({
+        ...promo.shareFor(p.code),
+        // Null once somebody has used it, so the screen can grey the row out
+        // rather than inviting a second send that will not work.
+        available: p.remaining === null ? true : p.remaining > 0,
+      })),
+    });
+  }));
+
 // --- dashboard -------------------------------------------------------------
 
 const ALLOWED_CONFIG = new Set([
@@ -1260,6 +1385,22 @@ app.post('/api/admin/request-link', wrap(async (req, res) => {
   }
 
   res.json(same);
+}));
+
+/**
+ * Who the cohort is: invited, referred, or just turned up.
+ *
+ * The operator question this whole table exists for. A league with no claim is
+ * organic, so this is a left join from leagues and the nulls are the answer.
+ */
+app.get('/api/admin/promo', admin, wrap(async (req, res) => {
+  const promo = require('../src/promo');
+  const [codes, leagues] = await Promise.all([
+    promo.summary(),
+    promo.cohort({ code: req.query?.code || null }),
+  ]);
+  const counts = leagues.reduce((a, r) => (a[r.arrival] = (a[r.arrival] || 0) + 1, a), {});
+  res.json({ codes, leagues, counts });
 }));
 
 app.get('/api/admin/overview', admin, wrap(async (req, res) => {

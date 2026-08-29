@@ -89,6 +89,32 @@
         <summary id="plan-more-summary">What's included?</summary>
         <div id="plan-more-body"></div>
       </details>
+
+      <!-- A promo code, and the state of it.
+           
+           HIDDEN UNLESS IT MATTERS. Most people arrive with no code, and a
+           blank "promo code?" box on a signup form is an invitation to go and
+           look for one somewhere else rather than finish. So the row collapses
+           to a single link, and opens by itself for anybody who arrived on a
+           ?promo= or ?ref= link — where the code is the reason they clicked.
+           
+           The banner below it is not an error style even when the answer is
+           no. Somebody who followed a Reddit link to a cohort that filled up
+           has not done anything wrong, and the thing they should read is what
+           they get instead. -->
+      <div class="promo-row">
+        <button type="button" class="linkish" id="promo-toggle"
+                aria-expanded="false" aria-controls="promo-box">Have a promo code?</button>
+        <div id="promo-box" hidden>
+          <label class="field-label" for="promo">Promo code</label>
+          <div class="row">
+            <input id="promo" type="text" autocapitalize="characters" autocomplete="off"
+                   spellcheck="false" placeholder="REDDIT50" aria-describedby="promo-msg">
+            <button id="promo-apply" class="btn ghost" type="button">Apply</button>
+          </div>
+          <p id="promo-msg" class="msg-line" role="status" aria-live="polite"></p>
+        </div>
+      </div>
     </div>
 
     <!-- Step 1 --------------------------------------------------------------->
@@ -499,7 +525,124 @@ function profileBody() {
     plan: state.plan || null,
     platform: $('platform').value || null,
     platformOther: $('platform-other').value.trim() || null,
+    // Only a code that validated. Sending an unchecked one would have the
+    // server re-reject it at the exact moment the visitor has finished the
+    // form, which is the worst point in the flow to find out.
+    //
+    // EXACTLY ONE of these is ever set, and which one is the whole record of
+    // how they arrived: ?ref= means another commissioner sent them, ?promo=
+    // means they came off the post. Sending both — which this did at first —
+    // makes every referral read as a direct signup at the server, and the
+    // referral loop becomes unmeasurable while still appearing to work.
+    promo: state.promo?.applied && state.promo.source !== 'ref' ? state.promo.code : null,
+    ref: state.promo?.applied && state.promo.source === 'ref' ? state.promo.code : null,
   };
+}
+
+/* ------------------------------------------------------------- promo ----
+ *
+ * A code arrives one of three ways: ?promo= off the Reddit post, ?ref= off
+ * another commissioner's text, or typed in. All three land here, and the only
+ * difference the page keeps is which one it was — the server needs it to tell
+ * an invited league from a referred one, and nothing else on this page cares.
+ *
+ * VALIDATED BEFORE IT IS PROMISED. The box could just accept the text and let
+ * checkout sort it out, except there is no checkout: this flow ends in a text
+ * message and an operator. So the only honest moment to find out whether a
+ * cohort is full is now, while the visitor can still read what they get
+ * instead.
+ */
+function promoState(cls, text) {
+  const el = $('promo-msg');
+  el.className = 'msg-line' + (cls ? ' ' + cls : '');
+  el.textContent = text || '';
+}
+
+async function applyPromo(raw, source) {
+  const code = String(raw || '').trim().toUpperCase();
+  if (!code) { promoState('', ''); state.promo = null; return; }
+
+  $('promo').value = code;
+  promoState('', 'Checking…');
+  try {
+    const r = await fetch('/api/promo/validate?code=' + encodeURIComponent(code));
+    const d = await r.json();
+
+    if (d.valid) {
+      state.promo = { applied: true, code, source, ...d.promo };
+      promoState('ok', promoLine(d.promo));
+      // The plan bar is where the price lives, so it is where the change to
+      // the price belongs — not in a separate box further down the page.
+      $('plan-note').textContent = promoLine(d.promo);
+      return;
+    }
+
+    state.promo = { applied: false, code, source, reason: d.reason };
+    // An exhausted cohort is not the visitor's mistake and is not styled as
+    // one. Everything else is a code that will not work.
+    promoState(d.reason === 'exhausted' ? '' : 'err', d.message);
+    if (d.reason === 'exhausted') {
+      $('plan-note').textContent = 'Free for the first week either way.';
+    }
+  } catch {
+    state.promo = null;
+    promoState('err', 'Could not check that code. You can still sign up.');
+  }
+}
+
+/* One sentence for what a code is worth. Sizes come off the plan, not a
+ * hardcoded total: this is priced per manager, so "$30 instead of $60" is only
+ * true for a twelve manager league and false for everybody else. */
+function promoLine(promo) {
+  if (promo.discountType === 'full_free') {
+    return 'Reddit Pilot: 100% free for the 2026 season.';
+  }
+  if (promo.discountType === 'percentage') {
+    return `Founder VIP Pass: ${promo.discountValue}% off your full season.`;
+  }
+  return `Applied: $${promo.discountValue} off.`;
+}
+
+function initPromo() {
+  const q = new URLSearchParams(location.search);
+  const fromPromo = q.get('promo');
+  const fromRef = q.get('ref');
+  const code = fromPromo || fromRef;
+
+  $('promo-toggle').addEventListener('click', () => {
+    const box = $('promo-box');
+    box.hidden = !box.hidden;
+    $('promo-toggle').setAttribute('aria-expanded', String(!box.hidden));
+    if (!box.hidden) $('promo').focus();
+  });
+  /*
+   * A TYPED CODE IS NOT A REFERRAL, even on a page that was opened from one.
+   *
+   * This read the previous source, so somebody who arrived on ?ref= and then
+   * typed a different code had it filed as a referral — crediting a founder
+   * pass that was never used and quietly corrupting the one number the loop
+   * exists to produce. Only the code that actually came in on ?ref= is a
+   * referral; everything else is direct, whatever the page did a moment ago.
+   */
+  const sourceOf = code =>
+    fromRef && String(code || '').trim().toUpperCase() === fromRef.trim().toUpperCase()
+      ? 'ref' : 'promo';
+
+  $('promo-apply').addEventListener('click',
+    () => applyPromo($('promo').value, sourceOf($('promo').value)));
+  $('promo').addEventListener('keydown', e => {
+    if (e.key === 'Enter') { e.preventDefault(); $('promo-apply').click(); }
+  });
+
+  // Arrived on a link: open the row and check it without being asked. The code
+  // is the reason they clicked, so hiding it behind a toggle would bury the
+  // one thing they came for.
+  if (code) {
+    $('promo-box').hidden = false;
+    $('promo-toggle').setAttribute('aria-expanded', 'true');
+    $('promo-toggle').textContent = 'Promo code';
+    applyPromo(code, fromRef && !fromPromo ? 'ref' : 'promo');
+  }
 }
 
 /*
@@ -593,6 +736,7 @@ for (const b of document.querySelectorAll('.plan-opt')) {
 }
 
 setPlan(new URLSearchParams(location.search).get('plan'), { silent: true });
+initPromo();
 
 /*
  * What is still missing, in the order the fields appear.

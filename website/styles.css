@@ -1093,3 +1093,45 @@ input[type="range"] { accent-color: var(--turf); }
   .rail-item:nth-child(even) > .exchange { order: -1; }
   .rail-item h3 { font-size: 1.7rem; }
 }
+/*
+ * The promo row on the start page.
+ *
+ * Collapsed to a link by default. An always-visible "promo code?" box on a
+ * signup form sends people off to hunt for a code they do not have, and the
+ * ones who DO have a code arrive on a link that opens the row for them.
+ */
+.promo-row { margin-top: 14px; }
+.linkish {
+  background: none; border: 0; padding: 0; cursor: pointer;
+  font: inherit; font-size: .88rem; color: var(--muted);
+  text-decoration: underline; text-underline-offset: 3px;
+}
+.linkish:hover { color: var(--text); }
+.promo-row #promo { text-transform: uppercase; }
+/* Applied, and worth being pleased about. */
+.promo-applied {
+  border-left-color: var(--turf);
+}
+
+/*
+ * A founder pass, on the screen you reach by finishing setup.
+ *
+ * The code is the thing being handed over, so it is set in the monospace face
+ * at a size you can read across a table — this gets shown to the friend as
+ * often as it gets texted to them.
+ */
+.pass {
+  background: var(--surface); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 16px 18px; margin: 0 0 12px;
+}
+.pass-code {
+  font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 1.15rem; font-weight: 700; letter-spacing: .04em;
+  color: var(--turf); margin-bottom: 12px; word-break: break-all;
+}
+.pass-state { margin: 10px 0 0; }
+/* Spent. Still shown — a pass that worked is the good outcome, and hiding it
+   would make two passes look like one. */
+.pass.spent { opacity: .55; }
+.pass.spent .pass-code { color: var(--muted); text-decoration: line-through; }
+.pass.spent .btn[aria-disabled="true"] { pointer-events: none; opacity: .5; }
