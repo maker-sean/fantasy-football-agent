@@ -927,10 +927,32 @@ input[type="range"] { accent-color: var(--turf); }
   left: -7px; width: 16px; height: 17px;
   background: var(--raised); border-bottom-right-radius: 16px;
 }
+/*
+ * The mask that carves the curve out of the tail, and two things it kept
+ * getting wrong.
+ *
+ * IT IS PAINTED IN THE BACKGROUND COLOUR, which means it is only invisible
+ * against the background it was written for. It said var(--surface), which is
+ * the transcript cards; the hero's phone screen is var(--carbon), so the same
+ * square showed up there as a dark block hanging off every bubble. The colour
+ * now comes from a variable each context sets, so a new context that forgets
+ * to set one inherits the card colour rather than a guess.
+ *
+ * IT IS WIDER THAN THE GAP IT SITS IN. Sixteen pixels of mask reaching into an
+ * eight pixel gap puts the other eight on top of the avatar, which is why every
+ * circle had a square bitten out of its bottom corner. The avatar is lifted
+ * above it rather than the mask being narrowed — the curve needs its full width
+ * to read as a tail, and the overlap is only a problem because of paint order.
+ */
 .chat .msg .bubble::after {
   left: -16px; width: 16px; height: 17px;
-  background: var(--surface); border-bottom-right-radius: 12px;
+  background: var(--tail-bg, var(--surface)); border-bottom-right-radius: 12px;
 }
+/* Transcript cards sit on --surface; the hero's phone screen does not. */
+.chat { --tail-bg: var(--surface); }
+.phone-screen.chat { --tail-bg: var(--carbon); }
+/* Above the mask, so the circle stays a circle. */
+.chat .av { position: relative; z-index: 1; }
 
 /*
  * REDUCED MOTION MUST NOT FLATTEN THE LAYOUT.
@@ -979,9 +1001,33 @@ input[type="range"] { accent-color: var(--turf); }
 
 /* A grade is the most repeatable thing this produces and should read as a
    verdict, not as body copy. */
+/*
+ * A grade is the most repeatable thing this produces and should read as a
+ * verdict rather than as prose.
+ *
+ * THE COLOURS ARE PER BUBBLE, not global. Good was --turf, which is the same
+ * green the Commish bubbles are painted in — so the moment Commish moved to
+ * the green side, every A and A+ became green text on a green background and
+ * the best half of a draft recap simply vanished. The Ds survived on amber and
+ * made it look intentional, which is how it shipped.
+ *
+ * So the defaults below are for grey bubbles, and the green bubble restates
+ * both against the ink colour it actually uses.
+ */
 .grade { font-family: var(--mono); font-weight: 700; }
 .grade.good { color: var(--turf); }
 .grade.bad { color: var(--amber); }
+
+/*
+ * On the green bubble, where the text is near-black rather than near-white.
+ *
+ * Both cleared 4.5:1 against #21a366 before being written down. The first
+ * attempt at these was picked by eye and measured 4.49 and 2.60 — the second
+ * of which is the same invisible-grade bug in a different colour, which is
+ * exactly the kind of thing eyes sign off on.
+ */
+.chat .msg.me .grade.good { color: #04250f; }   /* 5.09:1 */
+.chat .msg.me .grade.bad  { color: #331400; }   /* 5.23:1 */
 
 /* ---- phone: one rail, swiped sideways ---------------------------------- */
 .rail {
