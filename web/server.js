@@ -693,6 +693,37 @@ app.post('/api/signup-intent', wrap(async (req, res) => {
     }
   }
 
+  /*
+   * Tell the operator somebody filled the form.
+   *
+   * THIS WAS THE GAP. signup.record() alerts on a new signups row, and the
+   * comment above it claims every path passes through there — true of the
+   * texted keyword, the conversational path and /api/signup-email, but NOT of
+   * this endpoint, which is the main form. It only issues a code. So somebody
+   * could pick their league, hand over a name and an email, and be told to
+   * text a number, and the operator heard nothing until they did. Three of the
+   * last five codes issued were never texted in.
+   *
+   * It fires HERE rather than inside issueCode, which is where record()'s
+   * one-funnel argument would put it. That argument holds for record() because
+   * three paths reach it; issueCode has exactly one production caller, and the
+   * promo result — the thing that makes this alert worth sending — is only
+   * known out here, after the slot has actually been taken.
+   *
+   * Swallowed, like every other operator alert: a signup that is recorded and
+   * not announced is a missed notification, one that throws is a lost lead.
+   */
+  const notify = require('../src/notify');
+  await notify.operator(null, notify.codeIssuedText({
+    leagueName: lg.name,
+    teams: lg.total_rosters,
+    name: [profile.firstName, profile.lastName].filter(Boolean).join(' ') || null,
+    email: profile.email,
+    plan: profile.plan,
+    code: issued.code,
+    promo: promoOut?.applied ? promoOut.code : null,
+  })).catch(() => {});
+
   res.json({
     code: issued.code,
     keyword: signup.KEYWORD,

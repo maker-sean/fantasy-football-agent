@@ -72,7 +72,39 @@ async function auditDelivery() {
   }
 }
 
+
+/**
+ * Held pilot slots whose owner has gone quiet.
+ *
+ * One message listing all of them rather than one per lead — a handful landing
+ * separately reads as a problem, and the useful unit is "here is who to chase
+ * this morning". quietClaims marks them reported, so each appears exactly once.
+ */
+async function promoQuiet() {
+  const promo = require('./src/promo');
+  const rows = await promo.quietClaims({ days: 3 });
+  if (!rows.length) return;
+
+  const lines = rows.map(r => {
+    const who = [r.first_name, r.signup_email || r.email].filter(Boolean).join('  ');
+    const days = Math.floor((Date.now() - new Date(r.created_at)) / 86400000);
+    return `${r.league_name || 'a league'} — ${who || 'no name'}`
+         + `\n  ${r.code}, code ${r.signup_code || '?'}, quiet ${days} days`;
+  });
+
+  const text = `${rows.length} held ${rows.length === 1 ? 'slot has' : 'slots have'} `
+    + `gone quiet:\n\n${lines.join('\n')}\n\n`
+    + 'They filled the form and never texted in. The slot returns on its own at '
+    + '14 days — this is a chase list, not a problem.';
+
+  await require('./src/notify').operator(sendblue, text, { dryRun: DRY_RUN || !ECHO });
+}
+
 const JOBS = [
+  // A pilot slot held by somebody who filled the form and never texted their
+  // code in. Reported once each, in the morning: nothing here is urgent, and
+  // an alert at 3am about a lead who went quiet on Tuesday is noise.
+  ['promo_quiet',    '0 14 * * *',   () => promoQuiet()],
   ['gameday',        '*/15 * * * *', () => gameday.tick(sendblue, { dryRun: DRY_RUN })],
   ['schedule',       '0 5 * * *',    () => gameday.refreshSchedule()],
   // Trades. The tick is frequent but the Sleeper call is not: only leagues

@@ -333,6 +333,40 @@ async function release(leagueId) {
 }
 
 /**
+ * Held slots whose owner has gone quiet, reported once each.
+ *
+ * A reservation is somebody who filled the form and was told to text a code.
+ * Most do it within minutes. The ones who do not are holding a pilot slot for
+ * a fortnight, and they are also the most recoverable lead there is — they
+ * wanted this enough to hand over a name and an email, and then balked at
+ * texting an unknown number.
+ *
+ * Reports and does not release. The expiry already returns the slot on its
+ * own; sweeping early would take it off somebody who signs up on Friday and
+ * gets round to it on Tuesday.
+ */
+async function quietClaims({ days = 3, mark = true } = {}) {
+  const { rows } = await db.query(
+    `select c.*, s.first_name, s.email as signup_email, s.league_name
+       from promo_claims c
+       left join signup_codes s on s.code = c.signup_code
+      where c.state = 'reserved'
+        and c.alerted_at is null
+        and c.created_at < now() - ($1 || ' days')::interval
+        and (c.expires_at is null or c.expires_at > now())
+      order by c.created_at asc`, [String(days)]);
+
+  // Marked as reported whether or not the send succeeds. A failed alert that
+  // retries every night is the repeat this column exists to prevent, and the
+  // row is still visible in `npm run promo`.
+  if (mark && rows.length) {
+    await db.query(`update promo_claims set alerted_at = now(), updated_at = now()
+                     where id = any($1::uuid[])`, [rows.map(r => r.id)]);
+  }
+  return rows;
+}
+
+/**
  * Who the cohort actually is.
  *
  * The question this whole table exists to answer: which leagues came in on an
@@ -381,6 +415,6 @@ module.exports = {
   PILOT_CODE, RESERVATION_DAYS,
   normalize, slugFor, publicView,
   validate, reserve, redeem, remainingFor, seedFor,
-  mintFounderPasses, releasedPasses, readyToRelease, release,
+  mintFounderPasses, releasedPasses, readyToRelease, release, quietClaims,
   shareFor, cohort, summary,
 };

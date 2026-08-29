@@ -121,4 +121,42 @@ function waitlistText({ leagueName, teams, phone, email, name, source, pendingCo
   return `${intro}\n\n${how}`;
 }
 
-module.exports = { operator, operatorPhone, waitlistText };
+/**
+ * Somebody filled the form and has a code they have not used yet.
+ *
+ * A DIFFERENT MESSAGE FROM waitlistText, deliberately. That one carries an
+ * invite command, and an invite is meaningless here: there is no signups row
+ * to invite, no phone number, and nothing for the operator to do except wait
+ * or reach out. An alert that offers an action which cannot work costs the
+ * minute somebody spends finding that out — the same mistake "Reply INVITE
+ * .com" already made once.
+ *
+ * So this one carries the code instead. That is the thing worth having: it is
+ * what the person was told to text, so it is what you quote back at them if
+ * they get stuck, and it is what ties this alert to the row when they finally
+ * do text in.
+ */
+function codeIssuedText({ leagueName, teams, name, email, plan, code, promo = null }) {
+  const size = teams ? `, ${teams} teams` : '';
+  const who = [name, email].filter(Boolean).join('  ');
+  const lines = [`Form filled: ${leagueName || 'a league'}${size}.`];
+  if (who) lines.push(who);
+  if (plan) lines.push(`Plan: ${plan}`);
+
+  /*
+   * The promo line is the reason this alert exists at all.
+   *
+   * A form-fill on a pilot code takes one of fifty slots and holds it for a
+   * fortnight whether or not the person ever texts in. That is a cost, and a
+   * cost nobody is told about is one that shows up as a cohort that filled
+   * faster than the number of leagues that actually arrived.
+   */
+  if (promo) lines.push(`Promo: ${promo} — a pilot slot is now held.`);
+
+  lines.push('');
+  lines.push(`They were told to text ${process.env.SIGNUP_KEYWORD || 'COMMISH'} ${code}. `
+           + 'Nothing to do until they do — this is just so it is not a surprise.');
+  return lines.join('\n');
+}
+
+module.exports = { operator, operatorPhone, waitlistText, codeIssuedText };

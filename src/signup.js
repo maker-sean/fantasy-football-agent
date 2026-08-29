@@ -182,10 +182,16 @@ async function record({ phone, email = null, leagueId, rawText, source = 'sms',
     /*
      * Tell the operator, here rather than at the call sites.
      *
-     * Every signup passes through this function: the texted keyword, the
-     * website form, and the conversational path that returns before handle()
+     * Every signup ROW passes through this function: the texted keyword, the
+     * email fallback, and the conversational path that returns before handle()
      * ever sees it. Alerting from handle() missed that third one, which is the
      * same early-return shape that hid the welcome and the mute. One funnel.
+     *
+     * It does NOT cover /api/signup-intent, which is the main website form and
+     * creates a signup_codes row rather than a signups row — this comment used
+     * to claim it did, and the gap sat behind that sentence until somebody
+     * asked whether they got a text when a league signed up. That endpoint
+     * alerts for itself now; see the note there.
      *
      * Only on a genuinely new row. A repeat is somebody retrying, not a second
      * lead, and alerting on it trains the one person who has to act to ignore

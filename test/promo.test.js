@@ -258,6 +258,61 @@ async function makeLeague(n, name) {
     assert.strictEqual(String(first), String(again));
   });
 
+  console.log('\nheld slots that went quiet');
+
+  await it('a fresh reservation is not a chase yet', async () => {
+    await makeCode(T + 'QUIET', { max: 5 });
+    await promo.reserve(T + 'QUIET', { sleeperLeagueId: SL(6) });
+    const rows = await promo.quietClaims({ days: 3, mark: false });
+    assert.ok(!rows.some(r => r.sleeper_league_id === SL(6)), 'today is not three days ago');
+  });
+
+  await it('one that has sat for days is reported', async () => {
+    await db.query(`update promo_claims set created_at = now() - interval '5 days'
+                     where sleeper_league_id = $1`, [SL(6)]);
+    const rows = await promo.quietClaims({ days: 3, mark: false });
+    assert.ok(rows.some(r => r.sleeper_league_id === SL(6)));
+  });
+
+  await it('it is reported once, not every night', async () => {
+    // An alert that repeats trains the one person who can act on it to ignore
+    // it — the same reason a retried signup is not a second lead.
+    const first = await promo.quietClaims({ days: 3 });
+    assert.ok(first.some(r => r.sleeper_league_id === SL(6)));
+    const second = await promo.quietClaims({ days: 3 });
+    assert.ok(!second.some(r => r.sleeper_league_id === SL(6)), 'reported twice');
+  });
+
+  await it('a slot that was redeemed or expired is not chased', async () => {
+    await db.query(`update promo_claims set alerted_at = null, state = 'redeemed'
+                     where sleeper_league_id = $1`, [SL(6)]);
+    let rows = await promo.quietClaims({ days: 3, mark: false });
+    assert.ok(!rows.some(r => r.sleeper_league_id === SL(6)), 'redeemed is not quiet');
+
+    await db.query(`update promo_claims
+                       set state = 'reserved', expires_at = now() - interval '1 day'
+                     where sleeper_league_id = $1`, [SL(6)]);
+    rows = await promo.quietClaims({ days: 3, mark: false });
+    assert.ok(!rows.some(r => r.sleeper_league_id === SL(6)), 'already expired, slot is back');
+  });
+
+  await it('the alert names the person, not just the league', async () => {
+    const notify = require('../src/notify');
+    const withPromo = notify.codeIssuedText({
+      leagueName: 'ZZ League', teams: 12, name: 'Dave', email: 'd@example.invalid',
+      plan: 'season', code: 'AB12', promo: 'REDDIT50' });
+    assert.ok(withPromo.includes('Dave'), 'the name is the point');
+    assert.ok(withPromo.includes('AB12'), 'the code ties it to the row');
+    assert.ok(/pilot slot is now held/.test(withPromo), 'the cost is stated');
+    // No invite instruction: there is no signups row to invite yet, and an
+    // action that cannot work costs the minute spent finding that out.
+    assert.ok(!/INVITE/.test(withPromo));
+
+    const organic = notify.codeIssuedText({
+      leagueName: 'ZZ League', teams: 12, name: 'Dave', code: 'AB12' });
+    assert.ok(!/Promo:/.test(organic), 'no promo line when no promo');
+  });
+
   console.log('\nwho the fifty are');
 
   await it('invited, referred and organic are told apart', async () => {
