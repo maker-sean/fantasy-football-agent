@@ -30,6 +30,7 @@ Disallow: /app
 Disallow: /v/
 Disallow: /api/
 Disallow: /success
+Disallow: /v2
 
 # OpenAI: training and ChatGPT grounding
 User-agent: GPTBot
@@ -38,6 +39,7 @@ Disallow: /app
 Disallow: /v/
 Disallow: /api/
 Disallow: /success
+Disallow: /v2
 
 # OpenAI: ChatGPT search index
 User-agent: OAI-SearchBot
@@ -46,6 +48,7 @@ Disallow: /app
 Disallow: /v/
 Disallow: /api/
 Disallow: /success
+Disallow: /v2
 
 # OpenAI: fetches a page because a user asked for it
 User-agent: ChatGPT-User
@@ -54,6 +57,7 @@ Disallow: /app
 Disallow: /v/
 Disallow: /api/
 Disallow: /success
+Disallow: /v2
 
 # Anthropic
 User-agent: ClaudeBot
@@ -62,6 +66,7 @@ Disallow: /app
 Disallow: /v/
 Disallow: /api/
 Disallow: /success
+Disallow: /v2
 
 # Anthropic, older agent string
 User-agent: anthropic-ai
@@ -70,6 +75,7 @@ Disallow: /app
 Disallow: /v/
 Disallow: /api/
 Disallow: /success
+Disallow: /v2
 
 # Perplexity
 User-agent: PerplexityBot
@@ -78,6 +84,7 @@ Disallow: /app
 Disallow: /v/
 Disallow: /api/
 Disallow: /success
+Disallow: /v2
 
 # Gemini grounding. Separate from Googlebot: blocking
 User-agent: Google-Extended
@@ -86,6 +93,7 @@ Disallow: /app
 Disallow: /v/
 Disallow: /api/
 Disallow: /success
+Disallow: /v2
 
 # Apple Intelligence
 User-agent: Applebot-Extended
@@ -94,6 +102,7 @@ Disallow: /app
 Disallow: /v/
 Disallow: /api/
 Disallow: /success
+Disallow: /v2
 
 # Common Crawl, which feeds many models downstream
 User-agent: CCBot
@@ -102,3 +111,4 @@ Disallow: /app
 Disallow: /v/
 Disallow: /api/
 Disallow: /success
+Disallow: /v2
