@@ -51,7 +51,8 @@
     "feedback": "node scripts/feedback.js",
     "make-logo": "node scripts/make-logo.js",
     "values": "node scripts/values.js",
-    "trades-backfill": "node scripts/trades-backfill.js"
+    "trades-backfill": "node scripts/trades-backfill.js",
+    "promo": "node scripts/promo.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.117.1",
