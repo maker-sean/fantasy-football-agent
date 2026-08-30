@@ -1,345 +1,173 @@
-# commish-agent
+# Commish
 
-> **Keep this repo private.** Phone numbers were scrubbed from history on
-> 2026-08-15 and replaced with reserved `555-01xx` placeholders, but the docs
-> and commit messages still quote real group-chat messages and name real league
-> members. Runtime phone numbers live only in Postgres and the gitignored
-> `logs/` — never in code.
+Commish is an AI agent that lives in a fantasy football league's group chat, answering
+questions and writing weekly recaps grounded in six seasons of that league's own history.
+This repo is public as a writeup of the design decisions behind it. It covers how you
+evaluate output that has no right answer, what broke in production, and why the model
+layer is split three ways.
 
+## What it is, and why it exists
 
-An AI agent that sustains fantasy football league engagement year-round — the
-dead period after the draft when league chatter dies off.
+Commish is an AI agent that lives inside a fantasy football league's group chat, the real
+thread on iMessage and RCS rather than a separate app anyone would have to be persuaded to
+open. It holds six seasons of league history in Postgres (582 games, 1,020 draft picks,
+2,297 transactions) and speaks into the thread on its own schedule. It writes a weekly
+recap that names what actually happened, sends draft countdowns, grades trades, runs
+waiver post-mortems, and answers directly whenever somebody addresses it. It exists
+because a league's group chat is at its best for about three weeks a year. After the draft
+the conversation dies, and the league's own history sits unread in an app nobody opens on
+a Tuesday, including the closest game ever played, the playoff run that started from
+fourth, and the manager who has made 390 roster moves and won nothing. The bet is that the
+material is already there and what is missing is something to bring it up unprompted. It
+went live in a real 12-person league on 22 August 2026, and 11 of the 13 people on the
+thread talked to it in the first two hours.
 
-## TRANSPORT: SENDBLUE. Blooio is retired.
+## Where to look
 
-**Sendblue is the active provider.** Blooio failed Milestone 0 and remains in
-the tree only as a negative control and as proof the adapter seam works. Do not
-build against it.
+The four files that carry most of the reasoning below.
 
-| Provider | Mixed-device group send | Status |
-|---|---|---|
-| **Sendblue** | **works** — Android member received it | **ACTIVE** |
-| Blooio | fails — `device_send_error` 4 | retired, do not use |
-
-### Milestone 0 result
-
-Blooio, on trial number `+15555550101`, 2026-08-11:
-
-| Target | Composition | Transport | Result |
-|---|---|---|---|
-| `grp_AAAAAAAAAAAAAAAA` | all-Apple group | `imessage` | sent ✅ |
-| `+15555550105` (1:1) | single Android | `rcs` | delivered ✅ |
-| `grp_CCCCCCCCCCCCCCCC` | mixed group | `pending` | **failed** — `device_send_error` 4 |
-| `grp_BBBBBBBBBBBBBBBB` | mixed group | `pending` | **failed** — `device_send_error` 4 |
-
-Blooio reaches Apple users in groups and Android users 1:1 over RCS, but cannot
-send into a group containing a non-iMessage member. Two endpoints hit the
-identical failure while the same path succeeded on an all-Apple group, so
-composition was the variable, not the API. `protocol: pending` means no wire
-service ever resolved — the send died at Blooio's Mac before a transport was
-chosen, consistent with a Mac being unable to originate an MMS/RCS *group*.
-
-Sendblue, on line `+15555550100`, same participants:
-
-| Target | Composition | Result |
-|---|---|---|
-| `sb_group_22222222-2222-2222-2222-222222222222...` | all-Apple group (2 + line) | **sent** ✅ |
-| mixed group (2 iMessage + 1 Android) | mixed | **Android member received it** ✅ |
-
-Sendblue also creates groups on the **Free Tier** (`"plan": "free_api"`,
-`"message_type": "group"`), contrary to its docs claiming Blue Ocean is
-required.
-
-**Consequence:** in-group is viable. The 1:1-concierge fork stays closed unless
-something later reopens it.
-
-### Inbound: use POLLING, not webhooks
-
-**Sendblue's `receive` webhook does not fire for group messages.** Measured
-2026-08-15 with a verified, reachable receive webhook registered:
-
-| Message | `message_type` | Webhook fired? |
-|---|---|---|
-| 1:1 iMessage | `message` | **yes** |
-| group reply (×3, all after registration) | `group` | **no** |
-
-Every one of those group replies *was* recorded server-side and is readable at
-`GET /api/v2/messages` with a correct, stable `group_id`. The data is there;
-the push is not. Since the entire product lives in a group thread, webhooks
-cannot drive the reactive path on this provider.
-
-`src/poller.js` + `npm run poll` is the inbound transport. This is not purely a
-downgrade — it needs no tunnel and no public URL, it survives restarts via a
-durable cursor instead of losing whatever arrived while the process was down,
-and group and 1:1 share one code path. The cost is one poll interval of latency.
-
-`/webhooks/sendblue` still works and is kept for 1:1 and for the day Sendblue
-fixes this. Do not rely on it for groups.
-
-### Inbound correlation: PASSED
-
-From live data, all replies in the mixed group:
-
-- **one** `group_id` (`sb_group_00000000-0000-0000-0000-000000000000...`) across every message
-- **three** distinct senders resolved correctly, including the Android member
-- group traffic is `RCS` for *all* members — one non-Apple participant pulls the
-  whole thread off iMessage, exactly as Blooio showed
-- 1:1 to an iMessage member stays `iMessage` and is correctly not counted as group
-
-### PHASE 0 CLOSED — full round trip in a mixed-device group
-
-2026-08-15, `sb_group_00000000-0000-0000-0000-000000000000...` (2 iMessage + 1 Android + the line):
-
-```
-OUT 17:34  SENT      RCS  group  "[bot message redacted]"
-IN  17:35  RECEIVED  RCS  group  "[league member reply redacted]"
-IN  17:36  RECEIVED  RCS  group  "[league member reply redacted]"
-```
-
-Bot spoke into the group, two humans replied to it inside two minutes. Both
-directions work with a non-Apple member present. `was_downgraded` is null
-throughout — the thread is natively RCS rather than a fallback.
-
-Treat the reply count as encouraging, not evidence. n=1, the novelty is
-maximal, and the participants know whose bot it is. The Phase 2 measurement —
-**human replies triggered per bot message**, over weeks, in a league the owner
-does not run — is the one that decides the product.
-
-### Still unproven
-
-1. **Group size.** Tested at 4 participants. Leagues are 11–13, and group MMS
-   caps bite at 8–10 across carriers. Kill risk of the same class as device mix.
-2. **Poll latency and rate limits** under a real league's message volume.
-3. **Persistence.** Until `DATABASE_URL` is set, every message is read and
-   discarded — including exactly the banter Phase 3's narrative memory needs.
-
-### Vendor landscape (surveyed 2026-08)
-
-| Provider | Mixed devices in one group? | Cap |
-|---|---|---|
-| Sendblue | **yes** (measured) | untested above 4 |
-| Blooio | no (measured) | ~29 all-Apple |
-| LoopMessage | no — iMessage groups only | ~29 all-Apple |
-| Twilio Conversations | yes (group MMS) | 10 total |
-| Telnyx | yes (group MMS) | 9 total |
-| Linq | unclear — worth asking | 31 array; carrier ~10–20 |
-
-## Architecture (non-negotiable)
-
-| Seam | Where | Why |
-|---|---|---|
-| `MessagingProvider` | [src/provider.js](src/provider.js), [src/sendblue.js](src/sendblue.js) | Agent and league logic never import a vendor. Swapping transports is one new class — this is what let Blooio be replaced by Sendblue in an hour instead of a rewrite. |
-| League registry | [src/db.js](src/db.js) `leagues` | One service, many leagues. Inbound routes on `(provider, chat_id)`. Never hardcode a league. |
-| Reply-first + rate limit | [src/agent.js](src/agent.js) | UX *and* survival — chatty automated numbers get carrier-flagged. |
-| Identity = normalized E.164 | [src/db.js](src/db.js) `members` | NOT a provider contact id. Blooio minted two `contact_id`s for one human in one group; a roster keyed on those would double-count every league. |
-| Snapshots are insert-only | [0001_init.sql](supabase/migrations/0001_init.sql) | A kickoff lineup cannot be reconstructed later. A re-run must never overwrite the original capture. |
-| A vote is anchored to a member, not a browser | [0015_ballots.sql](supabase/migrations/0015_ballots.sql), [src/ballotlink.js](src/ballotlink.js) | The obvious design fingerprints IP + User-Agent. At ten voters that both collides (two housemates on one wifi) and duplicates (Private Relay rotates). The voting link is minted per member and signed, so the webview stays zero-auth without the vote being anonymous. |
-
-## Deploy (Render)
-
-One **background worker**, not a web service. Inbound is polling, so there is no
-port to bind — and a free Render *web* service sleeps on inactivity, which would
-stop the poller and every kickoff capture with it.
-
-1. Render Dashboard → **New → Blueprint** → point at this repo. It reads
-   [`render.yaml`](render.yaml).
-2. Render prompts for the five secrets (`sync: false` in the blueprint, so they
-   are never in git):
-   `DATABASE_URL`, `SENDBLUE_API_KEY_ID`, `SENDBLUE_API_SECRET_KEY`,
-   `SENDBLUE_FROM_NUMBER`, `ANTHROPIC_API_KEY`.
-3. Apply the migrations against Supabase once, from your laptop:
-   ```bash
-   for f in supabase/migrations/*.sql; do psql "$DATABASE_URL" -f "$f"; done
-   ```
-4. Watch the logs. A healthy boot prints the database time, each registered
-   league, the current NFL state, every scheduled cron, and the poll cursor.
-
-### Things that bite
-
-- **`BALLOT_SECRET` must match on both services.** The worker mints voting
-  links, the web app verifies them. Two different values, or one unset, and
-  every `/v/` link returns 404 with nothing in either log saying why.
-
-- **`CRON_TZ=America/New_York`** — NFL slates are Eastern. The wrong timezone
-  fires kickoff captures at the wrong hour and loses lineups with no error.
-- **One instance.** Two pollers double-process every message and the bot answers
-  twice. Inserts are idempotent so nothing corrupts, but the league sees it.
-- **The poll cursor lives in Postgres, not on disk.** Render's filesystem is
-  ephemeral; a file cursor would be wiped on every deploy, and the poller would
-  re-bootstrap and silently skip everything that arrived while it restarted.
-- **Start in `REPLY_DRY_RUN=true`.** It decides and logs against live traffic
-  without speaking. Read a few days of the `decisions` table before flipping it.
-
-## Setup
-
-```bash
-npm install && cp .env.example .env
-```
-
-Fill in `.env`:
-
-| Var | Where from |
+| File | What it does |
 |---|---|
-| `SENDBLUE_API_KEY_ID` / `SENDBLUE_API_SECRET_KEY` | `sendblue show-keys` |
-| `SENDBLUE_FROM_NUMBER` | `sendblue lines` — **required on every send** |
-| `DATABASE_URL` | Supabase → Project Settings → Database → Connection string (URI) |
+| [`src/stats.js`](src/stats.js) | Computes every number the bot says out loud, deterministically, with no model in the loop. The split that makes the rest testable. |
+| [`src/decide.js`](src/decide.js) | Decides whether to reply at all. Layered, defaults to silence, and documents why the two failure directions are not symmetric. |
+| [`scripts/retrieval-bench.js`](scripts/retrieval-bench.js) | The paired full-context versus routed-context harness. Scored on facts lost, not tokens saved. |
+| [`scripts/decide-replay.js`](scripts/decide-replay.js) | Replays real recorded group traffic through the reply gate offline, so "would this have been annoying?" is answerable without sending anything. |
 
-Apply the schema, then register a league:
+## Evaluating output with no right answer
 
-```bash
-psql "$DATABASE_URL" -f supabase/migrations/0001_init.sql
-```
+The hard part of this product is that its output has no right answer. There is no label
+for whether a roast landed. My response was to make most of the problem have a right
+answer anyway, with a strict split where [`src/stats.js`](src/stats.js) computes every
+number deterministically, with no model in the loop and full unit test coverage, and the
+model is handed those numbers and permitted only to supply voice. Arithmetic becomes
+testable and the genuinely subjective residual shrinks to something small enough to judge
+by hand. For that residual I lean on paired comparison and on behavior rather than on
+rubrics. [`scripts/retrieval-bench.js`](scripts/retrieval-bench.js) runs the same twelve
+questions with the full league context and with a routed subset, and the metric is
+deliberately not token count. It is whether the routed answer *lost a fact* the full
+answer had, because that is the failure a cost saving can hide.
+[`scripts/decide-replay.js`](scripts/decide-replay.js) replays real recorded group traffic
+through the reply gate offline and answers "would this bot have been annoying?" without
+sending anything, which matters because tuning a chattiness threshold against live humans
+is expensive and, if you overshoot, unrecoverable. `REPLY_DRY_RUN` does the same thing
+against live traffic while staying silent.
 
-```bash
-node scripts/register-league.js --name "My League" --sleeper <sleeper_league_id> --chat <sb_group_id> --from +1XXXXXXXXXX
-```
+**The metric that decides the product is whether a bot message pulls a human back into
+the thread. It's running at 94%.**
 
-Two processes:
+That number needs its caveats stated, because they're most of it. One league. Eight days.
+Reactions count as engagement, and a tapback is cheap. Everyone on the thread knows whose
+bot it is, and novelty is at its peak. The measurement that would mean something is the
+same number in month three, in a league I don't run, and it isn't in yet. But it's the
+number the whole design points at, and it's the right one to be watching.
 
-```bash
-npm start     # web: webhook receiver, persists inbound
-```
+## What broke
 
-```bash
-npm run worker  # cron: Sleeper ingestion + kickoff snapshots
-```
+The failure modes were mostly not the ones I expected, and almost none of them were the
+model writing badly. The dominant one was the model computing something it should have
+been handed. Asked who had the most top-three finishes, it read twelve rows and answered
+"A and B, three each". Asked the same question slightly differently a minute later, it
+said "B and C, two each". Both wrong, disagreeing with each other, off a list sitting in
+front of it. Ranking is precisely the operation nobody can verify after the fact.
 
-## Sendblue notes (verified by measurement)
+The same thing happens one row over. Handed a table that correctly said one manager was
+0-3 on trade value and another was 0-2, the bot answered that both were 0-3. Both numbers
+were printed correctly. One had been carried onto the neighbouring name.
 
-- Base URL `https://api.sendblue.co`. Auth is **two** headers: `sb-api-key-id`, `sb-api-secret-key`.
-- **`from_number` is required on every send.** Omitting it fails everything with a generic 400.
-- `POST /api/send-group-message` with `numbers[]` creates a group and returns `group_id`.
-  Follow up with `{group_id, content}` — no `numbers`.
-- `QUEUED` is **not** delivery. Lifecycle: `REGISTERED → PENDING → QUEUED → ACCEPTED → SENT → DELIVERED`,
-  with `DECLINED`/`ERROR` terminal. Always confirm with `npm run sendblue-status`.
-- Inbound webhook: `from_number`, `to_number`, `content`, `media_url`, `service`, `group_id`, `date_sent`.
-  There is **no event field** — inbound and status callbacks arrive on different URLs, so the route supplies the type.
-- Free Tier is **reply-only**: contacts must text the line first, max 10, shared number.
-  Same shape as Blooio's `inbound` allocation. A shared line is fine for testing and
-  wrong for a league that expects a persistent bot identity.
-- `was_downgraded` and `service` are the fields that reveal whether a mixed group
-  got pushed off iMessage.
+That's worse than a hallucination. An invented number often looks wrong. A fused one never
+does.
 
-Useful commands:
+The second was the bot talking to itself. iMessage tapbacks arrive over the wire as ordinary
+group messages whose body wraps a *quote* of the thing reacted to, so on launch night 47
+reactions appeared and the bot dutifully answered its own echo. Nineteen of those were the bot
+replying to a quote of its own name. It was having a great time.
 
-```bash
-npm run sendblue-preflight -- 5555550103 5555550105   # who still needs to text the line
-npm run sendblue-group -- 'message' 5555550103 5555550105
-npm run sendblue-status                               # what actually happened
-```
+The third was the worst. A league received its draft-day announcement twice, correctly on
+Saturday evening and then again at 2:40pm Sunday, five hours before its own draft. The
+announcer's timing logic was right. The test suite was the bug. `test/draftannounce.test.js`
+ran `delete from system_flags` in four places against the same database the product uses,
+wiping every live league's "already announced" marker, and running the suite that afternoon is
+what sent the text.
 
-## Phase 1 — snapshots (the deadline-bound work)
+Smaller ones cost real trust too. "Commish" is a *human* in every league, so a bot answering to
+it barges into conversations about a person, and answering "nothing on record for that name"
+about a manager who is simply new reads as a broken lookup rather than a true statement.
 
-Sleeper serves *current* state only. Once games kick off, the pre-kickoff
-starting lineup is gone — you can no longer tell who benched a 30-point week.
-That is most of the roast material and it has a hard deadline of the season's
-first kickoff.
+## What changed
 
-```bash
-node scripts/snapshot.js lock_sun_early --force   # prove it works in preseason
-node scripts/snapshot.js --list                   # what has been captured
-node scripts/snapshot.js --jobs                   # did the cron actually fire
-```
+Grounding stopped being a prompt instruction and became a structural constraint. Every
+superlative the bot is allowed to utter is now precomputed into an explicit `LEAGUE
+EXTREMES` block, ties are printed as ties, and any ranking not in that block is off limits
+no matter how obvious it looks from the data. The designed answer to an unanswerable
+superlative became refuse-then-redirect. Decline the ranking, then immediately hand over
+the nearest fact that *is* computed, because refusing alone is a worse answer than the
+question deserved. Reactions are now pattern-detected and excluded as a *reason* to speak
+while still being kept in conversation history. The test suite incident produced three
+fixes rather than one. Cleanup is scoped to each file's own fixture league, and the single
+test that needs a live league refuses any league already carrying a flag and deletes only
+what it wrote. All countdown copy is anchored to absolute dates, since "draft is tomorrow"
+is a claim about when a message is *read* and nothing controls that. And each notice got a
+bounded window so a late fire is never due again, because a missed notice beats a wrong
+one.
 
-Captures are gated on `season_type === 'regular'` (currently `pre`), so
-`--force` is how you exercise the path before it matters.
+## Deterministic data, nondeterministic reader
 
-Cron (ET, in `worker.js`): `lock_thu` Thu 20:15 · `lock_sun_early` Sun 12:55 ·
-`lock_sun_late` Sun 15:55 · `lock_sun_night` Sun 20:10 · `lock_mon` Mon 20:10 ·
-`postscore` Tue 06:00 · `players` daily 04:00 · `members` daily 04:30.
+Everything this bot talks about is already exact. Six seasons of scores, records and draft
+picks sit in Postgres as rows that do not move. The model is the only nondeterministic
+component in the system, and nearly every real failure came from putting those two things
+together carelessly. The lesson the codebase kept relearning, written into
+[`src/draftgrade.js`](src/draftgrade.js) after it had already been learned in four other
+places, is that a model quotes reliably and fuses unreliably.
 
-## Commissioner console — required capabilities
+The model's access to the data was narrowed until quoting was the only thing left to do.
+Numbers are computed in [`src/stats.js`](src/stats.js). Draft observations are written as
+finished sentences in code and the model is asked to repeat them rather than derive them.
+Projections are labelled as Sleeper's, and adjusting, averaging or totalling them is forbidden
+outright. Every one of those rules closed a hole where the model had been free to do arithmetic
+or comparison on data that was already correct before it arrived.
 
-Not built. Recorded here as it becomes clear what it has to do, so the first
-version is designed rather than guessed.
+The same reasoning drives the decisioning layer, which is the one place the model touches
+nothing at all. [`src/decide.js`](src/decide.js) runs layers in order and the first to
+return a verdict settles it. Layer 0 is hard suppression, Layer 1 is direct address, and
+both are ordinary deterministic code. Layer 2, heuristic interjection, and Layer 3, a gate
+model, exist in the structure as stubs that throw if called. Whether the bot speaks is
+decided today without asking a model anything. That is deliberate rather than unfinished.
+The cost of a wrong decision to speak is a muted number you are never told about and
+cannot undo, so the judgment carrying the most risk is the one held furthest away from the
+nondeterministic part of the system.
 
-**Identity — the reason it exists.** Bindings are write-once by design, because
-a phone number is verified and a team claim is not (see `identity_claims`).
-That makes a commissioner override necessary rather than optional:
+## Architecture
 
-- [ ] View every member: phone, team, display name, who bound it and when
-- [ ] **Rebind a phone to a different team** — the `--force` path, with the
-      previous binding recorded. This is the only way to fix a wrong claim.
-- [ ] Rename a member (cosmetic; must never move the team binding)
-- [ ] Unbind a phone entirely, e.g. someone leaves the league
-- [ ] Review rejected claims — a second person claiming a taken team is either
-      a mistake to fix or someone probing what the bot will believe
-- [ ] See which league members have no phone yet, and which phones are unmapped
+It is a Node worker against Postgres, with the seams placed where vendors and models are
+likely to move. Snapshots are insert-only and captured on a kickoff cron, because Sleeper
+serves current state only, and the pre-kickoff starting lineup, which is most of the roast
+material, is unrecoverable once games begin. A [`MessagingProvider`](src/provider.js)
+interface keeps league logic from importing any vendor, which is what let the first SMS
+provider be swapped out in an hour when it turned out it could not send into a group
+containing a single Android phone. Inbound runs by polling with the cursor in Postgres
+rather than by webhook, because the active provider's receive webhook silently never fires
+for group messages and the host's disk is ephemeral.
 
-**League settings**, all of which live in `leagues.config` today and are edited
-by hand with SQL:
+The model layer is deliberately three-tier. Haiku 4.5 does classification only. It reads
+the question and picks context sections off a fixed menu in
+[`src/retrieve.js`](src/retrieve.js), and it is explicitly not allowed to compose a lookup.
+That constraint is the architectural decision I am most willing to defend. The recurring
+failure in this codebase is a model deriving a fact it should have been handed, and a
+router that wrote its own query would have put the system straight back into that business
+for a saving I did not need. For the same reason I made the router **fail open**, so on
+error, timeout, or nonsense it loads the entire context, which is exactly the behavior that
+shipped before the router existed. The cost of that choice is a slow, expensive reply. The
+cost of failing closed is a confident answer with a section missing. I'd rather pay for
+the slow reply.
 
-- [ ] Bot trigger names (`botNames`) — the league picked "Jarvis" unprompted
-- [ ] Owner phone(s) for recap approval
-- [ ] Spice level, recap length
-- [ ] Auto-post toggle — skip approval once a league has earned trust
-- [ ] Pause the bot without deploying
-
-**Recaps:**
-
-- [ ] Read a pending draft and approve or kill it (the phone flow, on a screen)
-- [ ] See past recaps and whether they were sent
-
-**Access:** every one of these is a privileged action on other people's
-identities and messages, so the console needs real auth before it holds
-anything beyond one league the author runs.
-
-## Assumed, not measured — revisit with real data
-
-- **Recap length: 100 words** (`RECAP_WORDS`, or `--words`). Short keeps it
-  reading as a group text rather than an announcement, and announcements get
-  acknowledged instead of answered. The cost is real: a six-game week produces
-  more good material than 100 words can carry. Decide it on reply rate once the
-  bot posts weekly — generate the same week at 100 and 180 and compare.
-- **Spice default: 1 of 3** (`--spice`). Never tested against a live league.
-- **Burst debounce: 8s quiet / 30s ceiling** (`BURST_QUIET_MS`). Picked to feel
-  natural at a 10s poll; never measured against real conversation rhythm.
-
-## Still open
-
-- [ ] **Inbound correlation on Sendblue** — replies from both device types landing on one `group_id`. Phase 2 depends on it.
-- [ ] **Group size** — tested at 4 participants; leagues are 11–13, group MMS caps at 8–10.
-- [x] Webhook signature verification. Done, and narrower than this line implied:
-      the only webhook route is `/webhooks/linq`, it verifies the HMAC and 503s
-      when no secret is set. Sendblue is `inboundMode: 'poll'`, so the transport
-      actually in production has no inbound endpoint to forge. The warning
-      outlived the design it was written against.
-- [ ] Per-league unit economics (MMS cost vs price) — the Phase 4 gate.
-
-## Constraints (researched — don't re-derive)
-
-- No official iMessage API. These vendors run real Apple hardware; **ban risk is real**. Rent, never self-host a Mac farm.
-- Bans come from carriers, not vendors, and a banned number is unrecoverable. A banned identity cannot rejoin an existing group thread.
-- iMessage groups require every participant on iMessage (~29 cap). Group MMS is carrier-capped near 10. Leagues run 10–12.
-- Sendblue clears the device-mix wall. The **size** wall is untested.
-- Side bets are state-by-state regulated. Later, carefully scoped. The messaging layer does not make wagering legal.
-
-## Roadmap (phased by risk retirement, not feature completeness)
-
-- **P0** — transport proof. Device mix ✅ (Sendblue). Inbound correlation and group size ⬜
-- **P1** — echo loop + Sleeper snapshot capture. ← *you are here*
-- **P2** — thinnest valuable bot. Metric: **human replies per bot message**. This is the product go/no-go.
-- **P3** — narrative memory, league culture, spiciness/presence dials. Pilot in a league you don't run.
-- **P4** — productize: onboarding, multi-tenant, Stripe, ban recovery. Gate: unit economics.
-- **P5** — harden and scale only as load demands.
-
-## Historical: why Blooio was retired
-
-Kept because the reasoning is load-bearing and re-deriving it costs a day.
-
-Blooio's group send requires a linked iMessage chat; `POST /groups` without
-`chat_guid` creates a record with no thread, so sends returned `202` and went
-nowhere. The multi-recipient participant-list form worked on all-Apple groups
-and failed on mixed ones with `device_send_error` code 4 and `protocol: pending`
-— no wire service ever resolved. Its allocations are `shared`/`dedicated`/
-`inbound`/`trial`/`2fa`, where `inbound` is reply-only
-(`403 inbound_only_no_prior_inbound`). Its messaging-safety caps are worth
-remembering for any vendor: max 3 messages to a new recipient before they
-respond, a consecutive-message streak cap, one re-engagement message after 14
-days silent, and no links or media before the recipient writes back — **a
-tapback clears the streak counter**, which makes "get one reaction" a real
-engagement mechanic rather than a nicety.
-
-`scripts/whoami.js`, `scripts/groups.js`, `scripts/inspect.js`,
-`scripts/capabilities.js`, and `scripts/simulate-webhook.js` are Blooio-only and
-retained for reference.
+Sonnet is the workhorse for both generating surfaces, the weekly recap and the direct
+answer. It earns that spot because the binding constraint here is not throughput. Every
+generation is gated by a human addressing the bot or by a once-a-week recap, so volume is
+inherently low. The constraint is voice quality at a latency a live group chat will
+tolerate, and Sonnet clears the voice bar while staying fast enough that a reply lands
+while people are still looking at the thread. The stable persona prefix is marked with
+`cache_control`, so the expensive part of each call is cached and the marginal cost per
+message is just the league context and the reply. On launch night, 57 generated replies
+over two hours cost about fifty cents. Opus is wired in as the comparison for production
+weeks rather than the default, on the view that the model should be the last thing scaled
+up, after the grounding is structural enough that a bigger model would only be buying prose.
