@@ -41,7 +41,22 @@ function due(schedule, now = Date.now()) {
   if (start && status === 'pre_draft') {
     // Past the mark and not yet started. Both can be due at once if the bot was
     // asleep, and the caller sends only the latest — see run().
-    if (now >= start - 24 * HOUR && now < start) out.push('t24');
+    /*
+     * BOUNDED WINDOWS, not "any time before the draft".
+     *
+     * t24 was due from 24 hours out right up until the draft started, so a
+     * fire at any point in that day counted as the day-before notice — which
+     * is how a league got the day-before message five hours before its draft.
+     * The copy no longer lies when that happens, but a day-before notice sent
+     * on the day is still not a day-before notice.
+     *
+     * Four hours of slack on each: enough that a worker restart or a slow tick
+     * does not silently drop an announcement, short enough that neither can
+     * arrive somewhere it does not belong. Missing one is better than sending
+     * it at the wrong time — the reader cannot tell a late notice from a
+     * confused one.
+     */
+    if (now >= start - 24 * HOUR && now < start - 20 * HOUR) out.push('t24');
     if (now >= start - 1 * HOUR && now < start) out.push('t1');
   }
   if (status === 'complete') out.push('recap');
@@ -70,17 +85,37 @@ function whenText(startsAt, tz = 'America/New_York') {
   });
 }
 
-/** The countdown messages. Short on purpose: this is a nudge, not a briefing. */
+/**
+ * The countdown messages. Short on purpose: this is a nudge, not a briefing.
+ *
+ * ANCHORED TO THE DATE, NEVER TO "TOMORROW".
+ *
+ * This said "Draft is tomorrow" and that was true at the moment it was composed
+ * and false by the time it was read. On 2026-08-30 a league got the identical
+ * "Draft is tomorrow: Sunday, August 30" message twice — once at 8:21pm
+ * Saturday, when it was correct, and again at 2:40pm Sunday, five hours before
+ * the draft, when the draft was that evening.
+ *
+ * A relative word is a claim about WHEN IT IS READ, and nothing here controls
+ * that. The message can be delayed, retried, resent after a marking failure, or
+ * read the next morning by somebody who was asleep. A date is true whenever it
+ * arrives, so that is what these say now. The relative framing survives only as
+ * urgency — "starting soon" — which is vague enough to stay honest and is the
+ * only part that was ever doing real work.
+ *
+ * Weekday included deliberately: "Sunday, August 30" is checkable against the
+ * reader's own sense of what day it is in a way that a bare date is not.
+ */
 function countdownText(phase, schedule) {
   const when = whenText(schedule.startsAt);
   const rounds = schedule.rounds ? `${schedule.rounds} rounds` : null;
   if (phase === 't24') {
-    return `Draft is tomorrow: ${when}.`
+    return `Draft day: ${when}.`
       + (rounds ? ` ${rounds}.` : '')
       + (schedule.orderSet ? '' : ' Draft order still is not set.')
       + ' Set your queue now if you cannot be there live.';
   }
-  return `Draft starts in an hour, ${when}.`
+  return `Draft starting soon — ${when}.`
     + (schedule.pickSeconds ? ` ${Math.round(schedule.pickSeconds / 60)} minutes a pick.` : '')
     + ' Last call to set a queue — autopick does not care what you wanted.';
 }
@@ -166,15 +201,13 @@ async function run(provider, { dryRun = false, now = Date.now() } = {}) {
         continue;
       }
       /*
-       * A countdown that was superseded is marked WITHOUT sending, so a league
-       * that only ever gets the one-hour warning is not told tomorrow about a
-       * draft that already happened.
+       * There used to be a supersede step here: when a sleeping worker woke to
+       * find both countdowns due, it marked t24 without sending so the
+       * day-before notice could not go out after the draft. The bounded windows
+       * in due() make that unreachable — t24 lives in [-24h, -20h) and t1 in
+       * [-1h, 0), which cannot overlap — so a t24 that missed its window is
+       * simply never due again, and there is nothing to suppress.
        */
-      if (phase === 't1' && phases.includes('t24')
-          && !(await alreadySent(lg.id, schedule.draftId, 't24'))) {
-        await markSent(lg.id, schedule.draftId, 't24', { superseded: true });
-      }
-
       let text;
       try {
         text = phase === 'recap' ? await recapText(lg) : countdownText(phase, schedule);
@@ -185,13 +218,32 @@ async function run(provider, { dryRun = false, now = Date.now() } = {}) {
       if (!text) { detail.skipped.push({ league: lg.name, phase, why: 'nothing to say yet' }); continue; }
 
       if (dryRun) { detail.sent.push({ league: lg.name, phase, dryRun: true, text }); continue; }
+      /*
+       * SENDING AND MARKING ARE SEPARATE FAILURES.
+       *
+       * They shared a try, so a marking failure was reported as a send failure
+       * — and the comment underneath said "not marked, so it goes again",
+       * which was exactly wrong in that case: the message HAD gone, and going
+       * again meant sending it twice. A duplicate announcement in a group chat
+       * is worse than a missing one.
+       *
+       * So a send that succeeded is marked in its own try, and a failure to
+       * mark is loud rather than silently queuing a repeat.
+       */
       try {
         await provider.send(lg.chat_id, text, { leagueId: lg.id });
+      } catch (err) {
+        // Genuinely not sent. Unmarked on purpose: the next pass retries.
+        detail.skipped.push({ league: lg.name, phase, why: `send failed: ${err.message}` });
+        continue;
+      }
+      try {
         await markSent(lg.id, schedule.draftId, phase, { at: new Date().toISOString() });
         detail.sent.push({ league: lg.name, phase });
       } catch (err) {
-        // Not marked, so it goes again on the next pass.
-        detail.skipped.push({ league: lg.name, phase, why: `send failed: ${err.message}` });
+        detail.sent.push({ league: lg.name, phase, unmarked: true });
+        console.error(`[draft-announce] SENT BUT NOT MARKED for ${lg.name} (${phase}): `
+                    + `${err.message} — it may go again`);
       }
     }
   }
