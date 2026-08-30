@@ -287,6 +287,192 @@ function lineupImpact(trade, { rosters, rosterPositions, proj }) {
  * @param weaknesses  what the grade already calls thin, so a skipped position is
  *                    only mentioned when it actually cost them
  */
+
+/**
+ * What a draft was worth, measured against what was on the board.
+ *
+ * THE NUMBER THAT MATTERS IS NOT POINTS, IT IS POINTS OVER REPLACEMENT.
+ * Measured on the real 2026 projections for a 12-team, 1QB/2RB/2WR/1TE/1FLEX
+ * league: Josh Allen is the highest-projected player in football at 361.5, and
+ * he is worth +65.8 over the twelfth quarterback. Jahmyr Gibbs projects thirty
+ * points LOWER and is worth +183.5, because the thirty-sixth running back is
+ * not remotely Gibbs while the twelfth quarterback is nearly Josh Allen.
+ *
+ * A grade built on raw points says take Allen first. Every experienced drafter
+ * in the league knows that is wrong, and a grade that disagrees with them about
+ * something so basic will not be believed about anything else.
+ *
+ * WHY NOT ADP. Average draft position measures what the market would have paid;
+ * this measures what the points justify. For a grade the second is the better
+ * question, and it needs no external source that can quietly go stale — the
+ * projections are already pulled for the lineup grade.
+ *
+ * THE METHOD is a replay. Walk the picks in order, and at each one compare the
+ * value of the player taken against the best value still on the board. A
+ * manager who always took the best available scores 100%. Someone who opened
+ * with the second-best quarterback left roughly 150 points sitting there, and
+ * this says so to the point.
+ *
+ * @param picks   every pick in order: [{ pick_no, roster_id, player_id }]
+ * @param proj    Map of playerId -> { points, position, name }
+ * @param rosterPositions  the league's own slots, so replacement is its own
+ */
+function draftValue({ picks = [], proj, rosterPositions = [], teams = 12 } = {}) {
+  if (!proj || !picks.length) return null;
+
+  const slots = (rosterPositions || []).filter(sl => SLOT_ELIGIBILITY[sl]);
+  if (!slots.length) return null;
+
+  /*
+   * Replacement is the last player at a position anybody would still start,
+   * counted from THIS league's slots — dedicated plus every flex he is
+   * eligible for. A league with a superflex has a completely different
+   * quarterback replacement level, and using a league-average one would grade
+   * it wrongly in the one place it is most distinctive.
+   */
+  const byPos = {};
+  for (const v of proj.values()) {
+    if (v && v.position && v.points != null) (byPos[v.position] ||= []).push(v);
+  }
+  for (const list of Object.values(byPos)) list.sort((a, b) => b.points - a.points);
+
+  const replacement = {};
+  for (const pos of Object.keys(byPos)) {
+    const dedicated = slots.filter(sl => sl === pos).length;
+    const flex = slots.filter(sl => sl !== pos && SLOT_ELIGIBILITY[sl].includes(pos)).length;
+    const rank = teams * (dedicated + flex);
+    // A position nobody starts has no replacement level and no value here.
+    replacement[pos] = rank > 0 && byPos[pos].length >= rank
+      ? byPos[pos][rank - 1].points : null;
+  }
+
+  const vorpOf = id => {
+    const v = proj.get(String(id));
+    if (!v || v.points == null || !v.position) return null;
+    const base = replacement[v.position];
+    return base == null ? null : { player: v, vorp: v.points - base };
+  };
+
+  /*
+   * THE BOARD IS WHO WAS ACTUALLY DRAFTED, not every projected player.
+   *
+   * The first version built it from all 555 projections and produced nonsense
+   * on a keeper league: the best draft in the league scored 22% and the worst
+   * scored 0.2%, because in a six round rookie draft almost every good player
+   * is already on somebody's roster and was never available. It reported a
+   * pick-68 flier as a 230 point reach "instead of Bijan Robinson", who had
+   * been rostered since 2024.
+   *
+   * Restricting it to players this draft actually produced is knowable and
+   * close to true: anybody who went undrafted was, by twelve managers' revealed
+   * preference, not worth a pick. It understates the board slightly when a good
+   * player genuinely goes unclaimed, which is a bounded and honest error — and
+   * it makes the comparison the one people actually care about, which is
+   * against what their leaguemates did.
+   */
+  const draftable = new Set(picks.map(pk => String(pk.player_id)).filter(Boolean));
+  const board = [];
+  for (const id of draftable) {
+    const got = vorpOf(id);
+    if (got && got.vorp > 0) board.push({ id: String(id), ...got });
+  }
+  board.sort((a, b) => b.vorp - a.vorp);
+  // Where each drafted player sat on that board, one-indexed.
+  const boardRank = new Map(board.map((b, i) => [b.id, i + 1]));
+
+  const taken = new Set();
+  const teamsOut = new Map();
+  const ordered = [...picks].sort((a, b) => (a.pick_no || 0) - (b.pick_no || 0));
+
+  for (const pk of ordered) {
+    const rid = Number(pk.roster_id);
+    if (!teamsOut.has(rid)) {
+      teamsOut.set(rid, { rosterId: rid, captured: 0, available: 0, picks: 0,
+                          steal: null, reach: null });
+    }
+    const t = teamsOut.get(rid);
+
+    // The best thing nobody had taken when this pick was made.
+    const best = board.find(b => !taken.has(b.id));
+    const got = vorpOf(pk.player_id);
+    taken.add(String(pk.player_id));
+
+    // A pick of somebody with no projection is not a reach, it is a flier on
+    // a player the projections have never heard of. Counted as zero captured,
+    // and not held against the available side either — see below.
+    if (!best) continue;
+    const mine = got && got.vorp > 0 ? got.vorp : 0;
+
+    t.picks++;
+    t.captured += mine;
+    t.available += best.vorp;
+
+    const left = best.vorp - mine;
+    // The pick where the most was left on the table, and the one where they
+    // took the best thing there by the widest margin over the next man gone.
+    if (!t.reach || left > t.reach.left) {
+      t.reach = { left: Math.round(left * 10) / 10, pick: pk.pick_no,
+                  took: got?.player?.name || 'an unprojected player',
+                  instead: best.player.name,
+                  insteadPos: best.player.position };
+    }
+    /*
+     * A STEAL IS REAL VALUE, TAKEN LATE.
+     *
+     * Two definitions failed before this one. Raw value named the first overall
+     * pick — "Steal: Ja'Marr Chase at pick 1", which is not a steal, it is the
+     * draft working. Board rank against pick number then named a steal for
+     * eleven of twelve teams, because the board only ranks as many players as
+     * were drafted: by pick 130 of 168 almost anyone left ranks better than
+     * their pick number, so every late pick "gained" places for free.
+     *
+     * What is actually notable is a player worth starting, taken after the room
+     * had stopped expecting one. So: the most valuable pick made in the back
+     * two thirds of the draft, and only if he clears a real bar.
+     */
+    if (mine > 0 && pk.pick_no && pk.pick_no > ordered.length / 3) {
+      if (!t.steal || mine > t.steal.vorp) {
+        t.steal = { vorp: Math.round(mine * 10) / 10, pick: pk.pick_no,
+                    round: pk.round, name: got.player.name, pos: got.player.position };
+      }
+    }
+  }
+
+  const out = [...teamsOut.values()].map(t => ({
+    ...t,
+    captured: Math.round(t.captured * 10) / 10,
+    available: Math.round(t.available * 10) / 10,
+    // Share of the value that was actually on the board when they picked.
+    efficiency: t.available > 0 ? Math.round((t.captured / t.available) * 1000) / 10 : null,
+  }));
+
+  /*
+   * GRADED AGAINST THIS LEAGUE, on the same scale as the lineup grade.
+   *
+   * An absolute band would need calibrating and would be wrong for the next
+   * league along: a six round keeper draft ran 67% to 0.8% and a fourteen
+   * round redraft of the same season ran 65.7% to 48.6%, so a fixed cutoff
+   * would hand out As in one and Ds in the other for identical drafting.
+   *
+   * BANDS already expresses deviation from the league mean and is already
+   * calibrated for the lineup grade. Reusing it means the two letters on a
+   * team's line mean the same thing, which is the only way anybody can read
+   * them together.
+   */
+  const scored = out.filter(t => t.efficiency != null);
+  const mean = scored.length
+    ? scored.reduce((a, t) => a + t.efficiency, 0) / scored.length : null;
+  for (const t of out) {
+    if (t.efficiency == null || !mean) { t.grade = null; continue; }
+    const band = gradeFor((t.efficiency - mean) / mean);
+    t.grade = band.grade;
+    t.say = band.say;
+  }
+
+  out.sort((a, b) => (b.efficiency ?? -1) - (a.efficiency ?? -1));
+  return { teams: out, replacement, mean: mean == null ? null : Math.round(mean * 10) / 10 };
+}
+
 /**
  * Slot codes as people say them.
  *
@@ -294,6 +480,14 @@ function lineupImpact(trade, { rosters, rosterPositions, proj }) {
  * as a variable name in a sentence — "starting Justin Fields at SUPER_FLEX
  * every week" is a line written by a database.
  */
+const SLOT_ELIGIBILITY = {
+  QB: ['QB'], RB: ['RB'], WR: ['WR'], TE: ['TE'],
+  FLEX: ['RB', 'WR', 'TE'],
+  WRRB_FLEX: ['RB', 'WR'],
+  REC_FLEX: ['WR', 'TE'],
+  SUPER_FLEX: ['QB', 'RB', 'WR', 'TE'],
+};
+
 const SLOT_WORDS = {
   SUPER_FLEX: 'superflex', REC_FLEX: 'the receiver flex', FLEX: 'flex',
   DEF: 'defence', K: 'kicker', QB: 'QB', RB: 'RB', WR: 'WR', TE: 'TE',
@@ -363,8 +557,19 @@ function draftColour({ picks = [], need = null, holes = [], weaknesses = [] } = 
     if (first == null) continue;
     const round = seq[first].round;
     if (round != null && round >= 8 && notes.length < 2) {
-      notes.push(`Waited until round ${round} for a ${pos} and still got one — `
-        + 'that either looks clever in December or it does not.');
+      /*
+       * Varied, and for the same reason as the opener below: on a fourteen
+       * round board half the league waits on a quarterback, so one phrasing
+       * appeared six times in a single recap and stopped reading as a remark.
+       * Keyed on the round so the same draft always produces the same recap.
+       */
+      const ways = [
+        `Waited until round ${round} for a ${pos} and still got one — that either `
+          + 'looks clever in December or it does not.',
+        `Let ${pos} go until round ${round}, which is either patience or nerve.`,
+        `No ${pos} until round ${round}. Bold, and now permanent.`,
+      ];
+      notes.push(ways[round % ways.length]);
     }
   }
 
@@ -473,4 +678,4 @@ function draftColour({ picks = [], need = null, holes = [], weaknesses = [] } = 
 }
 
 
-module.exports = { gradeDraft, lineupImpact, draftColour, gradeFor, BANDS };
+module.exports = { gradeDraft, lineupImpact, draftColour, draftValue, gradeFor, BANDS };

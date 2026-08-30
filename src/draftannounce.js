@@ -161,6 +161,17 @@ async function recapText(league, { top = 3 } = {}) {
    * Best effort: a draft Sleeper has not written out yet gives no picks, and
    * the recap is still worth sending without the colour.
    */
+  /*
+   * THE SECOND AXIS: did they shop well, as opposed to did they build a team.
+   *
+   * The lineup grade answers whether this roster can field a good starting
+   * eleven. It cannot tell apart the manager who drafted badly from the one who
+   * drafted brilliantly into a shape that does not fit — four receivers he
+   * cannot start is a good draft by every measure except the only one that
+   * counts on Sunday. Value against the board is that second question, and the
+   * gap between the two is where the interesting story always is.
+   */
+  let valueOf = () => null;
   let colourFor = () => [];
   try {
     const d = await sleeper.draft(league.sleeper_league_id);
@@ -177,6 +188,19 @@ async function recapText(league, { top = 3 } = {}) {
      * erroring. A silent no-op is the worst outcome here: the recap would have
      * looked exactly like a draft nobody made an interesting decision in.
      */
+    /*
+     * Priced off the same projections the lineup grade uses, so the two letters
+     * on a team's line cannot disagree about who a player is.
+     */
+    const val = dg.draftValue({
+      picks: d?.picks || [], proj,
+      rosterPositions: lg.roster_positions, teams: lg.total_rosters,
+    });
+    if (val) {
+      const byRid = new Map(val.teams.map(t => [t.rosterId, t]));
+      valueOf = t => byRid.get(t.rosterId) || null;
+    }
+
     const ids = [...new Set((d?.picks || []).map(pk => String(pk.player_id)).filter(Boolean))];
     const positions = new Map();
     const names = new Map();
@@ -240,9 +264,61 @@ async function recapText(league, { top = 3 } = {}) {
     // draft was thin at buries the point, and vice versa.
     const tail = i < per && up ? `, strongest at ${up}`
       : down ? `, thin at ${down}` : '';
-    lines.push(`${i + 1}. ${t.name} ${t.grade}${tail}`
+    const v = valueOf(t);
+    lines.push(`${i + 1}. ${t.name} — lineup ${t.grade}`
+      + (v?.grade ? `, value ${v.grade}` : '') + tail
       + (t.holes.length ? `, cannot fill ${t.holes.join('/')}` : ''));
-    for (const note of colourFor(t)) lines.push(`   ${note}`);
+
+    /*
+     * TWO LINES A TEAM, FROM ONE RANKED POOL.
+     *
+     * These were three separate pushes — divergence, steal, then up to two from
+     * draftColour — which put four lines under some teams and turned a twelve
+     * team recap into thirteen hundred characters a message. The ask was one or
+     * two sentences. So everything competes in the same list and the best two
+     * win, most surprising first: a value-and-fit split is the only thing not
+     * already visible in the two letters, so it leads.
+     */
+    const pool = [];
+    if (v?.grade) {
+      /*
+       * THE REAL BAND ORDER, not a hand-rolled string.
+       *
+       * This ranked letters with 'DCCB BA A'.indexOf(g[0]), which spaces D-C-B-A
+       * at 0-1-3-6 and collapses every plus. A one-grade gap therefore looked
+       * like three and the divergence line fired for five of the first six
+       * teams, which makes it noise rather than a finding.
+       *
+       * BANDS is already in order, so use it. Three grades apart is a genuine
+       * split — A+ against C+, or B against D — and anything less is two
+       * measurements of the same draft disagreeing at the edges, which is
+       * normal and not worth a sentence.
+       */
+      const order = dg.BANDS.map(b => b.grade);
+      const fit = order.indexOf(t.grade);
+      const val2 = order.indexOf(v.grade);
+      if (fit >= 0 && val2 >= 0 && Math.abs(fit - val2) >= 3) {
+        pool.push(val2 < fit
+          // Better value than lineup: they shopped well and cannot start it all.
+          ? 'Took the best player on the board over and over and cannot start half '
+            + 'of them. Great drafting, awkward roster.'
+          // Better lineup than value: they drafted for need, not for value.
+          : 'Drafted for need rather than value — passed on better players to fill '
+            + 'slots, and the lineup is the better for it.');
+      }
+    }
+    // A steal only counts when it was genuinely a steal. Everybody has a best
+    // pick; naming all twelve makes none of them mean anything.
+    // Twenty places or more is a genuine bargain rather than the board
+    // shifting a little. Below that it is not worth a line.
+    // A startable player found in the back of the draft. The bar is absolute
+    // so it means the same thing in every league.
+    if (v?.steal && v.steal.vorp >= 60) {
+      pool.push(`Steal: ${v.steal.name} in round ${v.steal.round}, `
+              + `worth ${Math.round(v.steal.vorp)} points over replacement.`);
+    }
+    pool.push(...colourFor(t));
+    for (const note of pool.slice(0, 2)) lines.push(`   ${note}`);
   });
 
   return lines.join('\n');

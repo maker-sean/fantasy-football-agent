@@ -297,6 +297,10 @@ async function draft(leagueId) {
       player_id: pk.player_id,
       roster_id: Number(pk.roster_id),
       round: pk.round,
+      // Overall order. Dropped until 2026-08-30, which meant anything grading a
+      // draft against the board had no idea when a pick happened — the value
+      // engine reported every steal as "at pick undefined".
+      pick_no: pk.pick_no,
     })),
   };
 }
