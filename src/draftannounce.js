@@ -179,10 +179,15 @@ async function recapText(league, { top = 3 } = {}) {
      */
     const ids = [...new Set((d?.picks || []).map(pk => String(pk.player_id)).filter(Boolean))];
     const positions = new Map();
+    const names = new Map();
     if (ids.length) {
       const { rows: prows } = await db.query(
-        'select player_id, position from players where player_id = any($1::text[])', [ids]);
-      for (const r of prows) positions.set(String(r.player_id), r.position);
+        `select player_id, position, full_name from players
+          where player_id = any($1::text[])`, [ids]);
+      for (const r of prows) {
+        positions.set(String(r.player_id), r.position);
+        names.set(String(r.player_id), r.full_name);
+      }
     }
 
     const byRoster = new Map();
@@ -190,6 +195,7 @@ async function recapText(league, { top = 3 } = {}) {
       if (!byRoster.has(pk.roster_id)) byRoster.set(pk.roster_id, []);
       byRoster.get(pk.roster_id).push({
         position: positions.get(String(pk.player_id)) || null,
+        name: names.get(String(pk.player_id)) || null,
         round: pk.round,
       });
     }
@@ -208,24 +214,37 @@ async function recapText(league, { top = 3 } = {}) {
   }
   if (!out?.teams?.length) return null;
 
-  const n = Math.min(top, Math.max(1, Math.floor(out.teams.length / 3)));
+  /*
+   * EVERY TEAM, best to worst, across three messages.
+   *
+   * It used to name the best three and the worst three and say "6 others in
+   * between — ask me for a name", which is the one thing nobody wants to hear
+   * about their own draft. A league of twelve has twelve people in it and
+   * eleven of them are not top three.
+   *
+   * Three messages rather than one: splitMessages cuts on the --- lines and
+   * drafts.sendRecap puts a beat between them, so it reads like somebody
+   * typing rather than a newsletter arriving. Ordered throughout, so the last
+   * message ends on the worst draft, which is where the argument starts.
+   */
+  const ranked = out.teams;                       // already best to worst
+  const per = Math.ceil(ranked.length / 3);
   const lines = ['Draft is done. Graded on the starting lineup each roster can field,'
-               + ` against Sleeper's ${ctx.season} projections.`];
-  lines.push('Best of it:');
-  for (const t of out.teams.slice(0, n)) {
+               + ` against Sleeper's ${ctx.season} projections. Best to worst.`];
+
+  ranked.forEach((t, i) => {
+    if (i && i % per === 0) lines.push('', '---', '');
     const up = (t.strengths || []).map(x => x.pos).join('/');
-    lines.push(`  ${t.name} ${t.grade}${up ? `, strongest at ${up}` : ''}`);
-    for (const note of colourFor(t)) lines.push(`    ${note}`);
-  }
-  lines.push('Rough day:');
-  for (const t of out.teams.slice(-n).reverse()) {
     const down = (t.weaknesses || []).map(x => x.pos).join('/');
-    lines.push(`  ${t.name} ${t.grade}${down ? `, thin at ${down}` : ''}`
+    // Strengths for the top third, weaknesses for the rest: naming what a good
+    // draft was thin at buries the point, and vice versa.
+    const tail = i < per && up ? `, strongest at ${up}`
+      : down ? `, thin at ${down}` : '';
+    lines.push(`${i + 1}. ${t.name} ${t.grade}${tail}`
       + (t.holes.length ? `, cannot fill ${t.holes.join('/')}` : ''));
-    for (const note of colourFor(t)) lines.push(`    ${note}`);
-  }
-  const middle = out.teams.length - 2 * n;
-  if (middle > 0) lines.push(`${middle} others in between — ask me for a name.`);
+    for (const note of colourFor(t)) lines.push(`   ${note}`);
+  });
+
   return lines.join('\n');
 }
 
@@ -288,7 +307,19 @@ async function run(provider, { dryRun = false, now = Date.now() } = {}) {
        * mark is loud rather than silently queuing a repeat.
        */
       try {
-        await provider.send(lg.chat_id, text, { leagueId: lg.id });
+        /*
+         * The recap is several messages; a countdown is one.
+         *
+         * recapText marks its own breaks with --- and drafts.sendRecap honours
+         * them with a beat between each, which is what makes twelve graded
+         * teams read like somebody typing rather than a newsletter. Sending it
+         * through provider.send would deliver the separators as literal text.
+         */
+        if (phase === 'recap') {
+          await require('./drafts').sendRecap(provider, lg.chat_id, text);
+        } else {
+          await provider.send(lg.chat_id, text, { leagueId: lg.id });
+        }
       } catch (err) {
         // Genuinely not sent. Unmarked on purpose: the next pass retries.
         detail.skipped.push({ league: lg.name, phase, why: `send failed: ${err.message}` });

@@ -287,6 +287,19 @@ function lineupImpact(trade, { rosters, rosterPositions, proj }) {
  * @param weaknesses  what the grade already calls thin, so a skipped position is
  *                    only mentioned when it actually cost them
  */
+/**
+ * Slot codes as people say them.
+ *
+ * Sleeper's are SUPER_FLEX and REC_FLEX, which is fine in a payload and reads
+ * as a variable name in a sentence — "starting Justin Fields at SUPER_FLEX
+ * every week" is a line written by a database.
+ */
+const SLOT_WORDS = {
+  SUPER_FLEX: 'superflex', REC_FLEX: 'the receiver flex', FLEX: 'flex',
+  DEF: 'defence', K: 'kicker', QB: 'QB', RB: 'RB', WR: 'WR', TE: 'TE',
+};
+const slotWord = slot => SLOT_WORDS[String(slot || '').toUpperCase()] || String(slot || '').toLowerCase().replace(/_/g, ' ');
+
 function draftColour({ picks = [], need = null, holes = [], weaknesses = [] } = {}) {
   // Positions the grade already calls thin, plus slots nothing can fill.
   const weak = [...new Set([...(weaknesses || []).map(w => w.pos || w), ...holes])];
@@ -362,7 +375,7 @@ function draftColour({ picks = [], need = null, holes = [], weaknesses = [] } = 
    */
   if (notes.length < 2) {
     if (holes.length) {
-      notes.push(`Nobody to put at ${holes.join(' or ')} — that is a waiver problem `
+      notes.push(`Nobody to put at ${holes.map(slotWord).join(' or ')} — that is a waiver problem `
         + 'in week one, not a draft-day one.');
     } else if (need && !need.empty && need.name && need.overReplacement < 0) {
       /*
@@ -379,7 +392,7 @@ function draftColour({ picks = [], need = null, holes = [], weaknesses = [] } = 
        * Negative means genuinely below the last startable player at that
        * position, which is the only case where the sentence is true.
        */
-      notes.push(`Starting ${need.name} at ${need.slot} every week until somebody `
+      notes.push(`Starting ${need.name} at ${slotWord(need.slot)} every week until somebody `
         + 'better turns up. We will see.');
     }
   }
@@ -421,6 +434,39 @@ function draftColour({ picks = [], need = null, holes = [], weaknesses = [] } = 
         + (hurt.length ? ` and no ${hurt.join(' or ')} at all` : '')
         + ', so the plan is at least a plan.');
     }
+  }
+
+  /*
+   * SOMETHING FOR EVERYBODY, because the recap now names every team.
+   *
+   * The rules above fire on odd drafts and bad rosters. A middling team that
+   * drafted sensibly matched none of them and got a bare letter, which is the
+   * thing this whole function exists to avoid — and in a twelve team recap that
+   * is most of the list. Their first pick is always there and is always the
+   * decision they thought hardest about.
+   */
+  if (!notes.length && seq[0]?.name) {
+    /*
+     * VARIED, because in a short draft this is most of the recap.
+     *
+     * A three round rookie draft gives the sharper rules nothing to find, so
+     * this fired for six of twelve teams and the same eleven words six times
+     * reads as a template rather than a remark. The phrasing is chosen by the
+     * pick itself, so it is stable — the same draft always produces the same
+     * recap — and it leans on the two facts always to hand: who they opened
+     * with, and what they took last.
+     */
+    const first = seq[0];
+    const last = seq[seq.length - 1];
+    const variants = [
+      `Opened with ${first.name} and built from there.`,
+      `Started at ${first.position} with ${first.name}, which set the tone.`,
+      `${first.name} first`
+        + (last && last !== first ? `, ${last.name} last` : '')
+        + ' — make of that what you will.',
+      `Went ${first.position} early with ${first.name} and did not look back.`,
+    ];
+    notes.push(variants[first.name.length % variants.length]);
   }
 
   return notes.slice(0, 2);

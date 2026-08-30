@@ -124,7 +124,7 @@ const sched = (over = {}) => ({
     assert.strictEqual(await da.recapText(fake), null);
   });
 
-  await it('a real league recaps with grades and names the middle', async () => {
+  await it('a real league recaps every team, ranked, with something said about each', async () => {
     const { rows: [lg] } = await db.query(
       `select id, name, sleeper_league_id from leagues where provider <> 'archive' and active
         order by name limit 1`);
@@ -132,8 +132,34 @@ const sched = (over = {}) => ({
     const text = await da.recapText(lg);
     if (!text) return console.log('       (skip: that league has not drafted)');
     assert.match(text, /Draft is done/);
-    assert.match(text, /Best of it:/);
-    assert.match(text, /Rough day:/);
+
+    /*
+     * EVERY TEAM, RANKED, WITH SOMETHING SAID ABOUT EACH.
+     *
+     * This asserted "Best of it:" and "Rough day:" — the old shape, which
+     * named three at each end and told the other six "ask me for a name",
+     * which is the one thing nobody wants to hear about their own draft.
+     */
+    const { splitMessages } = require('../src/recap');
+    const parts = splitMessages(text);
+    assert.strictEqual(parts.length, 3, 'three messages, not a newsletter');
+
+    const ranks = [...text.matchAll(/^(\d+)\. /gm)].map(m => Number(m[1]));
+    assert.ok(ranks.length >= 4, 'every team is numbered');
+    assert.deepStrictEqual(ranks, ranks.slice().sort((a, b) => a - b), 'best to worst');
+    assert.strictEqual(ranks[0], 1);
+    assert.doesNotMatch(text, /others in between/);
+
+    // A bare letter is what the commentary was added to replace, so every
+    // ranked team must carry at least one line under it.
+    const bare = text.split('\n')
+      .filter(l => /^\d+\. /.test(l))
+      .filter((l, i, all) => {
+        const idx = text.split('\n').indexOf(l);
+        const next = text.split('\n')[idx + 1] || '';
+        return !/^ {3}\S/.test(next);
+      });
+    assert.deepStrictEqual(bare, [], 'a team with no commentary');
   });
 
   console.log('\neach notice fires in its own window, or not at all');
