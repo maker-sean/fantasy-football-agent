@@ -32,7 +32,7 @@
     "poll": "node scripts/poll.js",
     "sleeper-leagues": "node scripts/sleeper-leagues.js",
     "backfill": "node scripts/backfill.js",
-    "recap": "node scripts/recap.js",
+    "recap": "node scripts/draft-recap.js",
     "league-rules": "node scripts/league-rules.js",
     "test": "export NODE_ENV=test; for f in test/*.test.js; do node $f || fail=1; done; exit ${fail:-0}",
     "decide-replay": "node scripts/decide-replay.js",
