@@ -261,4 +261,170 @@ function lineupImpact(trade, { rosters, rosterPositions, proj }) {
   return { sides, bothUp, bothDown, meaningful: MEANINGFUL };
 }
 
-module.exports = { gradeDraft, lineupImpact, gradeFor, BANDS };
+/**
+ * A sentence or two about what a team actually DID, not how it scored.
+ *
+ * The grade says a letter and a weak position. That is the verdict and it is
+ * the same shape for everybody, which is exactly why nobody argues with it —
+ * "Cole D, thin at QB/RB/TE" is a fact about a spreadsheet. What people argue
+ * about is the DECISION: taking a fourth receiver before a second back, going
+ * three rounds without a quarterback, the pick everyone in the chat questioned
+ * at the time.
+ *
+ * WRITTEN HERE, NOT BY THE MODEL. Every observation below is derived from pick
+ * order and the resulting lineup and comes out as a finished sentence. The
+ * model is asked to quote it. This codebase has learned the same lesson in
+ * four other places — it quotes reliably and fuses unreliably — and a draft
+ * recap that invents "he reached on a quarterback" about a team that did not
+ * is worse than one that says nothing.
+ *
+ * TWO AT MOST, and they are ranked. A paragraph per team is a wall nobody
+ * reads on a phone, and the second-best observation about a normal draft is
+ * usually "they took some players".
+ *
+ * @param picks   this team's picks IN ORDER: [{ position, name, round }]
+ * @param need    draftNeeds().need — the empty slot, or the weakest starter
+ * @param weaknesses  what the grade already calls thin, so a skipped position is
+ *                    only mentioned when it actually cost them
+ */
+function draftColour({ picks = [], need = null, holes = [], weaknesses = [] } = {}) {
+  // Positions the grade already calls thin, plus slots nothing can fill.
+  const weak = [...new Set([...(weaknesses || []).map(w => w.pos || w), ...holes])];
+  const notes = [];
+  const seq = picks.filter(p => p && p.position);
+  if (!seq.length) return notes;
+
+  // Where each position was taken, in order: { RB: [0, 4, 7], WR: [1, 2, 3] }
+  const at = {};
+  seq.forEach((p, i) => { (at[p.position] ||= []).push(i); });
+  const nth = (pos, n) => (at[pos] || [])[n - 1];
+  const ord = n => ['first', 'second', 'third', 'fourth', 'fifth', 'sixth'][n - 1] || `${n}th`;
+
+  /*
+   * THE STACKING CALL. Taking your fourth receiver before your second back is
+   * a real decision with a real consequence, and it is the thing the chat
+   * actually needles somebody about.
+   *
+   * Only reported when the gap is at least two — a fourth WR one pick before a
+   * second RB is a coincidence of board position, not a philosophy — and only
+   * for pairs where the later position is one the lineup genuinely needs.
+   */
+  const STARTING = ['RB', 'WR', 'TE', 'QB'];
+  let boldest = null;
+  for (const heavy of STARTING) {
+    for (const light of STARTING) {
+      if (heavy === light) continue;
+      const second = nth(light, 2);
+      if (second == null) continue;
+      /*
+       * THE DEEPEST ONE, not the first that qualifies.
+       *
+       * This looked for the smallest n with a gap of two or more picks, which
+       * reported "a third WR" for a team that took FOUR before its second
+       * back — the fourth was one pick closer and got filtered out by the gap
+       * rule, so the milder version of the same story won. The deepest is the
+       * headline and it implies every shallower one.
+       */
+      for (let n = (at[heavy] || []).length; n >= 3; n--) {
+        const a = nth(heavy, n);
+        if (a == null || a >= second) continue;
+        if (!boldest || n > boldest.n) boldest = { heavy, light, n, gap: second - a };
+        break;
+      }
+    }
+  }
+  if (boldest) {
+    // The gap only earns a mention when it is wide enough to be a decision
+    // rather than the board falling that way.
+    notes.push(`Took a ${ord(boldest.n)} ${boldest.heavy} before a second ${boldest.light}`
+      + (boldest.gap >= 3 ? `, ${boldest.gap} picks earlier` : '')
+      + ', which is a choice.');
+  }
+
+  /*
+   * THE POSITION THEY NEVER GOT TO. A round number is more use than "thin at
+   * QB": it says how long they were willing to wait, which is the decision.
+   */
+  for (const pos of ['QB', 'TE']) {
+    const first = (at[pos] || [])[0];
+    if (first == null) continue;
+    const round = seq[first].round;
+    if (round != null && round >= 8 && notes.length < 2) {
+      notes.push(`Waited until round ${round} for a ${pos} and still got one — `
+        + 'that either looks clever in December or it does not.');
+    }
+  }
+
+  /*
+   * WHAT IT MEANS EVERY WEEK. The grade already names the weak position; this
+   * names the human who has to start there, which is the version people
+   * remember. An empty slot is worse than a weak one and outranks it.
+   */
+  if (notes.length < 2) {
+    if (holes.length) {
+      notes.push(`Nobody to put at ${holes.join(' or ')} — that is a waiver problem `
+        + 'in week one, not a draft-day one.');
+    } else if (need && !need.empty && need.name && need.overReplacement < 0) {
+      /*
+       * ONLY WHEN THEY ARE ACTUALLY BELOW REPLACEMENT.
+       *
+       * draftNeeds().need is the weakest starter by over-replacement, and that
+       * number is NOT comparable across positions: a twelve team league starts
+       * twelve quarterbacks and forty-odd receivers, so QB1 sits eleven above
+       * his replacement while WR10 sits thirty above his. The weakest slot is
+       * therefore almost always QB, whoever is in it — the first run of this
+       * told a team with the A+ grade it would be "starting Josh Allen every
+       * week until somebody better turns up".
+       *
+       * Negative means genuinely below the last startable player at that
+       * position, which is the only case where the sentence is true.
+       */
+      notes.push(`Starting ${need.name} at ${need.slot} every week until somebody `
+        + 'better turns up. We will see.');
+    }
+  }
+
+  /*
+   * THE SHAPE OF THE DRAFT, when nothing sharper presented itself.
+   *
+   * The pick-order rule only fires on a genuinely odd draft — one team in
+   * twelve on a six round board — and the below-replacement line only fires on
+   * a bad roster. A good, normal draft would otherwise get a bare letter,
+   * which is the thing this was added to fix.
+   *
+   * So: what they came away with, when it is lopsided enough to be a decision.
+   * Always computable, never invented, and specific enough to argue with.
+   */
+  if (!notes.length) {
+    const counts = Object.entries(at)
+      .filter(([pos]) => STARTING.includes(pos))
+      .map(([pos, list]) => [pos, list.length])
+      .sort((a, b) => b[1] - a[1]);
+    const most = counts[0];
+    // Three or more of one position, and at least two more than the next, is a
+    // plan. Anything flatter is just a draft.
+    if (most && most[1] >= 3 && (!counts[1] || most[1] - counts[1][1] >= 2)) {
+      /*
+       * A POSITION THEY SKIPPED ONLY COUNTS IF IT HURT.
+       *
+       * Listing every position absent from the draft says nothing true. A
+       * three round rookie draft has three picks in it, so "not a single RB or
+       * TE or QB" describes the format rather than a decision — and on a team
+       * graded "strongest at QB" it read as a flat contradiction, because the
+       * quarterback was already on the roster.
+       *
+       * Weak spots and unfilled slots are the ones where skipping a position
+       * actually cost something, so those are the only ones named.
+       */
+      const hurt = STARTING.filter(pos => !at[pos] && weak.includes(pos));
+      notes.push(`Came away with ${most[1]} ${most[0]}s`
+        + (hurt.length ? ` and no ${hurt.join(' or ')} at all` : '')
+        + ', so the plan is at least a plan.');
+    }
+  }
+
+  return notes.slice(0, 2);
+}
+
+
+module.exports = { gradeDraft, lineupImpact, draftColour, gradeFor, BANDS };

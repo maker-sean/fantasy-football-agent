@@ -151,6 +151,61 @@ async function recapText(league, { top = 3 } = {}) {
     return m?.name || `roster ${rid}`;
   };
   const out = dg.gradeDraft({ rosters, rosterPositions: lg.roster_positions, proj, nameOf });
+
+  /*
+   * Pick order, per team, so the recap can say what somebody DID and not only
+   * how it scored. The grade is the same shape for every team — a letter and a
+   * thin position — which is why nobody argues with it. The decision is the
+   * part people argue about, and it is only visible in the order.
+   *
+   * Best effort: a draft Sleeper has not written out yet gives no picks, and
+   * the recap is still worth sending without the colour.
+   */
+  let colourFor = () => [];
+  try {
+    const d = await sleeper.draft(league.sleeper_league_id);
+    const { draftNeeds } = require('./context');
+
+    /*
+     * Positions come from the players table, which is the only place that
+     * definitely has them.
+     *
+     * The first version read ctx.players and fell back to the projections map.
+     * ctx has no players map at all, and the projection rows are keyed for
+     * points rather than metadata — so every position resolved to null, seq
+     * came back empty, and draftColour returned nothing for every team without
+     * erroring. A silent no-op is the worst outcome here: the recap would have
+     * looked exactly like a draft nobody made an interesting decision in.
+     */
+    const ids = [...new Set((d?.picks || []).map(pk => String(pk.player_id)).filter(Boolean))];
+    const positions = new Map();
+    if (ids.length) {
+      const { rows: prows } = await db.query(
+        'select player_id, position from players where player_id = any($1::text[])', [ids]);
+      for (const r of prows) positions.set(String(r.player_id), r.position);
+    }
+
+    const byRoster = new Map();
+    for (const pk of d?.picks || []) {
+      if (!byRoster.has(pk.roster_id)) byRoster.set(pk.roster_id, []);
+      byRoster.get(pk.roster_id).push({
+        position: positions.get(String(pk.player_id)) || null,
+        round: pk.round,
+      });
+    }
+    colourFor = t => {
+      const needs = draftNeeds(rosters, proj, t.rosterId,
+        { rosterPositions: lg.roster_positions });
+      return dg.draftColour({
+        picks: byRoster.get(t.rosterId) || [],
+        need: needs?.need || null,
+        holes: t.holes || [],
+        weaknesses: t.weaknesses || [],
+      });
+    };
+  } catch (err) {
+    console.error('[draft-announce] no pick order, sending grades only:', err.message);
+  }
   if (!out?.teams?.length) return null;
 
   const n = Math.min(top, Math.max(1, Math.floor(out.teams.length / 3)));
@@ -160,12 +215,14 @@ async function recapText(league, { top = 3 } = {}) {
   for (const t of out.teams.slice(0, n)) {
     const up = (t.strengths || []).map(x => x.pos).join('/');
     lines.push(`  ${t.name} ${t.grade}${up ? `, strongest at ${up}` : ''}`);
+    for (const note of colourFor(t)) lines.push(`    ${note}`);
   }
   lines.push('Rough day:');
   for (const t of out.teams.slice(-n).reverse()) {
     const down = (t.weaknesses || []).map(x => x.pos).join('/');
     lines.push(`  ${t.name} ${t.grade}${down ? `, thin at ${down}` : ''}`
       + (t.holes.length ? `, cannot fill ${t.holes.join('/')}` : ''));
+    for (const note of colourFor(t)) lines.push(`    ${note}`);
   }
   const middle = out.teams.length - 2 * n;
   if (middle > 0) lines.push(`${middle} others in between — ask me for a name.`);
